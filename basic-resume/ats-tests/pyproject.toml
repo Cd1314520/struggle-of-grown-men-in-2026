@@ -1,0 +1,17 @@
+[project]
+name = "ats-tests"
+version = "0.1.0"
+description = "Local ATS parsability test suite for the Typst-generated resume PDF"
+requires-python = ">=3.11"
+dependencies = [
+    "pdfminer.six==20240706",
+    "pypdf==4.3.1",
+    "PyYAML==6.0.2",
+    "rapidfuzz==3.9.7",
+    "rich==13.8.1",
+]
+
+[tool.uv]
+# Suite is run as `uv run python -m src` from this directory — no need to
+# build it as an installable wheel.
+package = false

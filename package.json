@@ -1,0 +1,16 @@
+{
+  "name": "auto-apply",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun src/server.ts",
+    "dev": "bun --watch src/server.ts",
+    "reassess-backlog": "bun scripts/reassess-backlog.ts"
+  },
+  "dependencies": {
+    "yaml": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

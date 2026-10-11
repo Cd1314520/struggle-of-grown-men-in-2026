@@ -1,0 +1,108 @@
+# App settings. Restart the server after editing.
+port: 8787
+
+# How you reach the app and the live browser view (served over the tailnet by `tailscale serve`).
+# Used for the Gmail OAuth redirect and the links in the UI. null = http://localhost:<port>.
+publicUrl: https://your-machine.your-tailnet.ts.net:8787
+vncUrl: https://your-machine.your-tailnet.ts.net:6080
+
+# The dedicated application mailbox. Connecting any other Google account is refused.
+mailbox: you@example.com
+
+# One daily plaintext questions digest to this same connected mailbox, never another recipient.
+# Each unchanged group is notified once; adding jobs does not re-notify it. Send-now in Settings
+# bypasses this schedule, not deduplication. Uncertain sends reconcile against Sent, never blindly retry.
+questionDigest:
+  enabled: true
+  time: "09:00"
+  timeZone: America/Chicago
+
+# practice = apply only with evidence of a definite decline: base-pay ceiling <= $80k or mandatory nonlocal onsite/hybrid.
+# real = apply to the roles in the Real phase section of profile/targets.md.
+phase: practice
+
+# Models per stage. null = whatever omp's default role resolves to.
+models:
+  triage: openai-codex/gpt-6-luna # pass over raw titles
+  discover: openai-codex/gpt-6.1-sol # web search for companies and postings
+  locate: openai-codex/gpt-6.1-sol # web search for the employer's own posting of a LinkedIn/Indeed job
+  prep: openai-codex/gpt-6.1-sol # scoring + resume tailoring
+  fill: openai-codex/gpt-6.1-sol # form filling in the browser
+  track: openai-codex/gpt-6.1-sol
+
+# Scoring weights and thresholds live in profile/rubric.yml.
+
+# Keep final approval for manual jobs; eligible auto-approved practice jobs use autoApply.submit.
+confirmBeforeSubmit: true
+
+# Auto apply: let the app give approvals itself. Off = every application waits for you at gate 1.
+# Fresh assessments must prove definite-practice eligibility and clear the interview-fit rubric.
+# Missing/old practice evidence never qualifies. Hand-picked jobs and unclear requirements wait
+# for review; expected low pay/nonlocal work and ordinary concerns do not veto an eligible job.
+autoApply:
+  enabled: true
+  phases: [practice] # phases in which it runs
+  minScore: 60 # align with the practice interview-fit threshold; score alone never authorizes practice
+  allowConcerns: true # expected dealbreakers are the point; hard requirements and evidence gates still apply
+  perDay: 50 # auto-approvals a day; limits.applyPerDay still caps application attempts
+  submit: true # only eligible auto-approved jobs skip gate 2; manual approvals still pause
+
+# Minutes between automatic runs. 0 disables that run (use the UI buttons).
+#   scan      re-reads every watched company board and the feeds below; only new postings cost anything
+#   discover  an agent searches the web for more companies and postings to watch
+#   track     reads the mailbox for replies to applications
+schedule:
+  scanMinutes: 30
+  discoverMinutes: 720
+  trackMinutes: 120
+
+# Remote-job aggregators, read during a scan but no more often than `minutes` each (they ask for a
+# few requests a day). A role also listed on a company board is folded into that one job.
+feeds:
+  remotive: { minutes: 480, categories: [software-development, artificial-intelligence, data] }
+  jobicy: { minutes: 360, geo: usa, industries: [dev, data-science], count: 50 }
+  remoteok: { minutes: 360, tags: [python, ai, junior] }
+
+# LinkedIn and Indeed job search, read logged out with no account during a scan. They only say what is
+# open: each posting that passes triage is then looked up on the employer's own site (its public job
+# board if it has one, otherwise an agent searching the web) and applied to there. One with no
+# posting of the employer's own is skipped. Neither site permits automated reading, so requests are
+# kept few; a refusal pauses that site for 6 hours. minutes: 0 turns a site off.
+boards:
+  location: Houston, TX
+  distance: 25 # miles
+  queries: [software engineer, backend developer, full stack developer]
+  initialHours: 72 # how far back the first scan looks; later scans ask only for what is new since the last
+  linkedin: { minutes: 60, pages: 2 } # newest first, 10 a page, per query: 3 to 6 requests an hour
+  indeed: { minutes: 60 } # one request per query, up to 100 postings each
+
+# Concurrency. prep = assessments at once. fill = applications at once, each in its own Chrome
+# (own display, profile and ports, counted up from the `chrome` values below; live views on
+# vncPort, vncPort+1, ...). Two applications to the same employer never run together.
+concurrency:
+  prep: 5
+  fill: 5
+
+# Daily caps on agent work: assessments, posting look-ups, and application attempts (including blocked or failed starts).
+limits:
+  prepPerDay: 1500
+  locatePerDay: 40 # LinkedIn/Indeed postings handed to the web-search agent
+  applyPerDay: 50
+
+# Seconds a browser rests between applications, randomised within the range. Applications in
+# different browsers also start at least the lower number of seconds apart.
+fillPauseSeconds: [60, 240]
+
+# Stock resume: a Typst project. `main` holds the content the agent tailors; other .typ files are
+# the template and are never edited. Every compiled copy, stock or tailored, is named `pdfName`.
+resume:
+  dir: basic-resume
+  main: main.typ
+  pdfName: resume.pdf
+
+chrome:
+  cdpPort: 9222
+  proxyPort: 9223 # agents connect here: same browser, with mouse and keyboard input paced like a person's
+  display: ":99"
+  window: [1440, 900]
+  vncPort: 6080 # noVNC for manual takeover (localhost only); 0 disables

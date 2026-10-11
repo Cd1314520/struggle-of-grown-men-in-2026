@@ -1,0 +1,18 @@
+# Per-dimension pass thresholds. Overall run fails (exit 1) if any
+# dimension drops below its threshold on the BEST backend (i.e. if no
+# backend can recover this dimension, the resume regressed).
+#
+# Each score is in [0, 1]. Tune up only after baseline is stable.
+
+contact: 0.95
+sections: 1.00          # all five headings must be found
+entries: 0.85
+dates: 0.90
+reading_order: 0.95
+bullets: 0.80
+glyphs: 1.00            # zero banned glyphs allowed
+copyable: 1.00          # every must_appear_verbatim token must be present
+links: 0.75             # link annotations are flaky across PDF libs
+
+# Aggregate floor — the unweighted mean of the above on the best backend.
+overall: 0.90
