@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { db, getJob, kvGet, kvSet, notifyJobChange, type Job, type Status } from "./db";
+import { db, getJob, notifyJobChange, type Job, type Status } from "./db";
+import { clearFillFlags, clearManualLease, confirmNotSubmitted, isSubmitting, isVerifying, lastSlot, manualLeaseGate, queueDraftRecovery, queueVerification, setManualLease } from "./fill-state";
 
 export type GateKind = "question" | "cover_letter" | "confirm_submit" | "manual" | "submission_ambiguous";
 export type AnswerScope = "application" | "standing";
@@ -100,7 +101,7 @@ export function getOpenGate(jobId: number): Gate | null {
 function park(jobId: number, input: GateInput, checkpoint: FillCheckpoint | null): Gate {
   const job = requireJob(jobId), key = identity(job, input);
   if (terminal.includes(job.status) || job.submitted_at) throw new Error("Cannot park a terminal application");
-  if (kvGet(`fill.submitting.${jobId}`) === "1" && input.kind !== "submission_ambiguous") throw new Error("Submission may have occurred; explicit inspection is required");
+  if (isSubmitting(jobId) && input.kind !== "submission_ambiguous") throw new Error("Submission may have occurred; explicit inspection is required");
   const existing = db.query<GateRow, [number]>("SELECT * FROM question_gates WHERE job_id = ? AND state = 'open'").get(jobId);
   if (existing?.kind === "submission_ambiguous" && input.kind !== "submission_ambiguous") throw new Error("Resolve submission ambiguity before parking another gate");
   if ((input.kind === "manual" || input.kind === "submission_ambiguous") && !checkpoint && !job.fill_checkpoint) throw new Error("Interactive gates require a browser checkpoint");
@@ -160,14 +161,14 @@ export function answerGate(gateId: string, answer: string, scope: AnswerScope): 
   const jobIds = db.transaction(() => {
     const row = db.query<GateRow, [string]>("SELECT * FROM question_gates WHERE id = ?").get(gateId);
     if (!row || !isCurrent(row, requireJob(row.job_id))) throw new Error("Gate is stale or already answered");
-    if (row.kind === "manual" || row.kind === "submission_ambiguous" || kvGet(`fill.submitting.${row.job_id}`) === "1") throw new Error("This gate requires explicit manual resolution");
+    if (row.kind === "manual" || row.kind === "submission_ambiguous" || isSubmitting(row.job_id)) throw new Error("This gate requires explicit manual resolution");
     if (scope === "standing" && !row.standing_allowed) throw new Error("Standing answers require a structured employer-scoped question");
     const at = now(), affected: number[] = [];
     if (scope === "standing") db.query(`INSERT INTO standing_answers (match_key,employer,question,context,options,answer,source_gate_id,answered_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(match_key) DO UPDATE SET answer = excluded.answer, source_gate_id = excluded.source_gate_id, answered_at = excluded.answered_at`).run(row.match_key, row.employer, row.text, row.context, row.options, answer, row.id, at);
     const targets = scope === "application" ? [row] : db.query<GateRow, [string]>("SELECT * FROM question_gates WHERE match_key = ? AND standing_allowed = 1 AND state = 'open' ORDER BY job_id").all(row.match_key);
     for (const target of targets) {
       const job = getJob(target.job_id);
-      if (!job || !isCurrent(target, job) || kvGet(`fill.submitting.${job.id}`) === "1") continue;
+      if (!job || !isCurrent(target, job) || isSubmitting(job.id)) continue;
       saveAnswer(target, answer, scope, at);
       affected.push(job.id);
     }
@@ -201,7 +202,7 @@ export function resumeContext(jobId: number): ResumeContext {
 export function consumeSubmitApproval(jobId: number, summary: string): boolean {
   const consumed = db.transaction(() => {
     const job = requireJob(jobId);
-    if (!["approved", "filling"].includes(job.status) || kvGet(`fill.submitting.${jobId}`) === "1" || getOpenGate(jobId)) return false;
+    if (!["approved", "filling"].includes(job.status) || isSubmitting(jobId) || getOpenGate(jobId)) return false;
     const approval = db.query<{ summary: string }, [number]>("SELECT summary FROM submit_approvals WHERE job_id = ? AND consumed_at IS NULL").get(jobId);
     if (!approval) return false;
     if (approval.summary.replace(/\s+/g, " ").trim() !== summary.replace(/\s+/g, " ").trim()) {
@@ -217,12 +218,12 @@ export function returnManualControl(jobId: number, gateId: string, answer: strin
   const returned = db.transaction(() => {
     const job = getJob(jobId);
     const row = db.query<GateRow, [string]>("SELECT * FROM question_gates WHERE id = ?").get(gateId);
-    if (!job || row?.job_id !== jobId || row.kind !== "manual" || !isCurrent(row, job) || kvGet(`fill.submitting.${jobId}`) === "1") return false;
+    if (!job || row?.job_id !== jobId || row.kind !== "manual" || !isCurrent(row, job) || isSubmitting(jobId)) return false;
     db.query("UPDATE question_gates SET state = 'closed' WHERE id = ?").run(row.id);
     clearManualLease(jobId);
     const note = answer.trim() ? `Manual control returned: ${answer.trim()}` : (job.note?.trim() || "Manual control returned: done");
     db.query("UPDATE jobs SET status = 'approved', pending = NULL, note = ?, updated_at = datetime('now') WHERE id = ?").run(note, jobId);
-    kvSet(`fill.recovery.${jobId}`, "1");
+    queueDraftRecovery(jobId);
     return true;
   }).immediate();
   if (returned) notifyJobChange(jobId);
@@ -247,9 +248,7 @@ export function resolveAmbiguous(jobId: number, resolution: string): void {
     db.query("UPDATE question_gates SET state = 'closed' WHERE id = ?").run(current.id);
     clearManualLease(jobId);
     invalidateApproval(jobId);
-    kvSet(`fill.submitting.${jobId}`, "0");
-    kvSet(`fill.verify.${jobId}`, "0");
-    kvSet(`fill.recovery.${jobId}`, "1");
+    confirmNotSubmitted(jobId);
     db.query("UPDATE jobs SET status = 'approved', pending = NULL, note = ?, updated_at = datetime('now') WHERE id = ?").run("Explicit inspection confirmed not submitted; queued to resume existing draft", jobId);
   }).immediate();
   notifyJobChange(jobId);
@@ -276,7 +275,7 @@ export function resolveAmbiguityWithEvidence(
     if (job.status !== "filling") {
       throw new Error("Application must be in active filling status to resolve ambiguity");
     }
-    if (kvGet(`fill.submitting.${jobId}`) !== "1" || kvGet(`fill.verify.${jobId}`) !== "1") {
+    if (!isSubmitting(jobId) || !isVerifying(jobId)) {
       throw new Error("Application is not in verified ambiguous submission state");
     }
     if (evidence.notes.trim().length < 5) {
@@ -316,14 +315,10 @@ export function resolveAmbiguityWithEvidence(
     invalidateApproval(jobId);
 
     if (outcome === "submitted") {
-      kvSet(`fill.submitting.${jobId}`, "0");
-      kvSet(`fill.verify.${jobId}`, "0");
-      kvSet(`fill.recovery.${jobId}`, "0");
+      clearFillFlags(jobId);
       db.query("UPDATE jobs SET status = 'submitted', pending = NULL, note = ?, submitted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(durableNote, jobId);
     } else {
-      kvSet(`fill.submitting.${jobId}`, "0");
-      kvSet(`fill.verify.${jobId}`, "0");
-      kvSet(`fill.recovery.${jobId}`, "1");
+      confirmNotSubmitted(jobId);
       db.query("UPDATE jobs SET status = 'approved', pending = NULL, note = ?, updated_at = datetime('now') WHERE id = ?").run(durableNote, jobId);
     }
   }).immediate();
@@ -346,8 +341,7 @@ export function queueRecovery(jobId: number, gateId: string): { mode: "fill" | "
     if (current.kind === "manual") {
       const note = current.text.trim() || job.note?.trim() || "Manual recovery queued";
       db.query("UPDATE jobs SET status = 'approved', pending = NULL, note = ?, updated_at = datetime('now') WHERE id = ?").run(note, jobId);
-      kvSet(`fill.recovery.${jobId}`, "1");
-      kvSet(`fill.verify.${jobId}`, "0");
+      queueDraftRecovery(jobId);
       return { mode: "fill" as const, slot: checkpoint.slot };
     } else {
       const originalReason = current.context.trim();
@@ -355,25 +349,18 @@ export function queueRecovery(jobId: number, gateId: string): { mode: "fill" | "
         ? originalReason
         : (current.text.trim() || job.note?.trim() || "Ambiguous verification queued");
       db.query("UPDATE jobs SET pending = NULL, note = ?, updated_at = datetime('now') WHERE id = ?").run(note, jobId);
-      kvSet(`fill.submitting.${jobId}`, "1");
-      kvSet(`fill.verify.${jobId}`, "1");
-      kvSet(`fill.recovery.${jobId}`, "1");
+      queueVerification(jobId);
       return { mode: "verify" as const, slot: checkpoint.slot };
     }
   }).immediate();
   notifyJobChange(jobId);
   return result;
 }
-function clearManualLease(jobId: number): void {
-  db.query("DELETE FROM kv WHERE key = ?").run(`fill.manual.${jobId}`);
-}
-
 // A parked gate is not a lease. Only an explicit, current human reservation is.
 export function manualLeases(): Map<number, number> {
   const leases = new Map<number, number>();
-  for (const row of db.query<GateRow, []>(`SELECT g.* FROM question_gates g
-    JOIN kv ON kv.key = 'fill.manual.' || g.job_id AND kv.value = g.id
-    WHERE g.state = 'open' AND g.kind IN ('manual','submission_ambiguous')`).all()) {
+  for (const row of db.query<GateRow, []>("SELECT * FROM question_gates WHERE state = 'open' AND kind IN ('manual','submission_ambiguous')").all()) {
+    if (manualLeaseGate(row.job_id) !== row.id) continue;
     const job = getJob(row.job_id);
     if (!job || !isCurrent(row, job)) continue;
     const checkpoint = readCheckpoint(job.id);
@@ -393,7 +380,7 @@ export function reserveManualLease(jobId: number, gateId: string): FillCheckpoin
     if (!saved?.tabId) throw new Error("No saved browser tab; request application recovery instead");
     const owner = manualLeases().get(saved.slot);
     if (owner !== undefined && owner !== jobId) throw new Error("This browser is reserved for another application");
-    kvSet(`fill.manual.${jobId}`, gateId);
+    setManualLease(jobId, gateId);
     return saved;
   }).immediate();
   notifyJobChange(jobId);
@@ -402,7 +389,7 @@ export function reserveManualLease(jobId: number, gateId: string): FillCheckpoin
 
 export function releaseManualLease(jobId: number, gateId: string): void {
   db.transaction(() => {
-    if (getOpenGate(jobId)?.id !== gateId || kvGet(`fill.manual.${jobId}`) !== gateId)
+    if (getOpenGate(jobId)?.id !== gateId || manualLeaseGate(jobId) !== gateId)
       throw new Error("This browser reservation is no longer current");
     clearManualLease(jobId);
   }).immediate();
@@ -412,7 +399,7 @@ export function importLegacyGates(): void {
   const adopted = db.transaction(() => {
     const ids: number[] = [];
     for (const job of db.query<Job, []>("SELECT * FROM jobs WHERE status IN ('needs_input','awaiting_submit','needs_manual','filling','approved','failed') ORDER BY id").all()) {
-      const current = getOpenGate(job.id), ambiguous = kvGet(`fill.submitting.${job.id}`) === "1";
+      const current = getOpenGate(job.id), ambiguous = isSubmitting(job.id);
       if (current && (!ambiguous || current.kind === "submission_ambiguous")) continue;
       const old = pending(job), oldKind = kinds.find(k => k === old?.["kind"]);
       if (!ambiguous && !["needs_input", "awaiting_submit", "needs_manual"].includes(job.status)) continue;
@@ -420,7 +407,7 @@ export function importLegacyGates(): void {
       const text = typeof old?.["text"] === "string" && old["text"].trim() ? old["text"] : ambiguous ? "Submission may have occurred. Inspect the existing application before resolving." : job.note?.trim() || "Inspect the existing application and provide the missing input.";
       let checkpoint = readCheckpoint(job.id);
       if (!checkpoint && (kind === "manual" || kind === "submission_ambiguous")) {
-        const slot = Number(kvGet(`fill.slot.${job.id}`) ?? "0");
+        const slot = lastSlot(job.id) ?? 0;
         checkpoint = { version: 1, slot, tabId: null, url: null, step: "legacy inspection", notes: "Legacy navigation unavailable; inspect the existing browser draft.", resumeSha: job.resume_sha, savedAt: now() };
       }
       park(job.id, { kind, text, legacy: true, shot: typeof old?.["shot"] === "number" ? old["shot"] : null }, checkpoint);

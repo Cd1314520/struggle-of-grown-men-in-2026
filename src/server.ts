@@ -11,10 +11,11 @@ import { killAllWorkers } from "./omp";
 import { MAIN, PDF_NAME, resumeFiles, workingPdf } from "./resume";
 import { autoApply } from "./auto";
 import { currentThreshold } from "./rubric";
-import { abortFill, activeFillSession, autoApprovedToday, fillSlot, isRunning, manualBrowserReserved, profileProblems, pump, releaseBrowser, reserveBrowser, respond, scan, scheduleRecovery, startScheduler, track } from "./pipeline";
+import { abortFill, activeFillSession, autoApprovedToday, fillSlot, forgetDeferredApproval, isRunning, manualBrowserReserved, profileProblems, pump, releaseBrowser, reserveBrowser, respond, scan, scheduleRecovery, startScheduler, track } from "./pipeline";
 import { answerGate, getOpenGate, listQuestionGroups, readCheckpoint, resolveAmbiguous } from "./questions";
 import { digestStatus, sendQuestionDigest } from "./digest";
 import { errorMessage } from "./errors";
+import { isSubmitting, recoveryMode } from "./fill-state";
 
 const PROFILE_FILES = ["targets.md", "rubric.yml", MAIN, "resume-notes.md", "answers.md", "personal.yml", "companies.yml"];
 const safeThreshold = () => {
@@ -83,7 +84,7 @@ function state() {
 
 function jobAction(job: Job, action: string, text: string) {
   const gate = getOpenGate(job.id);
-  const ambiguous = gate?.kind === "submission_ambiguous" || kvGet(`fill.submitting.${job.id}`) === "1";
+  const ambiguous = gate?.kind === "submission_ambiguous" || isSubmitting(job.id);
   if (ambiguous && !["reject", "mark_submitted", "confirmed_not_submitted"].includes(action))
     return "submission may already have occurred; inspect it, then mark submitted, confirm not submitted, or reject";
   switch (action) {
@@ -123,7 +124,7 @@ function jobAction(job: Job, action: string, text: string) {
       return "unknown action";
   }
   // An explicit user decision supersedes any queued automatic approval, even while quota is exhausted.
-  db.query("DELETE FROM kv WHERE key = ?").run(`auto.deferred.${job.id}`);
+  forgetDeferredApproval(job.id);
   logEvent("user", `${action}${text ? `: ${text}` : ""}`, job.id);
   pump();
   return null;
@@ -204,8 +205,7 @@ const server = Bun.serve({
         // Historical slot assignments are not ownership: ordinary parked browsers are reused.
         const slot = fillSlot(job.id);
         const browserUrl = config.chrome.vncPort && slot !== null ? vncUrl(slot) : null;
-        const recoveryMode = kvGet(`fill.verify.${job.id}`) === "1" ? "verify" : kvGet(`fill.recovery.${job.id}`) === "1" ? "fill" : null;
-        return json({ ...job, opened_at: openedAt(job), events, sources, siblings, gate, checkpoint, browserReserved: slot !== null, manualBrowserReserved: manualBrowserReserved(job.id), submissionAmbiguous: gate?.kind === "submission_ambiguous" || (job.status !== "filling" && kvGet(`fill.submitting.${job.id}`) === "1"), recoveryMode, vncUrl: browserUrl, hasPdf: existsSync(files.pdf), resumeFrozen: files.frozen, pdfName: PDF_NAME, diff: resumeDiff(job) });
+                return json({ ...job, opened_at: openedAt(job), events, sources, siblings, gate, checkpoint, browserReserved: slot !== null, manualBrowserReserved: manualBrowserReserved(job.id), submissionAmbiguous: gate?.kind === "submission_ambiguous" || (job.status !== "filling" && isSubmitting(job.id)), recoveryMode: recoveryMode(job.id), vncUrl: browserUrl, hasPdf: existsSync(files.pdf), resumeFrozen: files.frozen, pdfName: PDF_NAME, diff: resumeDiff(job) });
       }
       if (sub === "/resume.pdf") {
         const file = Bun.file(resumeFiles(job.id, job.resume_sha).pdf);

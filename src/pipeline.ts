@@ -6,12 +6,13 @@ import { addCompany, ATS, feedNames, fetchCompany, fetchDescription, fetchFeed, 
 import { boardMinutes, boardNames, fetchBoard, isBoardUrl, linkedinDescription, probeEmployer } from "./boards";
 import { activateApplicationTab, ensureChrome, prepareJobBrowser, pruneTabs, screenshot, tabs, type JobBrowser } from "./chrome";
 import { browserCount, browserSlot, config, DATA, jobDir, PROMPTS, readProfile, STOCK_MAIN } from "./config";
-import { db, dedupeExisting, findTwin, getJob, insertJob, jobsByStatus, kvGet, nextToPrep, kvSet, logEvent, notifyJobChange, relocateJob, updateJob, type Job } from "./db";
+import { db, dedupeExisting, findTwin, getJob, insertJob, jobsByStatus, kvDelete, kvEntries, kvGet, nextToPrep, kvSet, logEvent, notifyJobChange, relocateJob, updateJob, type Job } from "./db";
 import * as gmail from "./gmail";
 import { changedTemplateFiles, freezeResume, frozenResume, MAIN, pageCount, PDF_NAME, stageResume, stockPages, workingPdf } from "./resume";
 import { checklistText, evaluate, loadRubric, type Verdict } from "./rubric";
 import { arg, runWorker, S, schema, type HostTool, type WorkerHandle } from "./omp";
 import { errorMessage } from "./errors";
+import { authorizeSubmit, beginAttempt, clearFillFlags, dropManualLease, endVerification, isRecovering, isSubmitting, isVerifying, lastSlot, manualLeaseGate, rememberSlot } from "./fill-state";
 import { assessPractice } from "./practice";
 import { answerGate, cancelJobGates, consumeSubmitApproval, findStoredAnswer, getOpenGate, importLegacyGates, manualLeases, parkGate, queueRecovery, readCheckpoint, recordCheckpoint, releaseManualLease, reserveManualLease, resolveAmbiguityWithEvidence, resumeContext, returnManualControl, type AmbiguityEvidence, type FillCheckpoint, type GateInput } from "./questions";
 import { resolveAccount } from "./accounts";
@@ -426,9 +427,9 @@ async function prep(job: Job) {
           reported = true;
           const auto = autoApproval(verdict, { concerns, handPicked: !!feedback, approvedToday: usedToday("auto") });
           if (auto.deferred === "daily_cap") {
-            kvSet(`auto.deferred.${job.id}`, new Date().toISOString());
+            deferApproval(job.id);
           } else {
-            db.query("DELETE FROM kv WHERE key = ?").run(`auto.deferred.${job.id}`);
+            forgetDeferredApproval(job.id);
           }
           updateJob(job.id, {
             rationale,
@@ -465,6 +466,13 @@ interface FillSession {
 const fillSessions = new Map<number, FillSession>();
 // Activation is asynchronous; keep ownership even if the gate is resolved meanwhile.
 const manualActivations = new Map<number, number>();
+
+// Callbacks are invalidated first, then the process is told to stop.
+function endSession(session: FillSession) {
+  session.active = false;
+  session.browser?.revoke();
+  session.handle?.abort();
+}
 
 // Object identity is the generation guard. Aborted callbacks cannot touch a successor.
 function ownsFill(session: FillSession) {
@@ -515,7 +523,7 @@ async function parkFill(session: FillSession, input: GateInput, checkpoint = ses
   if (!ownsFill(session)) throw new Error("stale fill worker");
   if (shot) await Bun.write(join(jobDir(session.jobId), "gate.png"), shot);
   if (!ownsFill(session)) throw new Error("stale fill worker");
-  if (kvGet(`fill.submitting.${session.jobId}`) === "1") {
+  if (isSubmitting(session.jobId)) {
     const reason = input.text.trim();
     input = {
       kind: "submission_ambiguous",
@@ -526,9 +534,7 @@ async function parkFill(session: FillSession, input: GateInput, checkpoint = ses
     };
   }
   parkGate(session.jobId, { ...input, shot: shot ? Date.now() : null }, checkpoint);
-  session.active = false;
-  session.browser?.revoke();
-  session.handle?.abort();
+  endSession(session);
   logEvent("gate", `${input.kind}: ${input.text}`, session.jobId, "fill");
   await session.handle?.done;
   return "PARKED. This worker has exited.";
@@ -536,7 +542,7 @@ async function parkFill(session: FillSession, input: GateInput, checkpoint = ses
 
 export function respond(jobId: number, answer: string): boolean {
   const gate = getOpenGate(jobId);
-  if (!gate || gate.kind === "submission_ambiguous" || kvGet(`fill.submitting.${jobId}`) === "1") return false;
+  if (!gate || gate.kind === "submission_ambiguous" || isSubmitting(jobId)) return false;
   if (gate.kind === "manual") return returnManualControl(jobId, gate.id, answer);
   try {
     answerGate(gate.id, answer, "application");
@@ -549,9 +555,7 @@ export function respond(jobId: number, answer: string): boolean {
 export function abortFill(jobId: number) {
   const session = fillSessions.get(jobId);
   if (session) {
-    session.active = false;
-    session.browser?.revoke();
-    session.handle?.abort();
+    endSession(session);
   }
   cancelJobGates(jobId);
 }
@@ -586,13 +590,12 @@ export async function reserveBrowser(jobId: number, gateId: string): Promise<voi
   try {
     reserveManualLease(jobId, gateId);
     await activateApplicationTab(slot, tabId);
-    if (getOpenGate(jobId)?.id !== gateId || kvGet(`fill.manual.${jobId}`) !== gateId ||
+    if (getOpenGate(jobId)?.id !== gateId || manualLeaseGate(jobId) !== gateId ||
         readCheckpoint(jobId)?.tabId !== tabId)
       throw new Error("This handoff changed while opening its browser");
     activated = true;
   } finally {
-    if (!activated)
-      db.query("DELETE FROM kv WHERE key = ? AND value = ?").run(`fill.manual.${jobId}`, gateId);
+    if (!activated) dropManualLease(jobId, gateId);
     manualActivations.delete(slot);
     notifyJobChange(jobId);
     pump();
@@ -615,7 +618,7 @@ export async function confirmSubmission(jobId: number, summary: string): Promise
   const session = fillSessions.get(jobId);
   const job = getJob(jobId);
   if (!session || !job || !ownsFill(session)) return "ERROR: no current fill worker.";
-  if (kvGet(`fill.submitting.${jobId}`) === "1")
+  if (isSubmitting(jobId))
     return parkFill(session, { kind: "submission_ambiguous", text: "Submission already authorized; inspect before any further submit attempt." });
   try {
     if (!job.resume_sha || frozenResume(jobId, job.resume_sha).sha !== session.checkpoint.resumeSha)
@@ -624,7 +627,7 @@ export async function confirmSubmission(jobId: number, summary: string): Promise
     return parkFill(session, { kind: "manual", text: `Frozen resume verification failed; do not submit. ${err instanceof Error ? err.message : String(err)}` });
   }
   if (!confirmsSubmit(job) || consumeSubmitApproval(jobId, summary)) {
-    kvSet(`fill.submitting.${jobId}`, "1");
+    authorizeSubmit(jobId);
     logEvent("auto", `Final submission authorized after re-observation: ${summary}`, jobId, "fill");
     return "APPROVED. Click the final submit button once now. Do not retry it if the result is uncertain.";
   }
@@ -661,22 +664,20 @@ export function fillSlot(jobId: number): number | null {
 
 function stopFailedFill(session: FillSession, message: string) {
   if (!ownsFill(session)) return;
-  const ambiguous = kvGet(`fill.submitting.${session.jobId}`) === "1";
+  const ambiguous = isSubmitting(session.jobId);
   parkGate(session.jobId, {
     kind: ambiguous ? "submission_ambiguous" : "manual",
     text: ambiguous
       ? `Final submission may have happened. Inspect this application and mailbox; never retry without confirmed-not-submitted resolution. ${message}`
       : `Fill stopped. Inspect/recover the exact draft before returning browser control. ${message}`,
   }, session.checkpoint);
-  session.active = false;
-  session.browser?.revoke();
-  session.handle?.abort();
+  endSession(session);
 }
 
 async function fill(job: Job, session: FillSession) {
   const { slot } = session;
-  const isVerification = kvGet(`fill.verify.${job.id}`) === "1";
-  if (kvGet(`fill.submitting.${job.id}`) === "1" && !isVerification) {
+  const isVerification = isVerifying(job.id);
+  if (isSubmitting(job.id) && !isVerification) {
     updateJob(job.id, { status: "filling" });
     stopFailedFill(session, "Runnable job still had a final-submit marker.");
     return;
@@ -695,7 +696,7 @@ async function fill(job: Job, session: FillSession) {
   const dir = jobDir(job.id);
   const browser = browserSlot(slot);
   const context = resumeContext(job.id);
-  kvSet(`fill.slot.${job.id}`, String(slot));
+  rememberSlot(job.id, slot);
   const frozen = job.resume_sha ? frozenResume(job.id, job.resume_sha) : freezeResume(job.id);
   if (context.checkpoint?.resumeSha && context.checkpoint.resumeSha !== frozen.sha)
     throw new Error("checkpoint resume SHA does not match the frozen application resume");
@@ -752,7 +753,7 @@ async function fill(job: Job, session: FillSession) {
         register: { type: "boolean", description: "Set true only if the site explicitly confirmed no existing account and registration is required" },
       }, ["domain"]),
       handler: args => {
-        const allowCreate = args["register"] === true && !isVerification && kvGet(`fill.submitting.${job.id}`) !== "1";
+        const allowCreate = args["register"] === true && !isVerification && !isSubmitting(job.id);
         return resolveAccount(arg.str(args, "domain"), mailbox, allowCreate);
       },
     },
@@ -807,8 +808,7 @@ async function fill(job: Job, session: FillSession) {
           reason += `\nCurrent navigation could not be verified; checkpoint is the last observed draft: ${err instanceof Error ? err.message : String(err)}`;
         }
         if (isVerification) {
-          kvSet(`fill.verify.${job.id}`, "0");
-          kvSet(`fill.recovery.${job.id}`, "0");
+          endVerification(job.id);
           return parkFill(session, { kind: "submission_ambiguous", text: `Verification handoff: ${reason}` }, checkpoint);
         }
         return parkFill(session, { kind: "manual", text: reason }, checkpoint);
@@ -822,23 +822,19 @@ async function fill(job: Job, session: FillSession) {
         if (isVerification) {
           return "ERROR: verification workers must record status through verify_status with structured evidence, or hand off through need_manual.";
         }
-        if (outcome !== "submitted" && outcome !== "already_applied" && kvGet(`fill.submitting.${job.id}`) === "1") {
+        if (outcome !== "submitted" && outcome !== "already_applied" && isSubmitting(job.id)) {
           stopFailedFill(session, note);
           return "Submission ambiguity recorded; automatic retry forbidden.";
         }
         db.transaction(() => {
           cancelJobGates(job.id);
-          kvSet(`fill.submitting.${job.id}`, "0");
-          kvSet(`fill.verify.${job.id}`, "0");
-          kvSet(`fill.recovery.${job.id}`, "0");
+          clearFillFlags(job.id);
           if (outcome === "submitted" || outcome === "already_applied")
             updateJob(job.id, { status: "submitted", pending: null, note, submitted_at: new Date().toISOString() });
           else if (outcome === "closed") updateJob(job.id, { status: "skipped", pending: null, note: `posting closed: ${note}` });
           else updateJob(job.id, { status: "failed", pending: null, note });
         })();
-        session.active = false;
-        session.browser?.revoke();
-        session.handle?.abort();
+        endSession(session);
         return "Recorded.";
       },
     },
@@ -873,8 +869,7 @@ async function fill(job: Job, session: FillSession) {
 
         if (outcome === "unresolved") {
           const cp = await checkpointFrom(session, args).catch(() => session.checkpoint);
-          kvSet(`fill.verify.${job.id}`, "0");
-          kvSet(`fill.recovery.${job.id}`, "0");
+          endVerification(job.id);
           return await parkFill(session, {
             kind: "submission_ambiguous",
             text: `Verification inconclusive: ${evidence}`,
@@ -907,9 +902,7 @@ async function fill(job: Job, session: FillSession) {
             ...(messageId ? { messageId } : {}),
             checkpoint: cp,
           });
-          session.active = false;
-          session.browser?.revoke();
-          session.handle?.abort();
+          endSession(session);
           await session.handle?.done;
           return "Recorded: Application verified as submitted. Worker exiting.";
         }
@@ -928,9 +921,7 @@ async function fill(job: Job, session: FillSession) {
             status,
             checkpoint: cp,
           });
-          session.active = false;
-          session.browser?.revoke();
-          session.handle?.abort();
+          endSession(session);
           await session.handle?.done;
           return "Recorded: Ambiguity resolved. Verified draft queued for normal fill with fresh confirm_submit required.";
         }
@@ -971,8 +962,7 @@ async function fill(job: Job, session: FillSession) {
         kind: "submission_ambiguous",
         text: `Verification worker ended without conclusive evidence (${result.error ?? result.status}).`,
       }, session.checkpoint);
-      kvSet(`fill.verify.${job.id}`, "0");
-      kvSet(`fill.recovery.${job.id}`, "0");
+      endVerification(job.id);
       session.active = false;
     }
     return;
@@ -1061,6 +1051,11 @@ const countOne = (what: Counted) => kvSet(`count.${what}.${today()}`, String(use
 export const autoApprovedToday = () => usedToday("auto");
 
 
+// Jobs that only missed auto-approval because the day's allowance was used up, oldest first.
+const DEFERRED_PREFIX = "auto.deferred.";
+const deferApproval = (jobId: number) => kvSet(`${DEFERRED_PREFIX}${jobId}`, new Date().toISOString());
+export const forgetDeferredApproval = (jobId: number) => kvDelete(`${DEFERRED_PREFIX}${jobId}`);
+
 const DEFERRED_MIGRATION_KEY = "auto.deferred.migration";
 const DEFERRED_MIGRATION_VERSION = "1";
 const LEGACY_CAP_NOTE_REGEX = /^needs your review: auto apply has used its \d+ for today$/;
@@ -1080,7 +1075,7 @@ export function adoptLegacyDeferredJobs() {
       !job.submitted_at &&
       existsSync(workingPdf(job.id))
     ) {
-      kvSet(`auto.deferred.${job.id}`, new Date().toISOString());
+      deferApproval(job.id);
     }
   }
   kvSet(DEFERRED_MIGRATION_KEY, DEFERRED_MIGRATION_VERSION);
@@ -1096,25 +1091,21 @@ export function pumpDeferredApprovals() {
   const limit = rules.perDay;
   if (usedToday("auto") >= limit) return;
 
-  const rows = db
-    .query<{ key: string; value: string }, []>(
-      "SELECT key, value FROM kv WHERE key LIKE 'auto.deferred.%' AND key != 'auto.deferred.migration' ORDER BY rowid ASC"
-    )
-    .all();
+  const rows = kvEntries(DEFERRED_PREFIX).filter(row => row.key !== DEFERRED_MIGRATION_KEY);
 
   for (const row of rows) {
     if (usedToday("auto") >= limit) break;
 
-    const idStr = row.key.slice("auto.deferred.".length);
+    const idStr = row.key.slice(DEFERRED_PREFIX.length);
     const jobId = Number(idStr);
     if (!Number.isInteger(jobId) || jobId <= 0) {
-      db.query("DELETE FROM kv WHERE key = ?").run(row.key);
+      kvDelete(row.key);
       continue;
     }
 
     const job = getJob(jobId);
     if (!job) {
-      db.query("DELETE FROM kv WHERE key = ?").run(row.key);
+      kvDelete(row.key);
       continue;
     }
 
@@ -1131,7 +1122,7 @@ export function pumpDeferredApprovals() {
       isSubmitted ||
       !existsSync(pdf)
     ) {
-      db.query("DELETE FROM kv WHERE key = ?").run(row.key);
+      kvDelete(row.key);
       continue;
     }
 
@@ -1153,14 +1144,14 @@ export function pumpDeferredApprovals() {
           practice_assessment: verdict.practice ? JSON.stringify(verdict.practice) : null,
           note: null,
         });
-        db.query("DELETE FROM kv WHERE key = ?").run(row.key);
+        kvDelete(row.key);
       })();
       logEvent("auto", `Approved by reconsidered auto apply: ${verdict.reason}`, job.id, "prep");
     } else {
       if (result.approval.deferred === "daily_cap") {
         break;
       } else {
-        db.query("DELETE FROM kv WHERE key = ?").run(row.key);
+        kvDelete(row.key);
         if (result.approval.note || result.reason) {
           updateJob(job.id, { note: result.approval.note ?? `needs your review: ${result.reason}` });
         }
@@ -1168,6 +1159,18 @@ export function pumpDeferredApprovals() {
     }
   }
 }
+// Jobs a fill worker could be started for, in the order they should be tried: verification of an
+// ambiguous submit first, then draft recovery, then jobs with a saved draft, then oldest.
+function fillQueue() {
+  const rank = (c: { verify: boolean; recovering: boolean; job: Job }) => (c.verify ? 4 : 0) + (c.recovering ? 2 : 0) + (c.job.fill_checkpoint === null ? 0 : 1);
+  return db
+    .query<Job, []>("SELECT * FROM jobs WHERE status IN ('approved', 'needs_manual') ORDER BY id")
+    .all()
+    .map(job => ({ job, verify: isVerifying(job.id), recovering: isRecovering(job.id) }))
+    .filter(c => c.job.status === "approved" || c.verify)
+    .sort((a, b) => rank(b) - rank(a) || a.job.id - b.job.id);
+}
+
 // Start whatever work is waiting. Safe to call any time state changes.
 export function pump() {
   if (!isRunning("locate") && usedToday("locate") < (config.limits.locatePerDay ?? 40) && jobsByStatus("locating", 1).length) void locate();
@@ -1188,6 +1191,7 @@ export function pump() {
     }
   }
   const leases = manualLeases();
+  let queue: ReturnType<typeof fillQueue> | undefined;
   for (let slot = 0; slot < filling.length; slot++) {
     if (filling[slot] || leases.has(slot) || manualActivations.has(slot) ||
         Date.now() < Math.max(nextFillAt, restUntil[slot] ?? 0)) continue;
@@ -1202,26 +1206,15 @@ export function pump() {
     let isVerification = false;
     // Recovery is priority, not ownership: skipped candidates cannot block the slot.
     // Multiple parked/recovering applications may share a persistent profile.
-    const candidates = db.prepare<Job, []>(`SELECT j.* FROM jobs j
-      LEFT JOIN kv v ON v.key = 'fill.verify.' || j.id
-      LEFT JOIN kv r ON r.key = 'fill.recovery.' || j.id
-      WHERE j.status = 'approved' OR (j.status = 'needs_manual' AND v.value = '1')
-      ORDER BY coalesce(v.value = '1', 0) DESC, coalesce(r.value = '1', 0) DESC,
-        (j.fill_checkpoint IS NOT NULL) DESC, j.id`);
-    try {
-      for (const candidate of candidates.iterate()) {
-        if (fillSessions.has(candidate.id) || employers.has(candidate.company_key ?? candidate.company) || getOpenGate(candidate.id)) continue;
-        const verify = kvGet(`fill.verify.${candidate.id}`) === "1";
-        if (!verify && usedToday("fill") >= config.limits.applyPerDay) continue;
-        const saved = readCheckpoint(candidate.id);
-        if (saved ? saved.slot !== slot : candidate.resume_sha && Number(kvGet(`fill.slot.${candidate.id}`)) !== slot) continue;
-        selectedJob = candidate;
-        checkpoint = saved;
-        isVerification = verify;
-        break;
-      }
-    } finally {
-      candidates.finalize();
+    for (const { job: candidate, verify } of (queue ??= fillQueue())) {
+      if (fillSessions.has(candidate.id) || employers.has(candidate.company_key ?? candidate.company) || getOpenGate(candidate.id)) continue;
+      if (!verify && usedToday("fill") >= config.limits.applyPerDay) continue;
+      const saved = readCheckpoint(candidate.id);
+      if (saved ? saved.slot !== slot : candidate.resume_sha && lastSlot(candidate.id) !== slot) continue;
+      selectedJob = candidate;
+      checkpoint = saved;
+      isVerification = verify;
+      break;
     }
     const job = selectedJob;
     if (!job) continue;
@@ -1229,7 +1222,7 @@ export function pump() {
     const session: FillSession = { jobId: job.id, slot, active: true, checkpoint: checkpoint ?? defaultCheckpoint(job, slot) };
     filling[slot] = session;
     fillSessions.set(job.id, session);
-    kvSet(`fill.recovery.${job.id}`, "0");
+    beginAttempt(job.id);
     if (!isVerification) countOne("fill");
     nextFillAt = Date.now() + min * 1000;
     kvSet("fill.nextAt", String(nextFillAt));
@@ -1262,11 +1255,10 @@ export function startScheduler() {
   // Open gates remain parked; answered gates remain queued. A marker is never
   // cleared by startup, generic retry, or the act of requesting approval.
   for (const j of db.query<Job, []>("SELECT * FROM jobs WHERE status IN ('approved', 'filling', 'needs_input', 'awaiting_submit', 'needs_manual', 'failed')").all()) {
-    const checkpoint = readCheckpoint(j.id) ?? defaultCheckpoint(j, Number(kvGet(`fill.slot.${j.id}`) ?? 0));
+    const checkpoint = readCheckpoint(j.id) ?? defaultCheckpoint(j, lastSlot(j.id) ?? 0);
     const gate = getOpenGate(j.id);
-    if (kvGet(`fill.submitting.${j.id}`) === "1") {
-      kvSet(`fill.verify.${j.id}`, "0");
-      kvSet(`fill.recovery.${j.id}`, "0");
+    if (isSubmitting(j.id)) {
+      endVerification(j.id);
       if (gate?.kind !== "submission_ambiguous")
         parkGate(j.id, { kind: "submission_ambiguous", text: "Restart after final submission authorization. Inspect the exact application and mailbox; explicitly mark submitted, confirmed not submitted, or reject." }, checkpoint);
     } else if (gate) {

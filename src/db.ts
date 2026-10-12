@@ -325,6 +325,14 @@ export function insertJob(j: Pick<Job, "url" | "source" | "company" | "title" | 
   return Number(res.lastInsertRowid);
 }
 
+// Removes a job that was folded into another, with what was recorded under its id. Only jobs nothing
+// has acted on are ever folded, so there is no fill state to carry over.
+function deleteJob(id: number) {
+  db.query("DELETE FROM events WHERE job_id = ?").run(id);
+  db.query("DELETE FROM jobs WHERE id = ?").run(id);
+  for (const key of ["feedback", "locate.tries", "auto.deferred"]) kvDelete(`${key}.${id}`);
+}
+
 // Points a job found on a job-search site at the employer's own posting. When that posting is already
 // a job here, this one is folded into it instead.
 export function relocateJob(job: Job, rawUrl: string, description: string | null): "moved" | "merged" {
@@ -333,8 +341,7 @@ export function relocateJob(job: Job, rawUrl: string, description: string | null
   if (other && other.id !== job.id) {
     db.query("INSERT OR IGNORE INTO job_sources (job_id, url, source, location) VALUES (?, ?, ?, ?)").run(other.id, job.url, job.source, job.location);
     db.query("UPDATE job_sources SET job_id = ? WHERE job_id = ?").run(other.id, job.id);
-    db.query("DELETE FROM events WHERE job_id = ?").run(job.id);
-    db.query("DELETE FROM jobs WHERE id = ?").run(job.id);
+    deleteJob(job.id);
     emit({ type: "job", jobId: other.id });
     return "merged";
   }
@@ -364,8 +371,7 @@ export function dedupeExisting() {
       }
       fold(twin, r.url, r.source, r.location, r.description);
       db.query("UPDATE job_sources SET job_id = ? WHERE job_id = ?").run(twin.id, r.id);
-      db.query("DELETE FROM events WHERE job_id = ?").run(r.id);
-      db.query("DELETE FROM jobs WHERE id = ?").run(r.id);
+      deleteJob(r.id);
       merged++;
     }
   }
@@ -388,3 +394,7 @@ export function logEvent(kind: string, message: string, jobId?: number | null, w
 export const kvGet = (key: string) => db.query<{ value: string }, [string]>("SELECT value FROM kv WHERE key = ?").get(key)?.value ?? null;
 export const kvSet = (key: string, value: string) =>
   db.query("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
+export const kvDelete = (key: string) => db.query("DELETE FROM kv WHERE key = ?").run(key);
+// Every entry whose key starts with `prefix`, oldest first.
+export const kvEntries = (prefix: string) =>
+  db.query<{ key: string; value: string }, [string, string]>("SELECT key, value FROM kv WHERE substr(key, 1, length(?)) = ? ORDER BY rowid").all(prefix, prefix);
