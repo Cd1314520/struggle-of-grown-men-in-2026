@@ -227,7 +227,28 @@ The remaining commercial DevTools signal was reproduced locally from the [observ
 Restarting the Bun service (`systemctl --user restart auto-apply`) **does not** restart Chrome or apply modified launch flags. Because the systemd unit uses `KillMode=process`, existing Chrome processes and open tabs remain alive across app restarts.
 
 Launch flag modifications take effect only when a new Chrome process starts (e.g. after explicit slot termination or machine reboot). Terminating Chrome closes unsaved tabs and destroys in-memory DOM state; draft recovery relies on ATS-saved state verified in `prompts/fill.md`, not browser memory.
+## Database
+
+`data/app.db` is SQLite. Its schema is the ordered list of migrations in `src/schema.ts`; `PRAGMA user_version` records how many have been applied. The app applies whatever is pending when it starts, each migration in one transaction with its version bump, and logs each upgrade of an existing database to Activity. It refuses to start on a database newer than the code.
+
+To change the schema, append a migration to `MIGRATIONS` and never edit one that has shipped. A migration is written for exactly the schema the previous one leaves behind; only the baseline (version 1, which adopted databases from before versions were tracked) tolerates things already existing. Changing a constraint or column type means creating the new table, copying the rows, dropping the old one and renaming, inside the one migration.
+
+```bash
+bun run migrate --status              # version and pending migrations; changes nothing
+bun run migrate                       # upgrade data/app.db without starting the app
+bun run migrate --db <path>           # the same for another file, such as a restored backup
+```
+
+The journal and reassessment scripts open a database by path and never change its schema: they stop with a message naming `bun run migrate` if it is not at the version the code expects.
+
+SQL lives with the module that owns the table: `jobs`, `job_sources`, `events` and `kv` in `src/db.ts`, `accounts` in `src/accounts.ts`, gates and answers in `src/questions.ts`, the digest ledger in `src/digest.ts`. Other modules call their functions. Values are always bound as parameters; a list is bound as one JSON array and read with `json_each`. `tests/db.test.ts` checks both by scanning the source: it catches statements outside the owning modules and values spliced into SQL template strings, not SQL assembled by string concatenation.
+
+The current schema in full is recorded in `tests/__snapshots__/schema.test.ts.snap`. Adding a migration changes it deliberately (`bun test -u`); a change without a new migration means a shipped migration was edited.
+
+`bun test` runs against throwaway state: `tests/setup.ts` (loaded through `bunfig.toml` when run from the repository root) points `AUTO_APPLY_DATA` at a temporary directory before anything loads. Run from anywhere else, `src/db.ts` refuses to open a database at all under `bun test` unless `AUTO_APPLY_DATA` is set, so a test run cannot migrate or write to the live database.
+
 ## Layout
 
 - `src/pipeline.ts`: workers, host tools, scheduler. `src/omp.ts`: RPC client. `prompts/`: one prompt per worker.
+- `src/schema.ts`: database migrations and how a connection is opened. `src/db.ts`: jobs, events and kv.
 - `data/`: SQLite DB, per-job resume copies, omp sessions, Chrome profile (git-ignored; holds site passwords and Gmail tokens).

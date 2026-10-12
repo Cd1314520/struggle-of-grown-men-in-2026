@@ -1,0 +1,143 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`schema migrations produces exactly the recorded schema 1`] = `
+"version 1
+
+CREATE TABLE accounts (
+domain TEXT PRIMARY KEY,
+email TEXT NOT NULL,
+password TEXT NOT NULL,
+created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE application_answers (
+job_id INTEGER NOT NULL,
+match_key TEXT NOT NULL,
+kind TEXT NOT NULL,
+question TEXT NOT NULL,
+context TEXT NOT NULL,
+options TEXT NOT NULL,
+answer TEXT NOT NULL,
+answered_at TEXT NOT NULL,
+PRIMARY KEY(job_id, match_key)
+);
+
+CREATE TABLE events (
+id INTEGER PRIMARY KEY,
+job_id INTEGER,
+worker TEXT,
+kind TEXT NOT NULL,
+message TEXT NOT NULL,
+at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE job_sources (
+url TEXT PRIMARY KEY,
+job_id INTEGER NOT NULL,
+source TEXT NOT NULL,
+location TEXT,
+seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE jobs (
+id INTEGER PRIMARY KEY,
+url TEXT NOT NULL UNIQUE,
+source TEXT NOT NULL,
+company TEXT NOT NULL,
+title TEXT NOT NULL,
+location TEXT,
+description TEXT,
+status TEXT NOT NULL DEFAULT 'found',
+score INTEGER,
+rationale TEXT,
+concerns TEXT,
+resume_changes TEXT,
+pending TEXT,          -- JSON: question / confirmation the agent is blocked on
+note TEXT,             -- latest human-readable status note
+found_at TEXT NOT NULL DEFAULT (datetime('now')),
+updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+submitted_at TEXT
+, resume_sha TEXT, resume_frozen_at TEXT, checklist TEXT, dedupe_key TEXT, company_key TEXT, posted_at TEXT, approved_by TEXT, practice_assessment TEXT, fill_checkpoint TEXT);
+
+CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+CREATE TABLE question_digest_deliveries (
+id TEXT PRIMARY KEY,
+recipient TEXT NOT NULL,
+fingerprints TEXT NOT NULL,
+group_count INTEGER NOT NULL,
+subject TEXT NOT NULL,
+body TEXT NOT NULL,
+state TEXT NOT NULL CHECK (state IN ('sending', 'uncertain', 'failed', 'sent')),
+created_at TEXT NOT NULL,
+attempt_at TEXT NOT NULL,
+sent_at TEXT,
+gmail_id TEXT,
+error TEXT
+);
+
+CREATE TABLE question_digest_notified (
+fingerprint TEXT PRIMARY KEY,
+delivery_id TEXT NOT NULL,
+sent_at TEXT NOT NULL
+);
+
+CREATE TABLE question_gates (
+id TEXT PRIMARY KEY,
+job_id INTEGER NOT NULL,
+kind TEXT NOT NULL CHECK(kind IN ('question','cover_letter','confirm_submit','manual','submission_ambiguous')),
+group_key TEXT NOT NULL,
+match_key TEXT NOT NULL,
+employer TEXT NOT NULL,
+text TEXT NOT NULL,
+context TEXT NOT NULL,
+options TEXT NOT NULL,
+legacy INTEGER NOT NULL DEFAULT 0,
+standing_allowed INTEGER NOT NULL DEFAULT 0,
+state TEXT NOT NULL CHECK(state IN ('open','answered','closed')),
+answer TEXT,
+scope TEXT CHECK(scope IN ('application','standing')),
+shot INTEGER,
+created_at TEXT NOT NULL,
+answered_at TEXT
+);
+
+CREATE TABLE standing_answers (
+match_key TEXT PRIMARY KEY,
+employer TEXT NOT NULL,
+question TEXT NOT NULL,
+context TEXT NOT NULL,
+options TEXT NOT NULL,
+answer TEXT NOT NULL,
+source_gate_id TEXT NOT NULL,
+answered_at TEXT NOT NULL
+);
+
+CREATE TABLE submit_approvals (
+job_id INTEGER PRIMARY KEY,
+gate_id TEXT NOT NULL,
+summary TEXT NOT NULL,
+created_at TEXT NOT NULL,
+consumed_at TEXT
+);
+
+CREATE INDEX events_job ON events(job_id);
+
+CREATE INDEX job_sources_job ON job_sources(job_id);
+
+CREATE INDEX jobs_company ON jobs(company_key);
+
+CREATE INDEX jobs_dedupe ON jobs(dedupe_key);
+
+CREATE INDEX jobs_status ON jobs(status);
+
+CREATE UNIQUE INDEX question_digest_one_pending
+ON question_digest_deliveries ((1)) WHERE state != 'sent';
+
+CREATE INDEX question_gates_group ON question_gates(group_key, state);
+
+CREATE INDEX question_gates_job ON question_gates(job_id, created_at);
+
+CREATE UNIQUE INDEX question_gates_open_job ON question_gates(job_id) WHERE state = 'open';
+"
+`;

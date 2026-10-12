@@ -6,7 +6,7 @@ import { addCompany, ATS, feedNames, fetchCompany, fetchDescription, fetchFeed, 
 import { boardMinutes, boardNames, fetchBoard, isBoardUrl, linkedinDescription, probeEmployer } from "./boards";
 import { activateApplicationTab, ensureChrome, prepareJobBrowser, pruneTabs, screenshot, tabs, type JobBrowser } from "./chrome";
 import { browserCount, browserSlot, config, DATA, jobDir, PROMPTS, readProfile, STOCK_MAIN } from "./config";
-import { db, dedupeExisting, findTwin, getJob, insertJob, jobsByStatus, kvDelete, kvEntries, kvGet, nextToPrep, kvSet, logEvent, notifyJobChange, relocateJob, updateJob, type Job } from "./db";
+import { applicationsAwaitingOutcome, db, dedupeExisting, findTwin, getJob, insertJob, jobsByStatus, jobsInStatuses, jobsWithCheckpoint, kvDelete, kvEntries, kvGet, nextToPrep, kvSet, logEvent, notifyJobChange, relocateJob, requeueInterruptedPrep, updateJob, type Job } from "./db";
 import * as gmail from "./gmail";
 import { changedTemplateFiles, freezeResume, frozenResume, MAIN, pageCount, PDF_NAME, stageResume, stockPages, workingPdf } from "./resume";
 import { checklistText, evaluate, loadRubric, type Verdict } from "./rubric";
@@ -711,7 +711,7 @@ async function fill(job: Job, session: FillSession) {
   if (!ownsFill(session)) return;
   const protectedTabs = new Set<string>();
   const excludedTargets = new Set<string>();
-  for (const row of db.query<Job, []>("SELECT * FROM jobs WHERE fill_checkpoint IS NOT NULL").all()) {
+  for (const row of jobsWithCheckpoint()) {
     const checkpoint = readCheckpoint(row.id);
     if (checkpoint?.slot === slot && checkpoint.tabId) {
       protectedTabs.add(checkpoint.tabId);
@@ -975,9 +975,7 @@ async function fill(job: Job, session: FillSession) {
 export const track = () =>
   exclusive("track", async () => {
     if (!gmail.gmailStatus().connected) return;
-    const open = db
-      .query<Job, []>("SELECT * FROM jobs WHERE status IN ('submitted', 'interview') ORDER BY submitted_at DESC LIMIT 300")
-      .all();
+    const open = applicationsAwaitingOutcome();
     if (!open.length) return;
     const since = kvGet("last.track") ?? new Date(Date.now() - 7 * 86400_000).toISOString();
     const started = new Date().toISOString();
@@ -1062,7 +1060,7 @@ const LEGACY_CAP_NOTE_REGEX = /^needs your review: auto apply has used its \d+ f
 
 export function adoptLegacyDeferredJobs() {
   if (kvGet(DEFERRED_MIGRATION_KEY) === DEFERRED_MIGRATION_VERSION) return;
-  const candidates = db.query<Job, []>("SELECT * FROM jobs WHERE status = 'awaiting_approval'").all();
+  const candidates = jobsInStatuses(["awaiting_approval"]);
   for (const job of candidates) {
     if (
       job.status === "awaiting_approval" &&
@@ -1163,9 +1161,7 @@ export function pumpDeferredApprovals() {
 // ambiguous submit first, then draft recovery, then jobs with a saved draft, then oldest.
 function fillQueue() {
   const rank = (c: { verify: boolean; recovering: boolean; job: Job }) => (c.verify ? 4 : 0) + (c.recovering ? 2 : 0) + (c.job.fill_checkpoint === null ? 0 : 1);
-  return db
-    .query<Job, []>("SELECT * FROM jobs WHERE status IN ('approved', 'needs_manual') ORDER BY id")
-    .all()
+  return jobsInStatuses(["approved", "needs_manual"])
     .map(job => ({ job, verify: isVerifying(job.id), recovering: isRecovering(job.id) }))
     .filter(c => c.job.status === "approved" || c.verify)
     .sort((a, b) => rank(b) - rank(a) || a.job.id - b.job.id);
@@ -1251,10 +1247,10 @@ export function startScheduler() {
   dedupeExisting();
   adoptLegacyDeferredJobs();
   importLegacyGates();
-  db.run("UPDATE jobs SET status = 'triaged' WHERE status = 'prepping'");
+  requeueInterruptedPrep();
   // Open gates remain parked; answered gates remain queued. A marker is never
   // cleared by startup, generic retry, or the act of requesting approval.
-  for (const j of db.query<Job, []>("SELECT * FROM jobs WHERE status IN ('approved', 'filling', 'needs_input', 'awaiting_submit', 'needs_manual', 'failed')").all()) {
+  for (const j of jobsInStatuses(["approved", "filling", "needs_input", "awaiting_submit", "needs_manual", "failed"])) {
     const checkpoint = readCheckpoint(j.id) ?? defaultCheckpoint(j, lastSlot(j.id) ?? 0);
     const gate = getOpenGate(j.id);
     if (isSubmitting(j.id)) {

@@ -1,82 +1,51 @@
 import { describe, expect, it } from "bun:test";
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
+import { SCHEMA_VERSION, migrate, openDatabase, schemaVersion } from "../src/schema";
+import { createLegacyDatabase } from "./fixtures/legacy-db";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, rmSync } from "node:fs";
 import { runReassessment } from "../scripts/reassess-backlog";
 
 describe("Backlog Reassessment Script - Migration Invariants & Edge Cases", () => {
-  function setupTestDb(options: { withPracticeCol?: boolean } = {}): { dir: string; dbPath: string; db: Database } {
+  function setupTestDb(): { dir: string; dbPath: string; db: Database } {
     const dir = mkdtempSync(join(tmpdir(), "reassess-test-"));
     const dbPath = join(dir, "test.db");
-    const db = new Database(dbPath, { create: true });
-
-    const practiceColSql = options.withPracticeCol ? ", practice_assessment TEXT" : "";
-
-    db.run(`
-      CREATE TABLE jobs (
-        id INTEGER PRIMARY KEY,
-        url TEXT NOT NULL UNIQUE,
-        source TEXT NOT NULL,
-        company TEXT NOT NULL,
-        title TEXT NOT NULL,
-        location TEXT,
-        description TEXT,
-        status TEXT NOT NULL DEFAULT 'found',
-        score INTEGER,
-        rationale TEXT,
-        concerns TEXT,
-        resume_changes TEXT,
-        pending TEXT,
-        note TEXT,
-        found_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-        submitted_at TEXT,
-        resume_sha TEXT,
-        resume_frozen_at TEXT,
-        checklist TEXT,
-        dedupe_key TEXT,
-        company_key TEXT,
-        posted_at TEXT,
-        approved_by TEXT
-        ${practiceColSql}
-      );
-
-      CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      CREATE TABLE events (
-        id INTEGER PRIMARY KEY,
-        job_id INTEGER,
-        worker TEXT,
-        kind TEXT NOT NULL,
-        message TEXT NOT NULL,
-        at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-    `);
+    const db = openDatabase(dbPath, "migrate");
 
     return { dir, dbPath, db };
   }
 
-  it("handles legacy DB without practice_assessment column safely", () => {
-    const { dir, dbPath, db } = setupTestDb({ withPracticeCol: false });
+  it("refuses a database from before schema versions, changes nothing in it, and works once it is migrated", () => {
+    const dir = mkdtempSync(join(tmpdir(), "reassess-test-"));
+    const dbPath = join(dir, "test.db");
+    const db = createLegacyDatabase(dbPath);
     try {
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75, '[{}]')`).run();
-      const dryResult = runReassessment({ dbPath, apply: false, silent: true });
-      expect(dryResult.eligibleCount).toBe(1);
+      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75)`).run();
 
-      const applyResult = runReassessment({ dbPath, apply: true, silent: true });
-      expect(applyResult.eligibleCount).toBe(1);
+      for (const apply of [false, true]) {
+        expect(() => runReassessment({ dbPath, apply, silent: true })).toThrow(`schema is version 0, but this code needs version ${SCHEMA_VERSION}`);
+      }
+      // Neither mode upgraded or touched it.
+      expect(schemaVersion(db)).toBe(0);
+      expect(db.query<{ status: string; score: number | null }, []>("SELECT status, score FROM jobs WHERE id = 1").get()).toEqual({ status: "awaiting_approval", score: 75 });
 
-      const row1 = db.query<{ status: string; score: number | null }, [number]>("SELECT status, score FROM jobs WHERE id = ?").get(1);
-      expect(row1?.status).toBe("triaged");
-      expect(row1?.score).toBeNull();
+      migrate(db);
+      expect(runReassessment({ dbPath, apply: false, silent: true }).eligibleCount).toBe(1);
+      expect(runReassessment({ dbPath, apply: true, silent: true }).eligibleCount).toBe(1);
+      expect(db.query<{ status: string; score: number | null }, []>("SELECT status, score FROM jobs WHERE id = 1").get()).toEqual({ status: "triaged", score: null });
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
+  it("reports a missing database file", () => {
+    expect(() => runReassessment({ dbPath: join(tmpdir(), "reassess-no-such-dir", "app.db"), silent: true })).toThrow("Database file not found");
+  });
+
   it("skips jobs with already-valid practice_assessment to preserve fresh prep work", () => {
-    const { dir, dbPath, db } = setupTestDb({ withPracticeCol: true });
+    const { dir, dbPath, db } = setupTestDb();
     try {
       const validPracticeJson = JSON.stringify({
         version: 1,
@@ -112,7 +81,7 @@ describe("Backlog Reassessment Script - Migration Invariants & Edge Cases", () =
   });
 
   it("resets approved_by to NULL on requeue", () => {
-    const { dir, dbPath, db } = setupTestDb({ withPracticeCol: true });
+    const { dir, dbPath, db } = setupTestDb();
     try {
       db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist, approved_by) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75, '[{}]', 'auto')`).run();
 
@@ -128,7 +97,7 @@ describe("Backlog Reassessment Script - Migration Invariants & Edge Cases", () =
   });
 
   it("dry-run defaults to no writes and correctly categorizes eligible vs protected", () => {
-    const { dir, dbPath, db } = setupTestDb({ withPracticeCol: true });
+    const { dir, dbPath, db } = setupTestDb();
     try {
       // 1. Eligible awaiting_approval
       db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75, '[{}]')`).run();
@@ -174,7 +143,7 @@ describe("Backlog Reassessment Script - Migration Invariants & Edge Cases", () =
   });
 
   it("requeues eligible rows atomically, preserves freeze invariants, and is idempotent", () => {
-    const { dir, dbPath, db } = setupTestDb({ withPracticeCol: true });
+    const { dir, dbPath, db } = setupTestDb();
     try {
       db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist, rationale, concerns) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75, '[{}]', 'good', 'none')`).run();
       db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist, resume_sha) VALUES (2, 'http://2', 'board', 'Co B', 'Eng 2', 'awaiting_approval', 80, '[{}]', 'sha-freeze')`).run();

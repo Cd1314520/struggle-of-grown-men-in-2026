@@ -1,127 +1,23 @@
-import { Database } from "bun:sqlite";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { DATA } from "./config";
+import { connectDatabase, migrate } from "./schema";
 
-export const db = new Database(join(DATA, "app.db"), { create: true });
-db.run("PRAGMA journal_mode = WAL");
-
-db.run(`
-CREATE TABLE IF NOT EXISTS jobs (
-  id INTEGER PRIMARY KEY,
-  url TEXT NOT NULL UNIQUE,
-  source TEXT NOT NULL,
-  company TEXT NOT NULL,
-  title TEXT NOT NULL,
-  location TEXT,
-  description TEXT,
-  status TEXT NOT NULL DEFAULT 'found',
-  score INTEGER,
-  rationale TEXT,
-  concerns TEXT,
-  resume_changes TEXT,
-  pending TEXT,          -- JSON: question / confirmation the agent is blocked on
-  note TEXT,             -- latest human-readable status note
-  found_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  submitted_at TEXT
-);
-CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);
-
-CREATE TABLE IF NOT EXISTS events (
-  id INTEGER PRIMARY KEY,
-  job_id INTEGER,
-  worker TEXT,
-  kind TEXT NOT NULL,
-  message TEXT NOT NULL,
-  at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS events_job ON events(job_id);
-
-CREATE TABLE IF NOT EXISTS accounts (
-  domain TEXT PRIMARY KEY,
-  email TEXT NOT NULL,
-  password TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-`);
-
-// Columns added after the first version.
-for (const col of ["resume_sha TEXT", "resume_frozen_at TEXT", "checklist TEXT", "dedupe_key TEXT", "company_key TEXT", "posted_at TEXT", "approved_by TEXT", "practice_assessment TEXT", "fill_checkpoint TEXT"]) {
-  try {
-    db.run(`ALTER TABLE jobs ADD COLUMN ${col}`);
-  } catch {
-    // already there
-  }
+// SQL lives with the module that owns the table: jobs, job_sources, events and kv here, accounts in
+// accounts.ts, gates and answers in questions.ts, the digest ledger in digest.ts. The tables
+// themselves are defined in schema.ts.
+// `bun test` sets NODE_ENV=test. Opening the database migrates it, so a test process must say where
+// its throwaway state is (tests/setup.ts does) rather than fall through to the live data directory.
+export function refuseLiveDataUnderTest(env: Record<string, string | undefined> = process.env) {
+  if (env["NODE_ENV"] === "test" && !env["AUTO_APPLY_DATA"])
+    throw new Error("Refusing to open the live database from a test run: AUTO_APPLY_DATA is not set. Run `bun test` from the repository root so tests/setup.ts is loaded.");
 }
+refuseLiveDataUnderTest();
 
-db.run(`
-CREATE TABLE IF NOT EXISTS job_sources (
-  url TEXT PRIMARY KEY,
-  job_id INTEGER NOT NULL,
-  source TEXT NOT NULL,
-  location TEXT,
-  seen_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS job_sources_job ON job_sources(job_id);
-CREATE INDEX IF NOT EXISTS jobs_dedupe ON jobs(dedupe_key);
-CREATE INDEX IF NOT EXISTS jobs_company ON jobs(company_key);
-`);
-
-// Durable human gates, application-only answers, and explicitly authorized exact standing rules.
-db.run(`
-CREATE TABLE IF NOT EXISTS question_gates (
-  id TEXT PRIMARY KEY,
-  job_id INTEGER NOT NULL,
-  kind TEXT NOT NULL CHECK(kind IN ('question','cover_letter','confirm_submit','manual','submission_ambiguous')),
-  group_key TEXT NOT NULL,
-  match_key TEXT NOT NULL,
-  employer TEXT NOT NULL,
-  text TEXT NOT NULL,
-  context TEXT NOT NULL,
-  options TEXT NOT NULL,
-  legacy INTEGER NOT NULL DEFAULT 0,
-  standing_allowed INTEGER NOT NULL DEFAULT 0,
-  state TEXT NOT NULL CHECK(state IN ('open','answered','closed')),
-  answer TEXT,
-  scope TEXT CHECK(scope IN ('application','standing')),
-  shot INTEGER,
-  created_at TEXT NOT NULL,
-  answered_at TEXT
-);
-CREATE UNIQUE INDEX IF NOT EXISTS question_gates_open_job ON question_gates(job_id) WHERE state = 'open';
-CREATE INDEX IF NOT EXISTS question_gates_group ON question_gates(group_key, state);
-CREATE INDEX IF NOT EXISTS question_gates_job ON question_gates(job_id, created_at);
-CREATE TABLE IF NOT EXISTS application_answers (
-  job_id INTEGER NOT NULL,
-  match_key TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  question TEXT NOT NULL,
-  context TEXT NOT NULL,
-  options TEXT NOT NULL,
-  answer TEXT NOT NULL,
-  answered_at TEXT NOT NULL,
-  PRIMARY KEY(job_id, match_key)
-);
-CREATE TABLE IF NOT EXISTS standing_answers (
-  match_key TEXT PRIMARY KEY,
-  employer TEXT NOT NULL,
-  question TEXT NOT NULL,
-  context TEXT NOT NULL,
-  options TEXT NOT NULL,
-  answer TEXT NOT NULL,
-  source_gate_id TEXT NOT NULL,
-  answered_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS submit_approvals (
-  job_id INTEGER PRIMARY KEY,
-  gate_id TEXT NOT NULL,
-  summary TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  consumed_at TEXT
-);
-`);
+const DB_PATH = join(DATA, "app.db");
+const dbExisted = existsSync(DB_PATH);
+export const db = connectDatabase(DB_PATH, "create");
+const appliedMigrations = migrate(db);
 
 /*
  * found             scanned, not yet triaged
@@ -207,6 +103,48 @@ export const nextToPrep = () => jobsByStatus("triaged").sort((a, b) => openedAt(
 export const jobsByStatus = (status: Status, limit = 1000) =>
   db.query<Job, [string, number]>("SELECT * FROM jobs WHERE status = ? ORDER BY id LIMIT ?").all(status, limit);
 
+// Every job in any of the given statuses, oldest first.
+export const jobsInStatuses = (statuses: readonly Status[]) =>
+  db.query<Job, [string]>("SELECT * FROM jobs WHERE status IN (SELECT value FROM json_each(?)) ORDER BY id").all(JSON.stringify(statuses));
+
+// Jobs with a saved browser checkpoint, whatever their status.
+export const jobsWithCheckpoint = () => db.query<Job, []>("SELECT * FROM jobs WHERE fill_checkpoint IS NOT NULL").all();
+
+// Applications still waiting for an outcome, most recently submitted first.
+export const applicationsAwaitingOutcome = (limit = 300) =>
+  db.query<Job, [number]>("SELECT * FROM jobs WHERE status IN ('submitted', 'interview') ORDER BY submitted_at DESC LIMIT ?").all(limit);
+
+// ---- what the UI lists
+
+export type BoardJob = Pick<Job, "id" | "url" | "source" | "company" | "title" | "location" | "status" | "score" | "pending" | "note" | "found_at" | "posted_at" | "updated_at" | "submitted_at">;
+// Everything past triage, most recently touched first. Leaves out the long text columns.
+export const boardJobs = (limit = 500) =>
+  db
+    .query<BoardJob, [number]>(`
+      SELECT id, url, source, company, title, location, status, score, pending, note, found_at, posted_at, updated_at, submitted_at
+      FROM jobs
+      WHERE status NOT IN ('found', 'skipped')
+      ORDER BY updated_at DESC
+      LIMIT ?`)
+    .all(limit);
+
+export const statusCounts = (): Record<string, number> =>
+  Object.fromEntries(db.query<{ status: string; n: number }, []>("SELECT status, count(*) AS n FROM jobs GROUP BY status").all().map(r => [r.status, r.n]));
+
+// Other live jobs at the same employer.
+export const siblingJobs = (job: Pick<Job, "id" | "company_key">, limit = 20) =>
+  db
+    .query<Pick<Job, "id" | "title" | "status">, [number, string, number]>(`
+      SELECT id, title, status
+      FROM jobs
+      WHERE id != ? AND status NOT IN ('found', 'skipped') AND company_key = ?
+      ORDER BY updated_at DESC
+      LIMIT ?`)
+    .all(job.id, job.company_key ?? "", limit);
+
+export const jobSources = (jobId: number) =>
+  db.query<{ url: string; source: string; location: string | null }, [number]>("SELECT url, source, location FROM job_sources WHERE job_id = ?").all(jobId);
+
 // ---- duplicates: one row per (employer, role), however many boards, aggregators or locations list it
 //
 // Two postings are the same role when the employer matches and either the titles say the same thing
@@ -282,10 +220,14 @@ export function normalizeUrl(raw: string) {
     return raw;
   }
 }
-export const knownUrl = (raw: string) => {
-  const url = normalizeUrl(raw);
-  return !!db.query("SELECT 1 FROM jobs WHERE url = ? UNION SELECT 1 FROM job_sources WHERE url = ?").get(url, url);
-};
+// The job a (normalized) URL belongs to, as its own posting or as another listing of it.
+const jobIdForUrl = (url: string) =>
+  db.query<{ id: number }, [string, string]>("SELECT id FROM jobs WHERE url = ? UNION SELECT job_id FROM job_sources WHERE url = ?").get(url, url)?.id ?? null;
+export const knownUrl = (raw: string) => jobIdForUrl(normalizeUrl(raw)) !== null;
+
+const addSource = (jobId: number, url: string, source: string, location: string | null) =>
+  db.query("INSERT OR IGNORE INTO job_sources (job_id, url, source, location) VALUES (?, ?, ?, ?)").run(jobId, url, source, location);
+const moveSources = (from: number, to: number) => db.query("UPDATE job_sources SET job_id = ? WHERE job_id = ?").run(to, from);
 
 const mergeLocation = (existing: string | null, extra: string | null) => {
   if (!extra) return existing;
@@ -300,9 +242,9 @@ const NOT_STARTED = ["found", "locating", "triaged", "held", "skipped", "awaitin
 function fold(into: Job, url: string, source: string, location: string | null, description: string | null) {
   if (AGGREGATORS.has(into.source) && !AGGREGATORS.has(source) && NOT_STARTED.includes(into.status)) {
     // The employer's own listing turned up for a job first seen on an aggregator: apply there instead.
-    db.query("INSERT OR IGNORE INTO job_sources (job_id, url, source, location) VALUES (?, ?, ?, ?)").run(into.id, into.url, into.source, into.location);
+    addSource(into.id, into.url, into.source, into.location);
     db.query("UPDATE jobs SET url = ?, source = ? WHERE id = ?").run(url, source, into.id);
-  } else db.query("INSERT OR IGNORE INTO job_sources (job_id, url, source, location) VALUES (?, ?, ?, ?)").run(into.id, url, source, location);
+  } else addSource(into.id, url, source, location);
   // Until it has been assessed, let the extra listing widen the location and fill a missing description.
   if (["found", "locating", "triaged"].includes(into.status))
     db.query("UPDATE jobs SET location = ?, description = COALESCE(description, ?) WHERE id = ?").run(mergeLocation(into.location, location), description, into.id);
@@ -319,7 +261,9 @@ export function insertJob(j: Pick<Job, "url" | "source" | "company" | "title" | 
   const twin = findTwin(j);
   if (twin) return fold(twin, url, j.source, j.location, j.description), null;
   const res = db
-    .query("INSERT INTO jobs (url, source, company, title, location, description, status, dedupe_key, company_key, posted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .query(`
+      INSERT INTO jobs (url, source, company, title, location, description, status, dedupe_key, company_key, posted_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(url, j.source, j.company, j.title, j.location, j.description, status, dedupeKey(j.company, j.title), companyKey(j.company), j.posted ?? null);
   emit({ type: "job", jobId: Number(res.lastInsertRowid) });
   return Number(res.lastInsertRowid);
@@ -337,15 +281,15 @@ function deleteJob(id: number) {
 // a job here, this one is folded into it instead.
 export function relocateJob(job: Job, rawUrl: string, description: string | null): "moved" | "merged" {
   const url = normalizeUrl(rawUrl);
-  const other = db.query<{ id: number }, [string, string]>("SELECT id FROM jobs WHERE url = ? UNION SELECT job_id FROM job_sources WHERE url = ?").get(url, url);
-  if (other && other.id !== job.id) {
-    db.query("INSERT OR IGNORE INTO job_sources (job_id, url, source, location) VALUES (?, ?, ?, ?)").run(other.id, job.url, job.source, job.location);
-    db.query("UPDATE job_sources SET job_id = ? WHERE job_id = ?").run(other.id, job.id);
+  const other = jobIdForUrl(url);
+  if (other !== null && other !== job.id) {
+    addSource(other, job.url, job.source, job.location);
+    moveSources(job.id, other);
     deleteJob(job.id);
-    emit({ type: "job", jobId: other.id });
+    emit({ type: "job", jobId: other });
     return "merged";
   }
-  db.query("INSERT OR IGNORE INTO job_sources (job_id, url, source, location) VALUES (?, ?, ?, ?)").run(job.id, job.url, job.source, job.location);
+  addSource(job.id, job.url, job.source, job.location);
   updateJob(job.id, { url, description: description || job.description, status: "triaged", note: null });
   return "moved";
 }
@@ -354,7 +298,8 @@ export function relocateJob(job: Job, rawUrl: string, description: string | null
 const DEDUPE_VERSION = "2";
 export function dedupeExisting() {
   const stale = kvGet("dedupe.version") !== DEDUPE_VERSION;
-  for (const j of db.query<Job, []>(`SELECT * FROM jobs ${stale ? "" : "WHERE company_key IS NULL"}`).all())
+  const unkeyed = stale ? db.query<Job, []>("SELECT * FROM jobs").all() : db.query<Job, []>("SELECT * FROM jobs WHERE company_key IS NULL").all();
+  for (const j of unkeyed)
     db.query("UPDATE jobs SET dedupe_key = ?, company_key = ? WHERE id = ?").run(dedupeKey(j.company, j.title), companyKey(j.company), j.id);
   kvSet("dedupe.version", DEDUPE_VERSION);
   // Only rows nothing has acted on yet may be folded away; the most advanced row of a set is kept.
@@ -370,7 +315,7 @@ export function dedupeExisting() {
         continue;
       }
       fold(twin, r.url, r.source, r.location, r.description);
-      db.query("UPDATE job_sources SET job_id = ? WHERE job_id = ?").run(twin.id, r.id);
+      moveSources(r.id, twin.id);
       deleteJob(r.id);
       merged++;
     }
@@ -378,18 +323,71 @@ export function dedupeExisting() {
   if (merged) logEvent("system", `Folded ${merged} duplicate postings into existing jobs`);
 }
 
-export function updateJob(id: number, fields: Partial<Omit<Job, "id">>) {
-  const keys = Object.keys(fields) as (keyof typeof fields)[];
+// Every column a caller may set. `id` never changes and `updated_at` is stamped on every write.
+export type JobFields = Partial<Omit<Job, "id" | "updated_at">>;
+const WRITABLE_JOB_COLUMNS: Record<keyof JobFields, true> = {
+  url: true, source: true, company: true, title: true, location: true, description: true, status: true, score: true,
+  rationale: true, concerns: true, resume_changes: true, pending: true, note: true, found_at: true, posted_at: true,
+  submitted_at: true, resume_sha: true, resume_frozen_at: true, dedupe_key: true, company_key: true, approved_by: true,
+  checklist: true, practice_assessment: true, fill_checkpoint: true,
+};
+
+// Writes the given columns without telling listeners. For callers inside a transaction, which call
+// notifyJobChange themselves once it has committed; everything else uses updateJob.
+export function writeJob(id: number, fields: JobFields) {
+  const keys = Object.keys(fields) as (keyof JobFields)[];
   if (!keys.length) return;
+  // Column names cannot be bound as parameters, so only known ones ever reach the statement.
+  const unknown = keys.filter(k => !Object.hasOwn(WRITABLE_JOB_COLUMNS, k));
+  if (unknown.length) throw new Error(`Not a writable jobs column: ${unknown.join(", ")}`);
   const sets = keys.map(k => `${k} = ?`).join(", ");
   db.query(`UPDATE jobs SET ${sets}, updated_at = datetime('now') WHERE id = ?`).run(...keys.map(k => fields[k] ?? null), id);
+}
+
+export function updateJob(id: number, fields: JobFields) {
+  if (!Object.keys(fields).length) return;
+  writeJob(id, fields);
   emit({ type: "job", jobId: id });
 }
+
+// The current time as datetime('now') writes it, for columns that are otherwise stamped in SQL.
+export const sqlNow = () => new Date().toISOString().slice(0, 19).replace("T", " ");
+
+// A prep worker does not survive a restart: its jobs go back in the queue.
+export const requeueInterruptedPrep = () => db.query("UPDATE jobs SET status = 'triaged' WHERE status = 'prepping'").run().changes;
+
+// Sends held jobs back through triage. Returns how many.
+export const releaseHeldJobs = () =>
+  db.query("UPDATE jobs SET status = 'found', note = NULL, updated_at = datetime('now') WHERE status = 'held'").run().changes;
+
+// ---- events
+
+export interface EventRow { id: number; job_id: number | null; worker: string | null; kind: string; message: string; at: string }
 
 export function logEvent(kind: string, message: string, jobId?: number | null, worker?: string) {
   db.query("INSERT INTO events (job_id, worker, kind, message) VALUES (?, ?, ?, ?)").run(jobId ?? null, worker ?? null, kind, message.slice(0, 4000));
   emit(jobId == null ? { type: "event" } : { type: "event", jobId });
 }
+
+export const recentEvents = (limit = 150) =>
+  db.query<EventRow, [number]>("SELECT id, job_id, worker, kind, message, at FROM events ORDER BY id DESC LIMIT ?").all(limit);
+
+// Without the agents' step-by-step chatter: what a person scanning the feed cares about.
+export const highlightEvents = (limit = 80) =>
+  db
+    .query<Omit<EventRow, "worker"> & { company: string | null; title: string | null }, [number]>(`
+      SELECT e.id, e.job_id, e.kind, e.message, e.at, j.company, j.title
+      FROM events e
+      LEFT JOIN jobs j ON j.id = e.job_id
+      WHERE e.kind NOT IN ('step', 'tool', 'agent')
+      ORDER BY e.id DESC
+      LIMIT ?`)
+    .all(limit);
+
+export const jobEvents = (jobId: number, limit = 200) =>
+  db.query<Pick<EventRow, "worker" | "kind" | "message" | "at">, [number, number]>("SELECT worker, kind, message, at FROM events WHERE job_id = ? ORDER BY id DESC LIMIT ?").all(jobId, limit);
+
+// ---- kv: small durable values keyed by name
 
 export const kvGet = (key: string) => db.query<{ value: string }, [string]>("SELECT value FROM kv WHERE key = ?").get(key)?.value ?? null;
 export const kvSet = (key: string, value: string) =>
@@ -398,3 +396,6 @@ export const kvDelete = (key: string) => db.query("DELETE FROM kv WHERE key = ?"
 // Every entry whose key starts with `prefix`, oldest first.
 export const kvEntries = (prefix: string) =>
   db.query<{ key: string; value: string }, [string, string]>("SELECT key, value FROM kv WHERE substr(key, 1, length(?)) = ? ORDER BY rowid").all(prefix, prefix);
+
+// A fresh database has nothing worth telling; an existing one records what changed under it.
+if (dbExisted) for (const migration of appliedMigrations) logEvent("system", `Database schema upgraded to version ${migration.version} (${migration.name})`);

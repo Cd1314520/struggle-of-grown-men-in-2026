@@ -5,6 +5,7 @@
   "scripts": {
     "start": "bun src/server.ts",
     "dev": "bun --watch src/server.ts",
+    "migrate": "bun scripts/migrate.ts",
     "reassess-backlog": "bun scripts/reassess-backlog.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

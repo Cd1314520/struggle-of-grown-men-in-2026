@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
+import { openDatabase } from "../src/schema";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
@@ -89,45 +90,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
       "utf8"
     );
 
-    const db = new Database(dbPath, { create: true });
-    db.run(`
-      CREATE TABLE jobs (
-        id INTEGER PRIMARY KEY,
-        url TEXT NOT NULL UNIQUE,
-        source TEXT NOT NULL,
-        company TEXT NOT NULL,
-        title TEXT NOT NULL,
-        location TEXT,
-        description TEXT,
-        status TEXT NOT NULL DEFAULT 'found',
-        score INTEGER,
-        rationale TEXT,
-        concerns TEXT,
-        resume_changes TEXT,
-        pending TEXT,
-        note TEXT,
-        found_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-        submitted_at TEXT,
-        resume_sha TEXT,
-        resume_frozen_at TEXT,
-        checklist TEXT,
-        dedupe_key TEXT,
-        company_key TEXT,
-        posted_at TEXT,
-        approved_by TEXT,
-        practice_assessment TEXT
-      );
-
-      CREATE TABLE events (
-        id INTEGER PRIMARY KEY,
-        job_id INTEGER,
-        worker TEXT,
-        kind TEXT NOT NULL,
-        message TEXT NOT NULL,
-        at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-    `);
+    const db = openDatabase(dbPath, "migrate");
     db.close();
 
     const defaultOpts: CliOptions = {

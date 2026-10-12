@@ -1,0 +1,388 @@
+import { afterEach, describe, expect, it } from "bun:test";
+import { Database } from "bun:sqlite";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { runMigrate } from "../scripts/migrate";
+import { MIGRATIONS, SCHEMA_VERSION, assertSchemaCurrent, connectDatabase, migrate, openDatabase, schemaVersion, type Migration } from "../src/schema";
+import { BEFORE_COMPANY_KEYS_SCHEMA, FIRST_VERSION_SCHEMA, createLegacyDatabase } from "./fixtures/legacy-db";
+
+const TABLES = [
+  "accounts", "application_answers", "events", "job_sources", "jobs", "kv", "question_digest_deliveries",
+  "question_digest_notified", "question_gates", "standing_answers", "submit_approvals",
+];
+
+const dirs: string[] = [];
+const open: Database[] = [];
+function tempPath() {
+  const dir = mkdtempSync(join(tmpdir(), "auto-apply-schema-"));
+  dirs.push(dir);
+  return join(dir, "app.db");
+}
+function track<T extends Database>(db: T): T {
+  open.push(db);
+  return db;
+}
+const memory = () => track(new Database(":memory:"));
+afterEach(() => {
+  for (const db of open.splice(0)) db.close();
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+const tableNames = (db: Database) =>
+  db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(r => r.name);
+
+// SQLite stores a definition exactly as it was typed; indentation is not part of the schema.
+const flat = (sql: string | null | undefined) => sql?.replace(/\s+/g, " ").trim() ?? null;
+
+// Everything that defines how the database behaves, in a form two databases can be compared by.
+// jobs is compared by column rather than by its CREATE text: ADD COLUMN leaves different text behind.
+function shape(db: Database) {
+  const tables = Object.fromEntries(tableNames(db).map(name => [name, {
+    columns: db
+      .query<{ name: string; type: string; notnull: number; dflt_value: string | null; pk: number }, [string]>(
+        "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info(?) ORDER BY name")
+      .all(name),
+    sql: name === "jobs" ? null : flat(db.query<{ sql: string }, [string]>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)?.sql),
+  }]));
+  const indexes = db
+    .query<{ name: string; tbl_name: string; sql: string | null }, []>("SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' ORDER BY name")
+    .all()
+    .map(index => ({ ...index, sql: flat(index.sql) }));
+  return { tables, indexes };
+}
+
+function freshShape() {
+  const db = memory();
+  migrate(db);
+  return shape(db);
+}
+
+describe("schema migrations", () => {
+  it("numbers migrations 1..N with distinct names", () => {
+    expect(MIGRATIONS.map(m => m.version)).toEqual(MIGRATIONS.map((_, i) => i + 1));
+    expect(new Set(MIGRATIONS.map(m => m.name)).size).toBe(MIGRATIONS.length);
+    expect(SCHEMA_VERSION).toBe(MIGRATIONS.length);
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(1);
+  });
+
+  it("builds every table on an empty database and records the version", () => {
+    const db = memory();
+    expect(schemaVersion(db)).toBe(0);
+    expect(migrate(db).map(m => m.version)).toEqual(MIGRATIONS.map(m => m.version));
+    expect(schemaVersion(db)).toBe(SCHEMA_VERSION);
+    expect(tableNames(db)).toEqual(TABLES);
+  });
+
+  // The whole schema as a new database gets it. A new migration changes this on purpose (update the
+  // snapshot with \`bun test -u\`); a change with no new migration means a shipped one was edited.
+  it("produces exactly the recorded schema", () => {
+    const db = memory();
+    migrate(db);
+    const definitions = db
+      .query<{ sql: string }, []>("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type DESC, name")
+      .all()
+      .map(row => row.sql.split("\n").map(line => line.trim()).join("\n"));
+    expect(`version ${schemaVersion(db)}\n\n${definitions.join(";\n\n")};\n`).toMatchSnapshot();
+  });
+
+  it("does nothing the second time", () => {
+    const db = memory();
+    migrate(db);
+    const before = shape(db);
+    expect(migrate(db)).toEqual([]);
+    expect(shape(db)).toEqual(before);
+    expect(schemaVersion(db)).toBe(SCHEMA_VERSION);
+  });
+
+  it("keeps the constraints the app relies on", () => {
+    const db = memory();
+    migrate(db);
+    db.run("INSERT INTO jobs (id, url, source, company, title) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'Engineer')");
+    expect(db.query<{ status: string }, []>("SELECT status FROM jobs WHERE id = 1").get()?.status).toBe("found");
+    expect(() => db.run("INSERT INTO jobs (url, source, company, title) VALUES ('https://a.example/1', 'test', 'Acme', 'Engineer')")).toThrow(/UNIQUE/);
+    const gate = (id: string, state: string, kind = "question") =>
+      db.query("INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, created_at) VALUES (?, 1, ?, 'g', 'm', 'Acme', 't', 'c', '[]', ?, 'now')").run(id, kind, state);
+    gate("a", "open");
+    expect(() => gate("b", "open")).toThrow(/UNIQUE/); // one open gate per job
+    gate("c", "closed");
+    expect(() => gate("d", "parked")).toThrow(/CHECK/);
+    expect(() => gate("e", "closed", "survey")).toThrow(/CHECK/);
+    const delivery = (id: string, state: string) =>
+      db.query("INSERT INTO question_digest_deliveries (id, recipient, fingerprints, group_count, subject, body, state, created_at, attempt_at) VALUES (?, 'me@example.com', '[]', 1, 's', 'b', ?, 'now', 'now')").run(id, state);
+    delivery("one", "sending");
+    expect(() => delivery("two", "failed")).toThrow(/UNIQUE/); // one unsent delivery at a time
+    delivery("three", "sent");
+  });
+
+  describe("adopting a database from before versions were tracked", () => {
+    const legacy: [string, string][] = [
+      ["the first version of the app", FIRST_VERSION_SCHEMA],
+      ["a partly grown database", BEFORE_COMPANY_KEYS_SCHEMA],
+    ];
+    for (const [label, schema] of legacy) {
+      it(`brings ${label} to the same shape as a new database and keeps its rows`, () => {
+        const db = memory();
+        db.run(schema);
+        db.run(`
+          INSERT INTO jobs (id, url, source, company, title, status, score, note) VALUES (7, 'https://a.example/7', 'lever', 'Acme', 'Engineer', 'submitted', 81, 'sent');
+          INSERT INTO events (id, job_id, worker, kind, message) VALUES (3, 7, 'fill', 'step', 'clicked');
+          INSERT INTO kv (key, value) VALUES ('last.scan', '2026-10-01T00:00:00.000Z');
+          INSERT INTO accounts (domain, email, password) VALUES ('a.example', 'me@example.com', 'secret');
+        `);
+        expect(schemaVersion(db)).toBe(0);
+
+        migrate(db);
+
+        expect(schemaVersion(db)).toBe(SCHEMA_VERSION);
+        expect(shape(db)).toEqual(freshShape());
+        expect(db.query("SELECT id, url, status, score, note, fill_checkpoint, company_key FROM jobs").all()).toEqual([
+          { id: 7, url: "https://a.example/7", status: "submitted", score: 81, note: "sent", fill_checkpoint: null, company_key: null },
+        ]);
+        expect(db.query("SELECT id, job_id, worker, kind, message FROM events").all()).toEqual([{ id: 3, job_id: 7, worker: "fill", kind: "step", message: "clicked" }]);
+        expect(db.query("SELECT key, value FROM kv").all()).toEqual([{ key: "last.scan", value: "2026-10-01T00:00:00.000Z" }]);
+        expect(db.query("SELECT domain, email, password FROM accounts").all()).toEqual([{ domain: "a.example", email: "me@example.com", password: "secret" }]);
+      });
+    }
+
+    it("leaves a database that already has everything untouched apart from the version", () => {
+      const db = memory();
+      migrate(db);
+      db.run("INSERT INTO jobs (id, url, source, company, title, fill_checkpoint) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'Engineer', '{}')");
+      db.run("PRAGMA user_version = 0"); // as the live database was the day versioning arrived
+      const before = shape(db);
+
+      expect(migrate(db).map(m => m.name)).toEqual(MIGRATIONS.map(m => m.name));
+
+      expect(shape(db)).toEqual(before);
+      expect(schemaVersion(db)).toBe(SCHEMA_VERSION);
+      expect(db.query<{ n: number }, []>("SELECT count(*) AS n FROM jobs WHERE fill_checkpoint = '{}'").get()?.n).toBe(1);
+    });
+  });
+
+  describe("later migrations", () => {
+    const addPriority: Migration = {
+      version: SCHEMA_VERSION + 1,
+      name: "job priority",
+      up: db => {
+        db.run("ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0");
+        db.run("UPDATE jobs SET priority = 1 WHERE status = 'approved'");
+      },
+    };
+    const broken: Migration = {
+      version: SCHEMA_VERSION + 2,
+      name: "broken",
+      up: db => {
+        db.run("CREATE TABLE half_done (x TEXT)");
+        db.run("UPDATE jobs SET note = 'half done'");
+        db.run("INSERT INTO no_such_table VALUES (1)");
+      },
+    };
+    const seeded = () => {
+      const db = memory();
+      migrate(db);
+      db.run("INSERT INTO jobs (id, url, source, company, title, status, note) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'Engineer', 'approved', 'kept'), (2, 'https://a.example/2', 'test', 'Acme', 'Analyst', 'found', 'kept')");
+      return db;
+    };
+
+    it("applies only what is pending, in order, exactly once", () => {
+      const db = seeded();
+      expect(migrate(db, [...MIGRATIONS, addPriority]).map(m => m.name)).toEqual(["job priority"]);
+      expect(schemaVersion(db)).toBe(SCHEMA_VERSION + 1);
+      expect(db.query("SELECT id, priority FROM jobs ORDER BY id").all()).toEqual([{ id: 1, priority: 1 }, { id: 2, priority: 0 }]);
+      // Run again: a second ADD COLUMN would fail, so passing proves it was skipped.
+      expect(migrate(db, [...MIGRATIONS, addPriority])).toEqual([]);
+    });
+
+    it("rolls a failing migration back completely and keeps the ones before it", () => {
+      const db = seeded();
+      expect(() => migrate(db, [...MIGRATIONS, addPriority, broken])).toThrow(`Migration ${SCHEMA_VERSION + 2} (broken) failed and was rolled back: no such table: no_such_table`);
+      expect(schemaVersion(db)).toBe(SCHEMA_VERSION + 1);
+      expect(tableNames(db)).toEqual(TABLES);
+      expect(db.query("SELECT id, note, priority FROM jobs ORDER BY id").all()).toEqual([{ id: 1, note: "kept", priority: 1 }, { id: 2, note: "kept", priority: 0 }]);
+      expect(db.inTransaction).toBe(false);
+    });
+
+    it("refuses a database newer than the code and leaves it alone", () => {
+      const db = seeded();
+      migrate(db, [...MIGRATIONS, addPriority]);
+      const before = shape(db);
+      expect(() => migrate(db)).toThrow(`Database schema is version ${SCHEMA_VERSION + 1}, but this code only knows up to version ${SCHEMA_VERSION}`);
+      expect(shape(db)).toEqual(before);
+      expect(schemaVersion(db)).toBe(SCHEMA_VERSION + 1);
+    });
+
+    it("rejects a misnumbered list before touching the database", () => {
+      const db = memory();
+      expect(() => migrate(db, [...MIGRATIONS, { ...addPriority, version: SCHEMA_VERSION + 2 }])).toThrow(`must be version ${SCHEMA_VERSION + 1}, not ${SCHEMA_VERSION + 2}`);
+      expect(() => migrate(db, [{ version: 0, name: "zero", up: () => undefined }])).toThrow("must be version 1, not 0");
+      expect(schemaVersion(db)).toBe(0);
+      expect(tableNames(db)).toEqual([]);
+    });
+  });
+});
+
+describe("opening a database", () => {
+  it("migrate mode creates the file in WAL mode at the current version, and reopens it unchanged", () => {
+    const path = tempPath();
+    const db = track(openDatabase(path, "migrate"));
+    expect(schemaVersion(db)).toBe(SCHEMA_VERSION);
+    expect(db.query<{ journal_mode: string }, []>("PRAGMA journal_mode").get()?.journal_mode).toBe("wal");
+    expect(db.query<{ timeout: number }, []>("PRAGMA busy_timeout").get()?.timeout).toBe(5000);
+    db.run("INSERT INTO kv (key, value) VALUES ('k', 'v')");
+    db.close();
+    const again = track(openDatabase(path, "migrate"));
+    expect(again.query("SELECT key, value FROM kv").all()).toEqual([{ key: "k", value: "v" }]);
+  });
+
+  it("readonly and readwrite need an existing file and never create one", () => {
+    const path = tempPath();
+    for (const mode of ["readonly", "readwrite"] as const) {
+      expect(() => openDatabase(path, mode)).toThrow(`Database file not found: ${path}`);
+      expect(existsSync(path)).toBe(false);
+    }
+  });
+
+  it("readonly and readwrite refuse an older schema, say how to fix it, and change nothing", () => {
+    const path = tempPath();
+    createLegacyDatabase(path).close();
+    for (const mode of ["readonly", "readwrite"] as const)
+      expect(() => openDatabase(path, mode)).toThrow(`${path} schema is version 0, but this code needs version ${SCHEMA_VERSION}. Run \`bun run migrate\``);
+    const db = track(new Database(path, { readonly: true }));
+    expect(schemaVersion(db)).toBe(0);
+    expect(tableNames(db)).toEqual(["accounts", "events", "jobs", "kv"]);
+    expect(db.query<{ journal_mode: string }, []>("PRAGMA journal_mode").get()?.journal_mode).toBe("delete");
+  });
+
+  it("readonly and readwrite refuse a newer schema", () => {
+    const path = tempPath();
+    const db = openDatabase(path, "migrate");
+    db.run(`PRAGMA user_version = ${SCHEMA_VERSION + 1}`);
+    db.close();
+    for (const mode of ["readonly", "readwrite"] as const)
+      expect(() => openDatabase(path, mode)).toThrow(`only knows up to version ${SCHEMA_VERSION}`);
+    expect(() => openDatabase(path, "migrate")).toThrow(`only knows up to version ${SCHEMA_VERSION}`);
+  });
+
+  it("readonly cannot write; readwrite can", () => {
+    const path = tempPath();
+    openDatabase(path, "migrate").close();
+    const reader = track(openDatabase(path, "readonly"));
+    expect(() => reader.run("INSERT INTO kv (key, value) VALUES ('k', 'v')")).toThrow(/readonly/);
+    const writer = track(openDatabase(path, "readwrite"));
+    writer.run("INSERT INTO kv (key, value) VALUES ('k', 'v')");
+    expect(reader.query("SELECT value FROM kv WHERE key = 'k'").get()).toEqual({ value: "v" });
+  });
+
+  it("assertSchemaCurrent passes only at the exact version", () => {
+    const db = memory();
+    expect(() => { assertSchemaCurrent(db); }).toThrow("Database schema is version 0");
+    migrate(db);
+    assertSchemaCurrent(db);
+  });
+
+  it("connectDatabase configures the connection without touching the schema", () => {
+    const path = tempPath();
+    const db = track(connectDatabase(path, "create"));
+    expect(schemaVersion(db)).toBe(0);
+    expect(tableNames(db)).toEqual([]);
+    expect(db.query<{ journal_mode: string }, []>("PRAGMA journal_mode").get()?.journal_mode).toBe("wal");
+  });
+
+  it("opens a database that cannot use WAL without waiting on it", () => {
+    const started = Date.now();
+    const db = track(openDatabase(":memory:", "migrate"));
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(db.query<{ journal_mode: string }, []>("PRAGMA journal_mode").get()?.journal_mode).toBe("memory");
+    expect(schemaVersion(db)).toBe(SCHEMA_VERSION);
+  });
+
+  it("gives up switching to WAL after the busy timeout while another connection is reading", () => {
+    const path = tempPath();
+    const reader = track(new Database(path, { create: true }));
+    reader.run("CREATE TABLE t (x); INSERT INTO t VALUES (1)");
+    reader.run("BEGIN");
+    reader.query("SELECT * FROM t").all(); // holds a read lock on the rollback-journal database
+    const started = Date.now();
+    expect(() => connectDatabase(path, "readwrite")).toThrow(/locked/);
+    const waited = Date.now() - started;
+    expect(waited).toBeGreaterThanOrEqual(4500);
+    expect(waited).toBeLessThan(12000);
+    reader.run("ROLLBACK");
+    const db = track(connectDatabase(path, "readwrite"));
+    expect(db.query<{ journal_mode: string }, []>("PRAGMA journal_mode").get()?.journal_mode).toBe("wal");
+  }, 20000);
+
+  it("lets several processes start on a new database at once", async () => {
+    const path = tempPath();
+    const script = `
+      import { openDatabase, schemaVersion } from ${JSON.stringify(join(import.meta.dir, "../src/schema.ts"))};
+      const db = openDatabase(${JSON.stringify(path)}, "migrate");
+      db.run("INSERT INTO kv (key, value) VALUES (?, 'started')", [String(process.pid)]);
+      console.log(schemaVersion(db));
+      db.close();
+    `;
+    const children = Array.from({ length: 8 }, () => Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" }));
+    const results = await Promise.all(children.map(async child => ({
+      code: await child.exited,
+      out: (await new Response(child.stdout).text()).trim(),
+      err: await new Response(child.stderr).text(),
+    })));
+    expect(results.map(r => r.err).join("")).toBe("");
+    expect(results.map(r => r.code)).toEqual(children.map(() => 0));
+    expect(results.map(r => r.out)).toEqual(children.map(() => String(SCHEMA_VERSION)));
+    const db = track(openDatabase(path, "readonly"));
+    expect(db.query<{ n: number }, []>("SELECT count(*) AS n FROM kv").get()?.n).toBe(8);
+    expect(tableNames(db)).toEqual(TABLES);
+  });
+});
+
+describe("migrate command", () => {
+  it("reports status without changing the database", () => {
+    const path = tempPath();
+    createLegacyDatabase(path).close();
+    const report = runMigrate({ dbPath: path, status: true, silent: true });
+    expect(report).toEqual({ path, from: 0, to: 0, pending: MIGRATIONS.map(m => `${m.version} (${m.name})`), applied: false });
+    const db = track(new Database(path, { readonly: true }));
+    expect(schemaVersion(db)).toBe(0);
+  });
+
+  it("upgrades an old database, then reports it up to date", () => {
+    const path = tempPath();
+    const legacy = createLegacyDatabase(path, BEFORE_COMPANY_KEYS_SCHEMA);
+    legacy.run("INSERT INTO jobs (id, url, source, company, title) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'Engineer')");
+    legacy.close();
+
+    expect(runMigrate({ dbPath: path, silent: true })).toMatchObject({ from: 0, to: SCHEMA_VERSION, applied: true });
+    expect(runMigrate({ dbPath: path, silent: true })).toEqual({ path, from: SCHEMA_VERSION, to: SCHEMA_VERSION, pending: [], applied: false });
+
+    const db = track(openDatabase(path, "readonly"));
+    expect(shape(db)).toEqual(freshShape());
+    expect(db.query<{ n: number }, []>("SELECT count(*) AS n FROM jobs").get()?.n).toBe(1);
+  });
+
+  it("fails clearly on a missing file or a database newer than the code", () => {
+    const path = tempPath();
+    expect(() => runMigrate({ dbPath: path, silent: true })).toThrow(`Database file not found: ${path}`);
+    expect(existsSync(path)).toBe(false);
+    const db = openDatabase(path, "migrate");
+    db.run(`PRAGMA user_version = ${SCHEMA_VERSION + 3}`);
+    db.close();
+    expect(() => runMigrate({ dbPath: path, silent: true })).toThrow(`is at schema version ${SCHEMA_VERSION + 3}`);
+    expect(() => runMigrate({ dbPath: path, status: true, silent: true })).toThrow(`is at schema version ${SCHEMA_VERSION + 3}`);
+  });
+
+  it("runs from the command line and exits non-zero on failure", () => {
+    const path = tempPath();
+    createLegacyDatabase(path).close();
+    const cli = (...args: string[]) => {
+      const child = Bun.spawnSync([process.execPath, join(import.meta.dir, "../scripts/migrate.ts"), ...args], { stdout: "pipe", stderr: "pipe" });
+      return { code: child.exitCode, out: child.stdout.toString(), err: child.stderr.toString() };
+    };
+    expect(cli("--status", "--db", path)).toEqual({ code: 0, out: `${path}: schema version 0 of ${SCHEMA_VERSION}; pending: ${MIGRATIONS.map(m => `${m.version} (${m.name})`).join(", ")}\n`, err: "" });
+    expect(cli("--db", path)).toMatchObject({ code: 0, err: "" });
+    expect(cli("--db", path)).toEqual({ code: 0, out: `${path}: schema version ${SCHEMA_VERSION} of ${SCHEMA_VERSION}; up to date\n`, err: "" });
+    expect(cli("--db", `${path}.missing`)).toEqual({ code: 1, out: "", err: `Database file not found: ${path}.missing\n` });
+    expect(cli("--bogus")).toMatchObject({ code: 1, out: "" });
+  });
+});

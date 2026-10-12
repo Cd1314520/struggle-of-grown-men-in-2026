@@ -32,30 +32,11 @@ interface Delivery {
   error: string | null;
 }
 
-// The ledger is independent of gate lifetime. Closing or adding jobs cannot erase delivery proof.
-db.run(`
-CREATE TABLE IF NOT EXISTS question_digest_deliveries (
-  id TEXT PRIMARY KEY,
-  recipient TEXT NOT NULL,
-  fingerprints TEXT NOT NULL,
-  group_count INTEGER NOT NULL,
-  subject TEXT NOT NULL,
-  body TEXT NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('sending', 'uncertain', 'failed', 'sent')),
-  created_at TEXT NOT NULL,
-  attempt_at TEXT NOT NULL,
-  sent_at TEXT,
-  gmail_id TEXT,
-  error TEXT
-);
-CREATE UNIQUE INDEX IF NOT EXISTS question_digest_one_pending
-  ON question_digest_deliveries ((1)) WHERE state != 'sent';
-CREATE TABLE IF NOT EXISTS question_digest_notified (
-  fingerprint TEXT PRIMARY KEY,
-  delivery_id TEXT NOT NULL,
-  sent_at TEXT NOT NULL
-);
-`);
+// ---- statements used in more than one place. Nothing outside this module touches the digest ledger.
+const lastSent = () => db.query<{ sent_at: string }, []>("SELECT sent_at FROM question_digest_deliveries WHERE state = 'sent' ORDER BY sent_at DESC LIMIT 1").get();
+// Never overwrites a delivery that has since been proven sent.
+const markUnsent = (id: string, state: "uncertain" | "failed", error: string) =>
+  db.query("UPDATE question_digest_deliveries SET state = ?, error = ? WHERE id = ? AND state != 'sent'").run(state, error, id);
 
 const RETRY_INTERVAL_MS = 5 * 60_000;
 let inFlight = false;
@@ -122,7 +103,7 @@ function plaintext(groups: QuestionGroup[], deliveryId: string): string {
 export function digestStatus(): DigestStatus {
   const cfg = settings();
   const latest = db.query<Delivery, []>("SELECT * FROM question_digest_deliveries ORDER BY created_at DESC, rowid DESC LIMIT 1").get();
-  const sent = db.query<{ sent_at: string }, []>("SELECT sent_at FROM question_digest_deliveries WHERE state = 'sent' ORDER BY sent_at DESC LIMIT 1").get();
+  const sent = lastSent();
   const undeliveredGroups = unnotifiedGroups().length;
   const address = recipient();
   return {
@@ -176,7 +157,7 @@ async function deliver(options: { force?: boolean; now?: Date }): Promise<Result
       return { delivery: active, reconcile };
     }
     if (!options.force) {
-      const last = db.query<{ sent_at: string }, []>("SELECT sent_at FROM question_digest_deliveries WHERE state = 'sent' ORDER BY sent_at DESC LIMIT 1").get();
+      const last = lastSent();
       if (last && localClock(new Date(last.sent_at), cfg.timeZone).date >= clock.date)
         return { sent: false, groups: 0, reason: "already_sent_today" };
     }
@@ -194,10 +175,11 @@ async function deliver(options: { force?: boolean; now?: Date }): Promise<Result
       body: plaintext(groups.map(item => item.group), id),
       state: "sending", created_at: timestamp, attempt_at: timestamp, sent_at: null, gmail_id: null, error: null,
     };
-    db.query(`INSERT INTO question_digest_deliveries
-      (id, recipient, fingerprints, group_count, subject, body, state, created_at, attempt_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(delivery.id, delivery.recipient, delivery.fingerprints,
-        delivery.group_count, delivery.subject, delivery.body, delivery.state, delivery.created_at, delivery.attempt_at);
+    db
+      .query(`
+        INSERT INTO question_digest_deliveries (id, recipient, fingerprints, group_count, subject, body, state, created_at, attempt_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(delivery.id, delivery.recipient, delivery.fingerprints, delivery.group_count, delivery.subject, delivery.body, delivery.state, delivery.created_at, delivery.attempt_at);
     return { delivery, reconcile: false };
   }).immediate();
   if (!("delivery" in claimed)) return claimed;
@@ -208,7 +190,7 @@ async function deliver(options: { force?: boolean; now?: Date }): Promise<Result
       if (!match) {
         // Search indexing can lag. Absence is not proof of rejection, even after a restart.
         const error = "Send outcome is unknown; no matching self-message in Sent yet. Automatic resend is blocked to avoid duplicates.";
-        db.query("UPDATE question_digest_deliveries SET state = 'uncertain', error = ? WHERE id = ? AND state != 'sent'").run(error, delivery.id);
+        markUnsent(delivery.id, "uncertain", error);
         kvSet("questionDigest.error", error);
         return { sent: false, groups: delivery.group_count, messageId: delivery.id, reason: "delivery_uncertain" };
       }
@@ -221,7 +203,7 @@ async function deliver(options: { force?: boolean; now?: Date }): Promise<Result
   } catch (error) {
     const message = error instanceof Error ? error.message : "Digest delivery failed";
     const state = reconcile || !(error instanceof GmailSendError) || error.ambiguous ? "uncertain" : "failed";
-    db.query("UPDATE question_digest_deliveries SET state = ?, error = ? WHERE id = ? AND state != 'sent'").run(state, message, delivery.id);
+    markUnsent(delivery.id, state, message);
     kvSet("questionDigest.error", message);
     throw error;
   }

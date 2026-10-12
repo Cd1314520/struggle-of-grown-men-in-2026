@@ -4,7 +4,7 @@ import { feedNames, loadCompanies } from "./ats";
 import { isBoardUrl } from "./boards";
 import { screenshot, tabs } from "./chrome";
 import { browserCount, config, jobDir, PROFILE, ROOT, STOCK_MAIN, vncUrl } from "./config";
-import { db, getJob, insertJob, openedAt, kvGet, kvSet, logEvent, onChange, updateJob, type Job } from "./db";
+import { boardJobs, getJob, highlightEvents, insertJob, jobEvents, jobSources, kvGet, kvSet, logEvent, onChange, openedAt, recentEvents, releaseHeldJobs, siblingJobs, statusCounts, updateJob, type Job } from "./db";
 import * as gmail from "./gmail";
 import { startCdpProxy } from "./cdp-proxy";
 import { killAllWorkers } from "./omp";
@@ -38,22 +38,10 @@ function resumeDiff(job: Job) {
 }
 
 function state() {
-  const jobs = db
-    .query<Job, []>(
-      "SELECT id, url, source, company, title, location, status, score, pending, note, found_at, posted_at, updated_at, submitted_at FROM jobs WHERE status NOT IN ('found', 'skipped') ORDER BY updated_at DESC LIMIT 500",
-    )
-    .all()
-    .map(j => ({ ...j, opened_at: openedAt(j) }));
-  const counts = Object.fromEntries(
-    db.query<{ status: string; n: number }, []>("SELECT status, count(*) n FROM jobs GROUP BY status").all().map(r => [r.status, r.n]),
-  );
-  const events = db.query("SELECT id, job_id, worker, kind, message, at FROM events ORDER BY id DESC LIMIT 150").all();
-  // Without the agents' step-by-step chatter: what a person scanning the feed cares about.
-  const highlights = db
-    .query(
-      "SELECT e.id, e.job_id, e.kind, e.message, e.at, j.company, j.title FROM events e LEFT JOIN jobs j ON j.id = e.job_id WHERE e.kind NOT IN ('step', 'tool', 'agent') ORDER BY e.id DESC LIMIT 80",
-    )
-    .all();
+  const jobs = boardJobs().map(j => ({ ...j, opened_at: openedAt(j) }));
+  const counts = statusCounts();
+  const events = recentEvents();
+  const highlights = highlightEvents();
   return {
     jobs,
     counts,
@@ -194,12 +182,10 @@ const server = Bun.serve({
       if (!job) return fail("no such job", 404);
       const sub = jobMatch[2];
       if (!sub) {
-        const events = db.query("SELECT worker, kind, message, at FROM events WHERE job_id = ? ORDER BY id DESC LIMIT 200").all(job.id);
+        const events = jobEvents(job.id);
         const files = resumeFiles(job.id, job.resume_sha);
-        const sources = db.query("SELECT url, source, location FROM job_sources WHERE job_id = ?").all(job.id);
-        const siblings = db
-          .query("SELECT id, title, status FROM jobs WHERE id != ? AND status NOT IN ('found', 'skipped') AND company_key = ? ORDER BY updated_at DESC LIMIT 20")
-          .all(job.id, job.company_key ?? "");
+        const sources = jobSources(job.id);
+        const siblings = siblingJobs(job);
         const gate = getOpenGate(job.id);
         const checkpoint = readCheckpoint(job.id);
         // Historical slot assignments are not ownership: ordinary parked browsers are reused.
@@ -286,7 +272,7 @@ const server = Bun.serve({
         void scan({ discover: what === "discover" });
       } else if (what === "release_held") {
         // back through triage, which now judges them against the current phase
-        const n = db.query("UPDATE jobs SET status = 'found', note = NULL, updated_at = datetime('now') WHERE status = 'held'").run().changes;
+        const n = releaseHeldJobs();
         logEvent("user", `released ${n} held jobs for re-triage`);
         void scan();
       } else if (what === "track") void track();

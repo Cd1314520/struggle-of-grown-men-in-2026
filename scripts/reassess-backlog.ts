@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
-import { Database } from "bun:sqlite";
-import { existsSync } from "node:fs";
+import type { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { DATA } from "../src/config";
 import { parsePracticeAssessment } from "../src/practice";
+import { openDatabase } from "../src/schema";
 
 export interface ReassessmentSummary {
   totalJobs: number;
@@ -53,10 +53,6 @@ const CANDIDATE_STATUSES: Record<string, true> = {
 };
 
 function selectAndFilter(db: Database) {
-  // Support legacy DB safely before db.ts migration runs
-  const cols = new Set(db.query<{ name: string }, []>("PRAGMA table_info(jobs)").all().map(c => c.name));
-  const hasPracticeCol = cols.has("practice_assessment");
-
   const feedbackRows = db.query<{ key: string }, []>("SELECT key FROM kv WHERE key LIKE 'feedback.%'").all();
   const feedbackIds = new Set<number>();
   for (const r of feedbackRows) {
@@ -64,11 +60,12 @@ function selectAndFilter(db: Database) {
     if (Number.isFinite(id)) feedbackIds.add(id);
   }
 
-  const querySql = hasPracticeCol
-    ? "SELECT id, company, title, status, score, checklist, approved_by, resume_sha, resume_frozen_at, submitted_at, practice_assessment FROM jobs ORDER BY id"
-    : "SELECT id, company, title, status, score, checklist, approved_by, resume_sha, resume_frozen_at, submitted_at, NULL as practice_assessment FROM jobs ORDER BY id";
-
-  const allJobs = db.query<JobRow, []>(querySql).all();
+  const allJobs = db
+    .query<JobRow, []>(`
+      SELECT id, company, title, status, score, checklist, approved_by, resume_sha, resume_frozen_at, submitted_at, practice_assessment
+      FROM jobs
+      ORDER BY id`)
+    .all();
 
   const eligibleJobs: JobRow[] = [];
   const eligibleByStatus: Record<string, number> = {};
@@ -87,7 +84,7 @@ function selectAndFilter(db: Database) {
     }
 
     // Skip rows that already have a current valid practice assessment
-    if (hasPracticeCol && parsePracticeAssessment(j.practice_assessment) !== null) {
+    if (parsePracticeAssessment(j.practice_assessment) !== null) {
       excludedByReason["already_has_practice_assessment"] = (excludedByReason["already_has_practice_assessment"] ?? 0) + 1;
       continue;
     }
@@ -116,7 +113,7 @@ function selectAndFilter(db: Database) {
     eligibleByStatus[j.status] = (eligibleByStatus[j.status] ?? 0) + 1;
   }
 
-  return { allJobs, eligibleJobs, eligibleByStatus, excludedByReason, hasPracticeCol };
+  return { allJobs, eligibleJobs, eligibleByStatus, excludedByReason };
 }
 
 export function runReassessment(options: { apply?: boolean; dbPath?: string; silent?: boolean } = {}): ReassessmentSummary {
@@ -124,47 +121,29 @@ export function runReassessment(options: { apply?: boolean; dbPath?: string; sil
   const apply = !!options.apply;
   const silent = !!options.silent;
 
-  if (!existsSync(dbPath)) {
-    throw new Error(`Database file not found: ${dbPath}`);
-  }
-
-  const db = new Database(dbPath, apply ? { readwrite: true } : { readonly: true });
+  // Refuses a database that is not at this code's schema version; it never upgrades one itself.
+  const db = openDatabase(dbPath, apply ? "readwrite" : "readonly");
   try {
-    if (apply) {
-      db.run("PRAGMA journal_mode = WAL");
-    }
   // In apply mode, selection and writes run inside the same transaction
-  const { allJobs, eligibleJobs, eligibleByStatus, excludedByReason, hasPracticeCol } = apply
+  const { allJobs, eligibleJobs, eligibleByStatus, excludedByReason } = apply
     ? db.transaction(() => {
       const filtered = selectAndFilter(db);
 
       if (filtered.eligibleJobs.length > 0) {
-        const updateSql = filtered.hasPracticeCol
-          ? `UPDATE jobs
-             SET status = 'triaged',
-                 score = NULL,
-                 checklist = NULL,
-                 practice_assessment = NULL,
-                 approved_by = NULL,
-                 rationale = NULL,
-                 concerns = NULL,
-                 resume_changes = NULL,
-                 note = 'reassessment: requeued for fresh practice prep',
-                 updated_at = datetime('now')
-             WHERE id = ? AND status = ?`
-          : `UPDATE jobs
-             SET status = 'triaged',
-                 score = NULL,
-                 checklist = NULL,
-                 approved_by = NULL,
-                 rationale = NULL,
-                 concerns = NULL,
-                 resume_changes = NULL,
-                 note = 'reassessment: requeued for fresh practice prep',
-                 updated_at = datetime('now')
-             WHERE id = ? AND status = ?`;
-
-        const updateStmt = db.prepare(updateSql);
+        const updateStmt = db.prepare(`
+          UPDATE jobs
+          SET status = 'triaged',
+              score = NULL,
+              checklist = NULL,
+              practice_assessment = NULL,
+              approved_by = NULL,
+              rationale = NULL,
+              concerns = NULL,
+              resume_changes = NULL,
+              note = 'reassessment: requeued for fresh practice prep',
+              updated_at = datetime('now')
+          WHERE id = ? AND status = ?
+        `);
         const logEventStmt = db.prepare(`
           INSERT INTO events (job_id, worker, kind, message)
           VALUES (?, 'migration', 'migration', 'Requeued old assessed job for fresh practice prep')
@@ -193,7 +172,7 @@ export function runReassessment(options: { apply?: boolean; dbPath?: string; sil
   if (!silent) {
     console.log(`=== Backlog Reassessment CLI ===`);
     console.log(`Mode:    ${apply ? "APPLY (writing changes)" : "DRY-RUN (no changes made)"}`);
-    console.log(`DB:      ${dbPath} (practice column: ${hasPracticeCol ? "present" : "legacy/none"})`);
+    console.log(`DB:      ${dbPath}`);
     console.log(`Total jobs in DB:         ${allJobs.length}`);
     console.log(`Eligible to requeue:      ${eligibleJobs.length}`);
     for (const [st, cnt] of Object.entries(eligibleByStatus)) {

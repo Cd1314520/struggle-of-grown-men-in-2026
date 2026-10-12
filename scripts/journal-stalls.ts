@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { openDatabase } from "../src/schema";
 
 export const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 export const DEFAULT_DB_PATH = join(REPO_ROOT, "data", "app.db");
@@ -431,28 +432,28 @@ export function observeAutoApplyActivity(
     }
 
     const uniqueJobIds = Array.from(new Set(intervals.map((inv) => inv.jobId)));
-    const jobsSql = `
+    // One bound JSON array stands in for the id list, so no value is ever spliced into the SQL.
+    const jobIdList = JSON.stringify(uniqueJobIds);
+    const eligibleJobRows = db.query<JobRow, [string]>(`
       SELECT id, company, title, status, approved_by, submitted_at, pending, updated_at
       FROM jobs
-      WHERE id IN (${uniqueJobIds.join(",")})
-    `;
-    const eligibleJobRows = db.query<JobRow, []>(jobsSql).all();
+      WHERE id IN (SELECT value FROM json_each(?))
+    `).all(jobIdList);
 
     // 4. Retrieve candidate question gates strictly under worker = 'fill'
-    const gatesSql = `
+    const allGates = db.query<EventRow, [string]>(`
       SELECT id, job_id, worker, kind, message, at
       FROM events
-      WHERE kind = 'gate' AND worker = 'fill' AND job_id IN (${uniqueJobIds.join(",")})
+      WHERE kind = 'gate' AND worker = 'fill' AND job_id IN (SELECT value FROM json_each(?))
       ORDER BY id ASC
-    `;
-    const allGates = db.query<EventRow, []>(gatesSql).all();
+    `).all(jobIdList);
 
     // 5. Retrieve non-KB blockers: manual stalls, confirm_submit gates, fill worker errors and report failures
-    const blockersSql = `
+    const otherBlockerEvents = db.query<EventRow, [string]>(`
       SELECT id, job_id, worker, kind, message, at
       FROM events
       WHERE worker = 'fill'
-        AND job_id IN (${uniqueJobIds.join(",")})
+        AND job_id IN (SELECT value FROM json_each(?))
         AND (
           (kind = 'gate' AND (message LIKE 'manual:%' OR message LIKE 'confirm_submit:%'))
           OR kind = 'error'
@@ -460,8 +461,7 @@ export function observeAutoApplyActivity(
           OR (kind = 'step' AND message LIKE '%failed%')
         )
       ORDER BY id ASC
-    `;
-    const otherBlockerEvents = db.query<EventRow, []>(blockersSql).all();
+    `).all(jobIdList);
 
     return {
       intervals,
@@ -928,7 +928,7 @@ function monitorOnce(options: CliOptions): MonitorResult {
     throw new Error(`Database file not found at: ${options.dbPath}`);
   }
 
-  const db = new Database(options.dbPath, { readonly: true });
+  const db = openDatabase(options.dbPath, "readonly");
   try {
     const state = loadState(options.statePath, options.journalPath);
     const existingContent = existsSync(options.journalPath)

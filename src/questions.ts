@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { db, getJob, notifyJobChange, type Job, type Status } from "./db";
+import { db, getJob, jobsInStatuses, notifyJobChange, sqlNow, writeJob, type Job, type Status } from "./db";
 import { clearFillFlags, clearManualLease, confirmNotSubmitted, isSubmitting, isVerifying, lastSlot, manualLeaseGate, queueDraftRecovery, queueVerification, setManualLease } from "./fill-state";
 
 export type GateKind = "question" | "cover_letter" | "confirm_submit" | "manual" | "submission_ambiguous";
@@ -17,6 +17,14 @@ interface GateRow {
   state: Gate["state"]; answer: string | null; scope: AnswerScope | null;
   created_at: string; answered_at: string | null; shot: number | null;
 }
+// ---- statements used in more than one place. Nothing outside this module touches these tables.
+const gateRow = (gateId: string) => db.query<GateRow, [string]>("SELECT * FROM question_gates WHERE id = ?").get(gateId);
+// At most one: question_gates_open_job is unique.
+const openGateRow = (jobId: number) => db.query<GateRow, [number]>("SELECT * FROM question_gates WHERE job_id = ? AND state = 'open'").get(jobId);
+const closeGate = (gateId: string) => db.query("UPDATE question_gates SET state = 'closed' WHERE id = ?").run(gateId);
+const closeOpenGate = (jobId: number) => db.query("UPDATE question_gates SET state = 'closed' WHERE job_id = ? AND state = 'open'").run(jobId);
+const unconsumedApproval = (jobId: number) => db.query<{ summary: string }, [number]>("SELECT summary FROM submit_approvals WHERE job_id = ? AND consumed_at IS NULL").get(jobId);
+
 const kinds: GateKind[] = ["question", "cover_letter", "confirm_submit", "manual", "submission_ambiguous"];
 const parkedStatus: Record<GateKind, Status> = { question: "needs_input", cover_letter: "needs_input", confirm_submit: "awaiting_submit", manual: "needs_manual", submission_ambiguous: "needs_manual" };
 const terminal: Status[] = ["submitted", "interview", "offer", "rejected_by_company", "rejected", "skipped", "held"];
@@ -75,7 +83,7 @@ function writeCheckpoint(job: Job, checkpoint: FillCheckpoint) {
   validateCheckpoint(checkpoint, job);
   // Select declared fields only; never persist arbitrary worker tool arguments.
   const { version, slot, tabId, url, step, notes, resumeSha, savedAt } = checkpoint;
-  db.query("UPDATE jobs SET fill_checkpoint = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify({ version, slot, tabId, url, step, notes, resumeSha, savedAt }), job.id);
+  writeJob(job.id, { fill_checkpoint: JSON.stringify({ version, slot, tabId, url, step, notes, resumeSha, savedAt }) });
 }
 export function recordCheckpoint(jobId: number, checkpoint: FillCheckpoint): void {
   db.transaction(() => { writeCheckpoint(requireJob(jobId), checkpoint); }).immediate();
@@ -89,30 +97,34 @@ export function readCheckpoint(jobId: number): FillCheckpoint | null {
   return checkpoint;
 }
 export function getGate(gateId: string): Gate | null {
-  const row = db.query<GateRow, [string]>("SELECT * FROM question_gates WHERE id = ?").get(gateId);
+  const row = gateRow(gateId);
   return row ? gate(row) : null;
 }
 export function getOpenGate(jobId: number): Gate | null {
   const job = getJob(jobId);
   if (!job) return null;
-  const row = db.query<GateRow, [number]>("SELECT * FROM question_gates WHERE job_id = ? AND state = 'open'").get(jobId);
+  const row = openGateRow(jobId);
   return row && isCurrent(row, job) ? gate(row) : null;
 }
 function park(jobId: number, input: GateInput, checkpoint: FillCheckpoint | null): Gate {
   const job = requireJob(jobId), key = identity(job, input);
   if (terminal.includes(job.status) || job.submitted_at) throw new Error("Cannot park a terminal application");
   if (isSubmitting(jobId) && input.kind !== "submission_ambiguous") throw new Error("Submission may have occurred; explicit inspection is required");
-  const existing = db.query<GateRow, [number]>("SELECT * FROM question_gates WHERE job_id = ? AND state = 'open'").get(jobId);
+  const existing = openGateRow(jobId);
   if (existing?.kind === "submission_ambiguous" && input.kind !== "submission_ambiguous") throw new Error("Resolve submission ambiguity before parking another gate");
   if ((input.kind === "manual" || input.kind === "submission_ambiguous") && !checkpoint && !job.fill_checkpoint) throw new Error("Interactive gates require a browser checkpoint");
   if (checkpoint) writeCheckpoint(job, checkpoint);
   if (existing && isCurrent(existing, job) && existing.match_key === key.matchKey) return gate(existing);
-  db.query("UPDATE question_gates SET state = 'closed' WHERE job_id = ? AND state = 'open'").run(jobId);
+  closeOpenGate(jobId);
   clearManualLease(jobId);
   if (input.kind !== "manual") invalidateApproval(jobId);
   const value: Gate = { id: randomUUID(), jobId, kind: input.kind, groupKey: key.groupKey, text: input.text, context: key.context, options: key.options, state: "open", answer: null, scope: null, createdAt: now(), answeredAt: null, shot: input.shot ?? null };
-  db.query(`INSERT INTO question_gates (id,job_id,kind,group_key,match_key,employer,text,context,options,legacy,standing_allowed,state,shot,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'open',?,?)`).run(value.id, jobId, input.kind, key.groupKey, key.matchKey, job.company, input.text, key.context, JSON.stringify(key.options), input.legacy ? 1 : 0, key.standingAllowed ? 1 : 0, value.shot, value.createdAt);
-  db.query("UPDATE jobs SET status = ?, pending = ?, updated_at = datetime('now') WHERE id = ?").run(parkedStatus[input.kind], payload(value), jobId);
+  db
+    .query(`
+      INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, legacy, standing_allowed, state, shot, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`)
+    .run(value.id, jobId, input.kind, key.groupKey, key.matchKey, job.company, input.text, key.context, JSON.stringify(key.options), input.legacy ? 1 : 0, key.standingAllowed ? 1 : 0, value.shot, value.createdAt);
+  writeJob(jobId, { status: parkedStatus[input.kind], pending: payload(value) });
   return value;
 }
 export function parkGate(jobId: number, input: GateInput, checkpoint: FillCheckpoint | null): Gate {
@@ -146,25 +158,36 @@ export function listQuestionGroups(): QuestionGroup[] {
 function saveAnswer(row: GateRow, answer: string, scope: AnswerScope, at: string) {
   if (row.kind === "question" || row.kind === "cover_letter") {
     invalidateApproval(row.job_id);
-    db.query(`INSERT INTO application_answers (job_id,match_key,kind,question,context,options,answer,answered_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(job_id,match_key) DO UPDATE SET answer = excluded.answer, answered_at = excluded.answered_at`).run(row.job_id, row.match_key, row.kind, row.text, row.context, row.options, answer, at);
+    db
+      .query(`
+        INSERT INTO application_answers (job_id, match_key, kind, question, context, options, answer, answered_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(job_id, match_key) DO UPDATE SET answer = excluded.answer, answered_at = excluded.answered_at`)
+      .run(row.job_id, row.match_key, row.kind, row.text, row.context, row.options, answer, at);
   } else {
     invalidateApproval(row.job_id);
-    if (answer === "approve") db.query("INSERT INTO submit_approvals (job_id,gate_id,summary,created_at) VALUES (?,?,?,?)").run(row.job_id, row.id, row.text, at);
+    if (answer === "approve") db.query("INSERT INTO submit_approvals (job_id, gate_id, summary, created_at) VALUES (?, ?, ?, ?)").run(row.job_id, row.id, row.text, at);
   }
   db.query("UPDATE question_gates SET state = 'answered', answer = ?, scope = ?, answered_at = ? WHERE id = ? AND state = 'open'").run(answer, scope, at, row.id);
   const value = gate(row);
   value.state = "answered";
-  db.query("UPDATE jobs SET status = 'approved', pending = ?, note = ?, updated_at = datetime('now') WHERE id = ?").run(payload(value), "Answer saved; queued to resume the existing application", row.job_id);
+  writeJob(row.job_id, { status: "approved", pending: payload(value), note: "Answer saved; queued to resume the existing application" });
 }
 export function answerGate(gateId: string, answer: string, scope: AnswerScope): { jobIds: number[] } {
   if (typeof answer !== "string" || !answer.trim()) throw new Error("Answer must be nonblank text");
   const jobIds = db.transaction(() => {
-    const row = db.query<GateRow, [string]>("SELECT * FROM question_gates WHERE id = ?").get(gateId);
+    const row = gateRow(gateId);
     if (!row || !isCurrent(row, requireJob(row.job_id))) throw new Error("Gate is stale or already answered");
     if (row.kind === "manual" || row.kind === "submission_ambiguous" || isSubmitting(row.job_id)) throw new Error("This gate requires explicit manual resolution");
     if (scope === "standing" && !row.standing_allowed) throw new Error("Standing answers require a structured employer-scoped question");
     const at = now(), affected: number[] = [];
-    if (scope === "standing") db.query(`INSERT INTO standing_answers (match_key,employer,question,context,options,answer,source_gate_id,answered_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(match_key) DO UPDATE SET answer = excluded.answer, source_gate_id = excluded.source_gate_id, answered_at = excluded.answered_at`).run(row.match_key, row.employer, row.text, row.context, row.options, answer, row.id, at);
+    if (scope === "standing")
+      db
+        .query(`
+          INSERT INTO standing_answers (match_key, employer, question, context, options, answer, source_gate_id, answered_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(match_key) DO UPDATE SET answer = excluded.answer, source_gate_id = excluded.source_gate_id, answered_at = excluded.answered_at`)
+        .run(row.match_key, row.employer, row.text, row.context, row.options, answer, row.id, at);
     const targets = scope === "application" ? [row] : db.query<GateRow, [string]>("SELECT * FROM question_gates WHERE match_key = ? AND standing_allowed = 1 AND state = 'open' ORDER BY job_id").all(row.match_key);
     for (const target of targets) {
       const job = getJob(target.job_id);
@@ -179,16 +202,43 @@ export function answerGate(gateId: string, answer: string, scope: AnswerScope): 
 }
 export function resumeContext(jobId: number): ResumeContext {
   const job = requireJob(jobId);
-  const rows = db.query<{ kind: GateKind; question: string; context: string; options: string; answer: string; match_key: string }, [number]>("SELECT * FROM application_answers WHERE job_id = ? ORDER BY answered_at, match_key").all(jobId);
+  const rows = db
+    .query<{ kind: GateKind; question: string; context: string; options: string; answer: string; match_key: string }, [number]>(`
+      SELECT kind, question, context, options, answer, match_key
+      FROM application_answers
+      WHERE job_id = ?
+      ORDER BY answered_at, match_key`)
+    .all(jobId);
   const answers = rows.map(row => ({ kind: row.kind, question: row.question, context: row.context, options: JSON.parse(row.options) as string[], answer: row.answer }));
   const localKeys = new Set(rows.map(row => row.match_key));
   // Only standing rules observed on this application are relevant; don't inject unrelated employer facts.
-  for (const row of db.query<{ question: string; context: string; options: string; answer: string; match_key: string }, [number, string]>(`SELECT DISTINCT s.* FROM standing_answers s JOIN question_gates g ON g.match_key = s.match_key WHERE g.job_id = ? AND g.standing_allowed = 1 AND s.employer = ? ORDER BY s.match_key`).all(jobId, job.company)) {
+  const standing = db
+    .query<{ question: string; context: string; options: string; answer: string; match_key: string }, [number, string]>(`
+      SELECT DISTINCT s.question, s.context, s.options, s.answer, s.match_key
+      FROM standing_answers s
+      JOIN question_gates g ON g.match_key = s.match_key
+      WHERE g.job_id = ? AND g.standing_allowed = 1 AND s.employer = ?
+      ORDER BY s.match_key`)
+    .all(jobId, job.company);
+  for (const row of standing) {
     if (!localKeys.has(row.match_key)) answers.push({ kind: "question", question: row.question, context: row.context, options: (JSON.parse(row.options) as string[]), answer: row.answer });
   }
-  const approval = db.query<{ summary: string }, [number]>("SELECT summary FROM submit_approvals WHERE job_id = ? AND consumed_at IS NULL").get(jobId);
-  const lastConfirmation = db.query<{ answer: string | null }, [number]>("SELECT answer FROM question_gates WHERE job_id = ? AND kind = 'confirm_submit' AND state != 'closed' ORDER BY rowid DESC LIMIT 1").get(jobId);
-  const handoffRows = db.query<{ kind: "manual" | "submission_ambiguous"; text: string; context: string; created_at: string }, [number]>("SELECT kind, text, context, created_at FROM question_gates WHERE job_id = ? AND kind IN ('manual', 'submission_ambiguous') ORDER BY created_at ASC, rowid ASC").all(jobId);
+  const approval = unconsumedApproval(jobId);
+  const lastConfirmation = db
+    .query<{ answer: string | null }, [number]>(`
+      SELECT answer
+      FROM question_gates
+      WHERE job_id = ? AND kind = 'confirm_submit' AND state != 'closed'
+      ORDER BY rowid DESC
+      LIMIT 1`)
+    .get(jobId);
+  const handoffRows = db
+    .query<{ kind: "manual" | "submission_ambiguous"; text: string; context: string; created_at: string }, [number]>(`
+      SELECT kind, text, context, created_at
+      FROM question_gates
+      WHERE job_id = ? AND kind IN ('manual', 'submission_ambiguous')
+      ORDER BY created_at ASC, rowid ASC`)
+    .all(jobId);
   let handoffHistory: HandoffRecord[];
   if (handoffRows.length <= 6) {
     handoffHistory = handoffRows.map(r => ({ kind: r.kind, text: r.text, context: r.context.trim() || null, createdAt: r.created_at }));
@@ -203,7 +253,7 @@ export function consumeSubmitApproval(jobId: number, summary: string): boolean {
   const consumed = db.transaction(() => {
     const job = requireJob(jobId);
     if (!["approved", "filling"].includes(job.status) || isSubmitting(jobId) || getOpenGate(jobId)) return false;
-    const approval = db.query<{ summary: string }, [number]>("SELECT summary FROM submit_approvals WHERE job_id = ? AND consumed_at IS NULL").get(jobId);
+    const approval = unconsumedApproval(jobId);
     if (!approval) return false;
     if (approval.summary.replace(/\s+/g, " ").trim() !== summary.replace(/\s+/g, " ").trim()) {
       invalidateApproval(jobId);
@@ -217,12 +267,12 @@ export function consumeSubmitApproval(jobId: number, summary: string): boolean {
 export function returnManualControl(jobId: number, gateId: string, answer: string): boolean {
   const returned = db.transaction(() => {
     const job = getJob(jobId);
-    const row = db.query<GateRow, [string]>("SELECT * FROM question_gates WHERE id = ?").get(gateId);
+    const row = gateRow(gateId);
     if (!job || row?.job_id !== jobId || row.kind !== "manual" || !isCurrent(row, job) || isSubmitting(jobId)) return false;
-    db.query("UPDATE question_gates SET state = 'closed' WHERE id = ?").run(row.id);
+    closeGate(row.id);
     clearManualLease(jobId);
     const note = answer.trim() ? `Manual control returned: ${answer.trim()}` : (job.note?.trim() || "Manual control returned: done");
-    db.query("UPDATE jobs SET status = 'approved', pending = NULL, note = ?, updated_at = datetime('now') WHERE id = ?").run(note, jobId);
+    writeJob(jobId, { status: "approved", pending: null, note });
     queueDraftRecovery(jobId);
     return true;
   }).immediate();
@@ -235,7 +285,7 @@ export function cancelJobGates(jobId: number): void {
     db.query("UPDATE question_gates SET state = 'closed' WHERE job_id = ? AND state != 'closed'").run(jobId);
     clearManualLease(jobId);
     invalidateApproval(jobId);
-    db.query("UPDATE jobs SET pending = NULL, updated_at = datetime('now') WHERE id = ?").run(jobId);
+    writeJob(jobId, { pending: null });
   }).immediate();
   notifyJobChange(jobId);
 }
@@ -245,11 +295,11 @@ export function resolveAmbiguous(jobId: number, resolution: string): void {
   db.transaction(() => {
     const current = getOpenGate(jobId);
     if (current?.kind !== "submission_ambiguous") throw new Error("No current submission ambiguity to resolve");
-    db.query("UPDATE question_gates SET state = 'closed' WHERE id = ?").run(current.id);
+    closeGate(current.id);
     clearManualLease(jobId);
     invalidateApproval(jobId);
     confirmNotSubmitted(jobId);
-    db.query("UPDATE jobs SET status = 'approved', pending = NULL, note = ?, updated_at = datetime('now') WHERE id = ?").run("Explicit inspection confirmed not submitted; queued to resume existing draft", jobId);
+    writeJob(jobId, { status: "approved", pending: null, note: "Explicit inspection confirmed not submitted; queued to resume existing draft" });
   }).immediate();
   notifyJobChange(jobId);
 }
@@ -310,16 +360,16 @@ export function resolveAmbiguityWithEvidence(
     ].join(" ");
 
     writeCheckpoint(job, evidence.checkpoint);
-    db.query("UPDATE question_gates SET state = 'closed' WHERE job_id = ? AND state = 'open'").run(jobId);
+    closeOpenGate(jobId);
     clearManualLease(jobId);
     invalidateApproval(jobId);
 
     if (outcome === "submitted") {
       clearFillFlags(jobId);
-      db.query("UPDATE jobs SET status = 'submitted', pending = NULL, note = ?, submitted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(durableNote, jobId);
+      writeJob(jobId, { status: "submitted", pending: null, note: durableNote, submitted_at: sqlNow() });
     } else {
       confirmNotSubmitted(jobId);
-      db.query("UPDATE jobs SET status = 'approved', pending = NULL, note = ?, updated_at = datetime('now') WHERE id = ?").run(durableNote, jobId);
+      writeJob(jobId, { status: "approved", pending: null, note: durableNote });
     }
   }).immediate();
   notifyJobChange(jobId);
@@ -335,12 +385,12 @@ export function queueRecovery(jobId: number, gateId: string): { mode: "fill" | "
     const checkpoint = readCheckpoint(jobId);
     if (!checkpoint) throw new Error("Recovery requires a saved browser checkpoint");
 
-    db.query("UPDATE question_gates SET state = 'closed' WHERE id = ?").run(current.id);
+    closeGate(current.id);
     clearManualLease(jobId);
 
     if (current.kind === "manual") {
       const note = current.text.trim() || job.note?.trim() || "Manual recovery queued";
-      db.query("UPDATE jobs SET status = 'approved', pending = NULL, note = ?, updated_at = datetime('now') WHERE id = ?").run(note, jobId);
+      writeJob(jobId, { status: "approved", pending: null, note });
       queueDraftRecovery(jobId);
       return { mode: "fill" as const, slot: checkpoint.slot };
     } else {
@@ -348,7 +398,7 @@ export function queueRecovery(jobId: number, gateId: string): { mode: "fill" | "
       const note = (originalReason && originalReason !== current.text)
         ? originalReason
         : (current.text.trim() || job.note?.trim() || "Ambiguous verification queued");
-      db.query("UPDATE jobs SET pending = NULL, note = ?, updated_at = datetime('now') WHERE id = ?").run(note, jobId);
+      writeJob(jobId, { pending: null, note });
       queueVerification(jobId);
       return { mode: "verify" as const, slot: checkpoint.slot };
     }
@@ -398,7 +448,7 @@ export function releaseManualLease(jobId: number, gateId: string): void {
 export function importLegacyGates(): void {
   const adopted = db.transaction(() => {
     const ids: number[] = [];
-    for (const job of db.query<Job, []>("SELECT * FROM jobs WHERE status IN ('needs_input','awaiting_submit','needs_manual','filling','approved','failed') ORDER BY id").all()) {
+    for (const job of jobsInStatuses(["needs_input", "awaiting_submit", "needs_manual", "filling", "approved", "failed"])) {
       const current = getOpenGate(job.id), ambiguous = isSubmitting(job.id);
       if (current && (!ambiguous || current.kind === "submission_ambiguous")) continue;
       const old = pending(job), oldKind = kinds.find(k => k === old?.["kind"]);

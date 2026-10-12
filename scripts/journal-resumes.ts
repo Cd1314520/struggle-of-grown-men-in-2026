@@ -1,8 +1,8 @@
-import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { openDatabase } from "../src/schema";
 import {
   observeAutoApplyActivity,
   JOURNAL_HEADER,
@@ -769,7 +769,7 @@ export async function runResumeJournal(
   }
 
   // Strict read-only database connection
-  const db = new Database(options.dbPath, { readonly: true });
+  const db = openDatabase(options.dbPath, "readonly");
 
   try {
     // 1. Consistent database transaction snapshot for all DB reads (NO await inside transaction!)
@@ -798,25 +798,29 @@ export async function runResumeJournal(
       const jobIds = uniqueAttempts.map((a) => a.jobId);
 
       // Query jobs rows
+      // One bound JSON array stands in for the id list, so no value is ever spliced into the SQL.
+      const jobIdList = JSON.stringify(jobIds);
       const jobRows = db
-        .query<JobDetailRow, []>(
-          `SELECT id, company, title, description, resume_sha, resume_frozen_at, approved_by, status 
-           FROM jobs WHERE id IN (${jobIds.join(",")})`
+        .query<JobDetailRow, [string]>(
+          `SELECT id, company, title, description, resume_sha, resume_frozen_at, approved_by, status
+           FROM jobs
+           WHERE id IN (SELECT value FROM json_each(?))`
         )
-        .all();
+        .all(jobIdList);
       const jobDetailsMap = new Map<number, JobDetailRow>(jobRows.map((j) => [j.id, j]));
 
       // Query approval events (auto and user approvals) for governing approval determination
       const approvalRows = db
-        .query<ApprovalEventRow & { job_id: number }, []>(
-          `SELECT id, job_id, kind, message, at FROM events 
-           WHERE job_id IN (${jobIds.join(",")}) AND (
+        .query<ApprovalEventRow & { job_id: number }, [string]>(
+          `SELECT id, job_id, kind, message, at
+           FROM events
+           WHERE job_id IN (SELECT value FROM json_each(?)) AND (
              (kind = 'auto' AND worker = 'prep' AND (message LIKE 'Approved by auto apply:%' OR message LIKE 'Approved by reconsidered auto apply:%'))
              OR (kind = 'user' AND message = 'approve')
            )
            ORDER BY id ASC`
         )
-        .all();
+        .all(jobIdList);
 
       const approvalsMap = new Map<number, ApprovalEventRow[]>();
       for (const a of approvalRows) {
