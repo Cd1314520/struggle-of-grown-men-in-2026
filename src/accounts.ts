@@ -62,7 +62,7 @@ function normalizeTenantDomain(urlOrDomain: string): string {
     if (!segments.length) {
       throw new Error("Multi-tenant domain requires tenant slug in path");
     }
-    const tenantSlug = decodeURIComponent(segments[0]).toLowerCase();
+    const tenantSlug = decodeURIComponent(segments[0] ?? "").toLowerCase();
     return `${hostname}${portSuffix}/${tenantSlug}`;
   }
 
@@ -88,11 +88,11 @@ function normalizeTenantDomain(urlOrDomain: string): string {
  * - Missing and allowCreate=false: returns JSON { existing: false, error: "no_account_found", message: "..." }.
  * - Missing and allowCreate=true: generates a strong password, persists it, and returns JSON { email, password, existing: false }.
  */
-export async function resolveAccount(
+export function resolveAccount(
   domain: string,
   mailbox: string,
   allowCreate: boolean
-): Promise<string> {
+): string {
   let key: string;
   try {
     key = normalizeTenantDomain(domain);

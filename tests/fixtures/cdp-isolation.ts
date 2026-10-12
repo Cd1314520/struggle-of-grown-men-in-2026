@@ -12,34 +12,39 @@ interface Target {
   title: string;
   url: string;
   browserContextId: string;
-  parentId?: string;
+  parentId?: string | undefined;
   openerId?: string;
   draft: string;
   paused: boolean;
 }
 interface Wire {
-  id?: number;
-  method?: string;
+  id?: number | undefined;
+  method?: string | undefined;
   params: Record<string, unknown>;
-  result?: Record<string, unknown>;
-  sessionId?: string;
+  result?: Record<string, unknown> | undefined;
+  sessionId?: string | undefined;
   error?: unknown;
 }
-interface Connection { pageId?: string; sessions: Map<string, string>; discover: boolean }
+interface Connection { pageId: string | undefined; sessions: Map<string, string>; discover: boolean }
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function decode(text: string): Wire {
   const value: unknown = JSON.parse(text);
   assert(object(value));
-  assert(value.id === undefined || typeof value.id === "number");
-  assert(value.method === undefined || typeof value.method === "string");
-  assert(value.sessionId === undefined || typeof value.sessionId === "string");
-  assert(value.params === undefined || object(value.params));
-  assert(value.result === undefined || object(value.result));
-  return { id: value.id, method: value.method, sessionId: value.sessionId, params: value.params ?? {}, result: value.result, error: value.error };
+  assert(value["id"] === undefined || typeof value["id"] === "number");
+  assert(value["method"] === undefined || typeof value["method"] === "string");
+  assert(value["sessionId"] === undefined || typeof value["sessionId"] === "string");
+  assert(value["params"] === undefined || object(value["params"]));
+  assert(value["result"] === undefined || object(value["result"]));
+  return { id: value["id"], method: value["method"], sessionId: value["sessionId"], params: value["params"] ?? {}, result: value["result"], error: value["error"] };
 }
 const targets = new Map<string, Target>();
+function live(targetId: string): Target {
+  const target = targets.get(targetId);
+  if (!target) throw new Error(`Fixture target ${targetId} is gone`);
+  return target;
+}
 const sockets = new Set<ServerWebSocket<Connection>>();
 const commands: Wire[] = [];
 let nextTarget = 0;
@@ -90,8 +95,8 @@ const upstream = Bun.serve<Connection>({
       return Response.json({ ...target, id: target.targetId, webSocketDebuggerUrl: `ws://127.0.0.1:${server.port}/devtools/page/${target.targetId}` });
     }
     if (url.pathname === "/json/list" || url.pathname === "/json") return Response.json([...targets.values()].filter(t => t.type === "page").map(t => ({ ...t, id: t.targetId, webSocketDebuggerUrl: `ws://127.0.0.1:${server.port}/devtools/page/${t.targetId}` })));
-    const close = /^\/json\/close\/(.+)$/.exec(url.pathname);
-    if (close) { destroyTarget(close[1]!); return new Response("closed"); }
+    const closing = /^\/json\/close\/(.+)$/.exec(url.pathname)?.[1];
+    if (closing !== undefined) { destroyTarget(closing); return new Response("closed"); }
     if (url.pathname.startsWith("/json/activate/")) return new Response("activated");
     return new Response("unknown", { status: 404 });
   },
@@ -107,34 +112,35 @@ const upstream = Bun.serve<Connection>({
       switch (msg.method) {
         case "Browser.getVersion": result = { product: "Fixture", protocolVersion: "1.3" }; break;
         case "Target.getTargets": result = { targetInfos: [...targets.values()] }; break;
-        case "Target.getTargetInfo": result = { targetInfo: targets.get(String(msg.params.targetId)) }; break;
+        case "Target.getTargetInfo": result = { targetInfo: targets.get(String(msg.params["targetId"])) }; break;
         case "Target.getBrowserContexts": result = { defaultBrowserContextId: "persistent-profile", browserContextIds: ["unrelated-incognito"] }; break;
         case "Target.setDiscoverTargets":
-          ws.data.discover = msg.params.discover === true;
+          ws.data.discover = msg.params["discover"] === true;
           if (ws.data.discover) for (const info of targets.values()) ws.send(JSON.stringify({ method: "Target.targetCreated", params: { targetInfo: info } }));
           break;
         case "Target.attachToTarget": {
-          const info = targets.get(String(msg.params.targetId));
+          const info = targets.get(String(msg.params["targetId"]));
           assert(info, "proxy forwarded an invalid attachment");
           result = { sessionId: attach(ws, info) };
           break;
         }
         case "Target.setAutoAttach": {
-          if (msg.params.autoAttach === true) {
+          if (msg.params["autoAttach"] === true) {
             // Browser-level attachment affects every page before filtering events.
             // Page-level attachment is limited to descendants and obeys TargetFilter.
-            const filters = Array.isArray(msg.params.filter) ? msg.params.filter : [];
+            const requested: unknown = msg.params["filter"];
+            const filters: unknown[] = Array.isArray(requested) ? requested : [];
             for (const info of targets.values()) {
               if (target && info.parentId !== target.targetId) continue;
-              const filter = filters.find((entry: unknown) => object(entry) && (entry.type === undefined || entry.type === info.type));
-              if (object(filter) && filter.exclude === true) continue;
-              attach(ws, info, msg.sessionId, msg.params.waitForDebuggerOnStart === true);
+              const filter = filters.find(entry => object(entry) && (entry["type"] === undefined || entry["type"] === info.type));
+              if (object(filter) && filter["exclude"] === true) continue;
+              attach(ws, info, msg.sessionId, msg.params["waitForDebuggerOnStart"] === true);
             }
           }
           break;
         }
         case "Target.detachFromTarget": {
-          const sessionId = String(msg.params.sessionId);
+          const sessionId = String(msg.params["sessionId"]);
           if (!ws.data.sessions.has(sessionId)) {
             ws.send(JSON.stringify({ id: msg.id, sessionId: msg.sessionId, error: { code: -32000, message: "No session with given id" } }));
             return;
@@ -144,10 +150,10 @@ const upstream = Bun.serve<Connection>({
           break;
         }
         case "Target.closeTarget":
-          result = { success: destroyTarget(String(msg.params.targetId)) };
+          result = { success: destroyTarget(String(msg.params["targetId"])) };
           break;
         case "Target.createTarget": {
-          const created = addTarget(String(msg.params.url));
+          const created = addTarget(String(msg.params["url"]));
           // Event deliberately precedes the createTarget reply, as real CDP can.
           broadcast("Target.targetCreated", { targetInfo: created });
           result = { targetId: created.targetId };
@@ -155,13 +161,13 @@ const upstream = Bun.serve<Connection>({
         }
         case "Page.navigate":
           assert(target, "navigation lacked an attached page");
-          target.url = String(msg.params.url);
+          target.url = String(msg.params["url"]);
           target.draft = ""; // navigating away destroys unsaved form contents
           result = { frameId: `frame-${target.targetId}` };
           break;
         case "Runtime.evaluate":
           assert(target, "evaluation lacked an attached page");
-          if (msg.params.expression === "write-draft") target.draft = String(msg.params.value);
+          if (msg.params["expression"] === "write-draft") target.draft = String(msg.params["value"]);
           result = { result: { type: "string", value: target.draft } };
           break;
       }
@@ -177,13 +183,13 @@ const clientSockets: WebSocket[] = [];
 
 async function connect(browser: JobBrowser) {
   const version: unknown = await (await fetch(`http://127.0.0.1:${browser.port}/json/version`)).json();
-  assert(object(version) && typeof version.webSocketDebuggerUrl === "string");
-  assert.equal(new URL(version.webSocketDebuggerUrl).port, String(browser.port));
-  const socket = new WebSocket(version.webSocketDebuggerUrl);
+  assert(object(version) && typeof version["webSocketDebuggerUrl"] === "string");
+  assert.equal(new URL(version["webSocketDebuggerUrl"]).port, String(browser.port));
+  const socket = new WebSocket(version["webSocketDebuggerUrl"]);
   clientSockets.push(socket);
-  const ready = Promise.withResolvers<void>();
-  socket.onopen = () => ready.resolve();
-  socket.onerror = () => ready.reject(new Error("CDP fixture connection failed"));
+  const ready: PromiseWithResolvers<void> = Promise.withResolvers();
+  socket.onopen = () => { ready.resolve(); };
+  socket.onerror = () => { ready.reject(new Error("CDP fixture connection failed")); };
   const pending = new Map<number, (msg: Wire) => void>();
   const events: Wire[] = [];
   let id = 0;
@@ -196,7 +202,7 @@ async function connect(browser: JobBrowser) {
   async function call(method: string, params: Record<string, unknown> = {}, sessionId?: string) {
     const requestId = ++id;
     const reply = Promise.withResolvers<Wire>();
-    const timer = setTimeout(() => reply.reject(new Error(`No reply to ${method}`)), 2000);
+    const timer = setTimeout(() => { reply.reject(new Error(`No reply to ${method}`)); }, 2000);
     pending.set(requestId, msg => { clearTimeout(timer); reply.resolve(msg); });
     socket.send(JSON.stringify({ id: requestId, method, params, sessionId }));
     return reply.promise;
@@ -204,15 +210,15 @@ async function connect(browser: JobBrowser) {
   await call("Target.setDiscoverTargets", { discover: true });
   await call("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
   const get = await call("Target.getTargets");
-  assert(Array.isArray(get.result?.targetInfos));
+  assert(Array.isArray(get.result?.["targetInfos"]));
   // Model browser.open's problematic selection: adopt the first discoverable page.
-  const selected: unknown = get.result.targetInfos.find((info: unknown) => object(info) && info.type === "page");
-  assert(object(selected) && typeof selected.targetId === "string");
-  const attached = await call("Target.attachToTarget", { targetId: selected.targetId, flatten: true });
+  const selected: unknown = get.result["targetInfos"].find((info: unknown) => object(info) && info["type"] === "page");
+  assert(object(selected) && typeof selected["targetId"] === "string");
+  const attached = await call("Target.attachToTarget", { targetId: selected["targetId"], flatten: true });
   assert.equal(attached.error, undefined);
-  assert.equal(typeof attached.result?.sessionId, "string");
-  const sessionId = String(attached.result?.sessionId);
-  return { call, events, sessionId, selected: selected.targetId, socket };
+  assert.equal(typeof attached.result?.["sessionId"], "string");
+  const sessionId = String(attached.result?.["sessionId"]);
+  return { call, events, sessionId, selected: selected["targetId"], socket };
 }
 try {
   const first = await prepareJobBrowser(0, null, new Set([manual.targetId]));
@@ -232,11 +238,11 @@ try {
   // CDP directly to its page socket, instead of using a browser-level session.
   const visible: unknown = await (await fetch(`http://127.0.0.1:${second.port}/json/list`)).json();
   assert(Array.isArray(visible));
-  const chosen: unknown = visible.find((entry: unknown) => object(entry) && entry.type === "page");
-  assert(object(chosen) && typeof chosen.webSocketDebuggerUrl === "string");
-  const pageSocket = new WebSocket(chosen.webSocketDebuggerUrl);
+  const chosen: unknown = visible.find((entry: unknown) => object(entry) && entry["type"] === "page");
+  assert(object(chosen) && typeof chosen["webSocketDebuggerUrl"] === "string");
+  const pageSocket = new WebSocket(chosen["webSocketDebuggerUrl"]);
   clientSockets.push(pageSocket);
-  const pageReady = Promise.withResolvers<void>();
+  const pageReady: PromiseWithResolvers<void> = Promise.withResolvers();
   const pageReply = Promise.withResolvers<Wire>();
   let pageConnected = false;
   pageSocket.onopen = () => { pageConnected = true; pageReady.resolve(); };
@@ -249,12 +255,12 @@ try {
     if (reply.id === 1) pageReply.resolve(reply);
   };
   await pageReady.promise;
-  const pageTimer = setTimeout(() => pageReply.reject(new Error("No page navigation reply")), 2000);
+  const pageTimer = setTimeout(() => { pageReply.reject(new Error("No page navigation reply")); }, 2000);
   pageSocket.send(JSON.stringify({ id: 1, method: "Page.navigate", params: { url: "https://fixture.invalid/application/B" } }));
   try { assert.equal((await pageReply.promise).error, undefined); } finally { clearTimeout(pageTimer); }
-  assert.equal(targets.get(second.tabId)!.url, "https://fixture.invalid/application/B");
-  assert.equal(targets.get(first.tabId)!.draft, "A unsaved salary answer");
-  assert.equal(targets.get(first.tabId)!.url, "https://fixture.invalid/application/A");
+  assert.equal(live(second.tabId).url, "https://fixture.invalid/application/B");
+  assert.equal(live(first.tabId).draft, "A unsaved salary answer");
+  assert.equal(live(first.tabId).url, "https://fixture.invalid/application/A");
   // Even a manual page related to the current target must not be auto-attached.
   manual.parentId = second.tabId;
   const frame = addTarget("https://fixture.invalid/frame", "iframe", second.tabId);
@@ -263,19 +269,19 @@ try {
   await b.call("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, b.sessionId);
   await b.call("Page.navigate", { url: "https://fixture.invalid/application/B" }, b.sessionId);
   await b.call("Runtime.evaluate", { expression: "write-draft", value: "B unsaved cover letter" }, b.sessionId);
-  assert.equal(targets.get(first.tabId)!.url, "https://fixture.invalid/application/A");
-  assert.equal(targets.get(first.tabId)!.draft, "A unsaved salary answer");
-  assert.equal(targets.get(first.tabId)!.paused, false);
+  assert.equal(live(first.tabId).url, "https://fixture.invalid/application/A");
+  assert.equal(live(first.tabId).draft, "A unsaved salary answer");
+  assert.equal(live(first.tabId).paused, false);
   assert.equal(manual.draft, "human is editing this unsaved form");
   assert.equal(manual.paused, false);
-  const attachedFrame = b.events.find(event => event.method === "Target.attachedToTarget" && object(event.params.targetInfo) && event.params.targetInfo.targetId === frame.targetId);
-  assert(attachedFrame && typeof attachedFrame.params.sessionId === "string", "owned iframe must remain usable");
-  await b.call("Runtime.evaluate", { expression: "write-draft", value: "Answer in an owned iframe" }, attachedFrame.params.sessionId);
-  const frameAnswer = await b.call("Runtime.evaluate", { expression: "read-draft" }, attachedFrame.params.sessionId);
-  assert(object(frameAnswer.result?.result));
-  assert.equal(frameAnswer.result.result.value, "Answer in an owned iframe");
-  assert(!b.events.some(event => object(event.params.targetInfo) && [first.tabId, manual.targetId].includes(String(event.params.targetInfo.targetId))));
-  assert(!commands.some(command => command.method === "Target.setAutoAttach" && !command.sessionId && command.params.autoAttach === true), "no global auto-attach may reach Chrome");
+  const attachedFrame = b.events.find(event => event.method === "Target.attachedToTarget" && object(event.params["targetInfo"]) && event.params["targetInfo"]["targetId"] === frame.targetId);
+  assert(attachedFrame && typeof attachedFrame.params["sessionId"] === "string", "owned iframe must remain usable");
+  await b.call("Runtime.evaluate", { expression: "write-draft", value: "Answer in an owned iframe" }, attachedFrame.params["sessionId"]);
+  const frameAnswer = await b.call("Runtime.evaluate", { expression: "read-draft" }, attachedFrame.params["sessionId"]);
+  assert(object(frameAnswer.result?.["result"]));
+  assert.equal(frameAnswer.result["result"]["value"], "Answer in an owned iframe");
+  assert(!b.events.some(event => object(event.params["targetInfo"]) && [first.tabId, manual.targetId].includes(String(event.params["targetInfo"]["targetId"]))));
+  assert(!commands.some(command => command.method === "Target.setAutoAttach" && !command.sessionId && command.params["autoAttach"] === true), "no global auto-attach may reach Chrome");
 
   for (const hidden of [first.tabId, manual.targetId]) {
     assert((await b.call("Target.attachToTarget", { targetId: hidden, flatten: true })).error);
@@ -290,7 +296,7 @@ try {
   assert((await b.call("Browser.close")).error);
   assert((await b.call("Target.disposeBrowserContext", { browserContextId: "persistent-profile" })).error);
   const incognito = await b.call("Target.getBrowserContexts");
-  assert.deepEqual(incognito.result?.browserContextIds, []);
+  assert.deepEqual(incognito.result?.["browserContextIds"], []);
 
   const profileMutations: [string, Record<string, unknown>][] = [
     ["Network.clearBrowserCookies", {}],
@@ -312,47 +318,47 @@ try {
     for (const sessionId of [undefined, b.sessionId]) {
       const denied = await b.call(method, params, sessionId);
       assert(object(denied.error), `${method} must be rejected even through an owned session`);
-      assert.equal(denied.error.code, -32000);
+      assert.equal(denied.error["code"], -32000);
     }
     assert(!commands.some(command => command.method === method), `${method} must never reach Chrome`);
   }
 
   const created = await b.call("Target.createTarget", { url: "https://fixture.invalid/owned-popup", browserContextId: "persistent-profile" });
   assert.equal(created.error, undefined);
-  assert.equal(typeof created.result?.targetId, "string");
-  const popupId = String(created.result?.targetId);
+  assert.equal(typeof created.result?.["targetId"], "string");
+  const popupId = String(created.result?.["targetId"]);
   const attachedPopup = await b.call("Target.attachToTarget", { targetId: popupId, flatten: true });
   assert.equal(attachedPopup.error, undefined);
-  assert.equal(typeof attachedPopup.result?.sessionId, "string");
-  await b.call("Runtime.evaluate", { expression: "write-draft", value: "Owned popup form" }, String(attachedPopup.result?.sessionId));
-  assert.equal(targets.get(popupId)!.draft, "Owned popup form");
+  assert.equal(typeof attachedPopup.result?.["sessionId"], "string");
+  await b.call("Runtime.evaluate", { expression: "write-draft", value: "Owned popup form" }, String(attachedPopup.result?.["sessionId"]));
+  assert.equal(live(popupId).draft, "Owned popup form");
   await b.call("Browser.getVersion"); // ordered barrier after target notifications
-  assert(b.events.some(event => event.method === "Target.targetCreated" && object(event.params.targetInfo) && event.params.targetInfo.targetId === popupId));
+  assert(b.events.some(event => event.method === "Target.targetCreated" && object(event.params["targetInfo"]) && event.params["targetInfo"]["targetId"] === popupId));
   const closed = await b.call("Target.closeTarget", { targetId: popupId });
   assert.equal(closed.error, undefined);
-  assert.equal(closed.result?.success, true);
+  assert.equal(closed.result?.["success"], true);
   await b.call("Browser.getVersion");
   assert(!targets.has(popupId));
-  assert(b.events.some(event => event.method === "Target.targetDestroyed" && event.params.targetId === popupId));
+  assert(b.events.some(event => event.method === "Target.targetDestroyed" && event.params["targetId"] === popupId));
   const popupSessions = b.events
-    .filter(event => event.method === "Target.attachedToTarget" && object(event.params.targetInfo) && event.params.targetInfo.targetId === popupId)
-    .map(event => String(event.params.sessionId));
-  assert(popupSessions.includes(String(attachedPopup.result?.sessionId)));
-  assert(popupSessions.some(sessionId => sessionId !== attachedPopup.result?.sessionId), "popup must also have an automatic watch session");
+    .filter(event => event.method === "Target.attachedToTarget" && object(event.params["targetInfo"]) && event.params["targetInfo"]["targetId"] === popupId)
+    .map(event => String(event.params["sessionId"]));
+  assert(popupSessions.includes(String(attachedPopup.result?.["sessionId"])));
+  assert(popupSessions.some(sessionId => sessionId !== attachedPopup.result?.["sessionId"]), "popup must also have an automatic watch session");
   for (const sessionId of popupSessions) {
-    assert(b.events.some(event => event.method === "Target.detachedFromTarget" && event.params.sessionId === sessionId));
+    assert(b.events.some(event => event.method === "Target.detachedFromTarget" && event.params["sessionId"] === sessionId));
     assert((await b.call("Runtime.evaluate", { expression: "read-draft" }, sessionId)).error, "closed popup sessions must be retired");
   }
   const disabled = await b.call("Target.setAutoAttach", { autoAttach: false, waitForDebuggerOnStart: false, flatten: true });
   assert.equal(disabled.error, undefined);
   await b.call("Browser.getVersion"); // barrier after injected detach replies
-  assert(!commands.some(command => command.method === "Target.detachFromTarget" && popupSessions.includes(String(command.params.sessionId))), "cleanup must not detach closed popup sessions");
+  assert(!commands.some(command => command.method === "Target.detachFromTarget" && popupSessions.includes(String(command.params["sessionId"]))), "cleanup must not detach closed popup sessions");
   const liveDraft = await b.call("Runtime.evaluate", { expression: "read-draft" }, b.sessionId);
   assert.equal(liveDraft.error, undefined);
-  assert(object(liveDraft.result?.result));
-  assert.equal(liveDraft.result.result.value, "B unsaved cover letter", "live application connection must survive auto-attach cleanup");
+  assert(object(liveDraft.result?.["result"]));
+  assert.equal(liveDraft.result["result"]["value"], "B unsaved cover letter", "live application connection must survive auto-attach cleanup");
   assert(second.ownsTarget(popupId), "a destroyed owned tab must remain identifiable for a lost-tab manual checkpoint");
-  assert.equal(targets.get(first.tabId)!.draft, "A unsaved salary answer");
+  assert.equal(live(first.tabId).draft, "A unsaved salary answer");
   assert.equal(manual.draft, "human is editing this unsaved form");
 
   first.close(); // old worker exited; no Chrome page is closed
@@ -365,12 +371,12 @@ try {
   const resumedClient = await connect(resumed);
   assert.equal(resumedClient.selected, first.tabId);
   const draft = await resumedClient.call("Runtime.evaluate", { expression: "read-draft" }, resumedClient.sessionId);
-  assert(object(draft.result?.result));
-  assert.equal(draft.result.result.value, "A unsaved salary answer");
-  assert.equal(targets.get(first.tabId)!.url, "https://fixture.invalid/application/A");
-  assert.equal(targets.get(second.tabId)!.draft, "B unsaved cover letter");
+  assert(object(draft.result?.["result"]));
+  assert.equal(draft.result["result"]["value"], "A unsaved salary answer");
+  assert.equal(live(first.tabId).url, "https://fixture.invalid/application/A");
+  assert.equal(live(second.tabId).draft, "B unsaved cover letter");
   await assert.rejects(prepareJobBrowser(0, first.tabId, new Set([first.tabId])));
-  assert.equal(targets.get(first.tabId)!.draft, "A unsaved salary answer");
+  assert.equal(live(first.tabId).draft, "A unsaved salary answer");
   assert.equal(manual.draft, "human is editing this unsaved form");
   resumed.close();
   targets.delete(first.tabId); // Simulate a genuinely lost checkpoint target.
@@ -379,8 +385,8 @@ try {
   assert.notEqual(recovery.tabId, first.tabId);
   assert.notEqual(recovery.tabId, second.tabId);
   const recoveryClient = await connect(recovery);
-  assert.equal(targets.get(recoveryClient.selected)!.url, "about:blank");
-  assert.equal(targets.get(second.tabId)!.draft, "B unsaved cover letter");
+  assert.equal(live(recoveryClient.selected).url, "about:blank");
+  assert.equal(live(second.tabId).draft, "B unsaved cover letter");
   assert.equal(manual.draft, "human is editing this unsaved form");
 } finally {
   for (const ws of clientSockets) ws.close();

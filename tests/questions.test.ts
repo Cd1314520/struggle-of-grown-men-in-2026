@@ -30,7 +30,7 @@ function scenario(first: string, restart?: string) {
 }
 
 describe("durable questions", () => {
-  it("groups only exact structured employer questions and isolates sensitive wording, choices, context, and legacy gates", () => scenario(`
+  it("groups only exact structured employer questions and isolates sensitive wording, choices, context, and legacy gates", () => { scenario(`
     job(1); job(2, "Acme, Inc.", "Analyst"); job(3, "Acme Inc");
     const a = parkGate(1, prompt, checkpoint), b = parkGate(2, prompt, null);
     const c = parkGate(3, prompt, null);
@@ -58,9 +58,9 @@ describe("durable questions", () => {
     for (const id of [8, 9, 10, 11, 12]) assert.equal(listQuestionGroups().find(g => g.jobs.some(j => j.id === id)).standingAllowed, false);
     assert.equal(getJob(1).status, "needs_input");
     assert.equal(JSON.parse(getJob(1).pending).gateId, a.id);
-  `));
+  `); });
 
-  it("keeps application answers local and available after pending is cleared", () => scenario(`
+  it("keeps application answers local and available after pending is cleared", () => { scenario(`
     job(1); job(2);
     const a = parkGate(1, prompt, checkpoint), b = parkGate(2, prompt, null);
     assert.deepEqual(answerGate(a.id, "No", "application"), { jobIds: [1] });
@@ -75,9 +75,9 @@ describe("durable questions", () => {
     assert.deepEqual(readCheckpoint(1), checkpoint);
     assert.throws(() => answerGate(a.id, "Yes", "standing"), /stale|answered/);
     assert.equal(findStoredAnswer(2, prompt), null);
-  `));
+  `); });
 
-  it("does not upgrade an answer with unknown choices into an explicit free-text answer", () => scenario(`
+  it("does not upgrade an answer with unknown choices into an explicit free-text answer", () => { scenario(`
     job(1);
     const incomplete = { kind: "question", text: "Recruiter code", context: "Exact code for this hiring process" };
     const first = parkGate(1, incomplete, checkpoint);
@@ -91,9 +91,9 @@ describe("durable questions", () => {
     assert.notEqual(explicitText.groupKey, unknownAgain.groupKey);
     assert.equal(getGate(unknownAgain.id).state, "closed");
     assert.equal(getOpenGate(1).id, explicitText.id);
-  `));
+  `); });
 
-  it("fans out explicit standing answers only to current exact matches and supports future jobs", () => scenario(`
+  it("fans out explicit standing answers only to current exact matches and supports future jobs", () => { scenario(`
     for (let id = 1; id <= 5; id++) job(id);
     const a = parkGate(1, prompt, checkpoint);
     parkGate(2, prompt, null);
@@ -113,9 +113,9 @@ describe("durable questions", () => {
     assert.equal(getOpenGate(4).id, legacy.id);
     parkGate(5, prompt, null);
     assert.deepEqual(resumeContext(5).answers, [{ kind: "question", question: prompt.text, context: prompt.context, options: prompt.options, answer: "No" }]);
-  `));
+  `); });
 
-  it("rejects replaced, cancelled, and detached responses without double requeue", () => scenario(`
+  it("rejects replaced, cancelled, and detached responses without double requeue", () => { scenario(`
     job(1);
     const old = parkGate(1, prompt, checkpoint);
     const current = parkGate(1, { ...prompt, context: "New hiring process" }, checkpoint);
@@ -129,9 +129,9 @@ describe("durable questions", () => {
     assert.equal(getGate(current.id).state, "closed");
     assert.equal(getJob(1).pending, null);
     assert.equal(findStoredAnswer(1, { ...prompt, context: "New hiring process" }), null);
-  `));
+  `); });
 
-  it("rolls back answers, standing authorization, and requeues as one transaction", () => scenario(`
+  it("rolls back answers, standing authorization, and requeues as one transaction", () => { scenario(`
     job(1); job(2);
     const a = parkGate(1, prompt, checkpoint), b = parkGate(2, prompt, null);
     const notifications = [];
@@ -146,9 +146,9 @@ describe("durable questions", () => {
     db.exec("DROP TRIGGER fail_second_requeue");
     assert.deepEqual(answerGate(a.id, "No", "standing"), { jobIds: [1, 2] });
     unsubscribe();
-  `));
+  `); });
 
-  it("keeps final approval job-scoped, exact-summary, one-use, and invalidated by new answers", () => scenario(`
+  it("keeps final approval job-scoped, exact-summary, one-use, and invalidated by new answers", () => { scenario(`
     job(1); job(2);
     const confirmation = { kind: "confirm_submit", text: "Apply to Acme for Engineer with the frozen resume", context: "Final review", options: [] };
     const a = parkGate(1, confirmation, checkpoint), b = parkGate(2, confirmation, null);
@@ -178,9 +178,9 @@ describe("durable questions", () => {
     cancelJobGates(2);
     assert.deepEqual(resumeContext(2).changeRequests, []);
     assert.equal(findStoredAnswer(2, { kind: "cover_letter", text: "Letter draft", context: "Acme Engineer", options: [] }), "Revised letter");
-  `));
+  `); });
 
-  it("preserves unused exact approval and scoped answers when manual control returns after restart", () => scenario(`
+  it("preserves unused exact approval and scoped answers when manual control returns after restart", () => { scenario(`
     job(1);
     const question = parkGate(1, prompt, checkpoint);
     answerGate(question.id, "No", "standing");
@@ -206,9 +206,9 @@ describe("durable questions", () => {
     assert.equal(consumeSubmitApproval(1, "Exact final submission summary"), true);
     assert.equal(consumeSubmitApproval(1, "Exact final submission summary"), false);
     assert.equal(returnManualControl(1, manual.id, "Duplicate return"), false);
-  `), 15000);
+  `); }, 15000);
 
-  it("preserves pending confirmation change requests and application answers on manual return", () => scenario(`
+  it("preserves pending confirmation change requests and application answers on manual return", () => { scenario(`
     job(1);
     const question = parkGate(1, prompt, checkpoint);
     answerGate(question.id, "No", "application");
@@ -224,9 +224,9 @@ describe("durable questions", () => {
     assert.deepEqual(resumeContext(1).changeRequests, ["Remove the optional cover letter before submission"]);
     assert.equal(resumeContext(1).approvedSummary, null);
     assert.equal(findStoredAnswer(1, prompt), "No");
-  `));
+  `); });
 
-  it("refuses stale, detached, wrong-job, and ambiguous manual returns without mutations or notifications", () => scenario(`
+  it("refuses stale, detached, wrong-job, and ambiguous manual returns without mutations or notifications", () => { scenario(`
     for (let id = 1; id <= 6; id++) job(id);
     const stale = parkGate(1, { kind: "manual", text: "Old browser handoff" }, checkpoint);
     const current = parkGate(1, { kind: "manual", text: "Current browser handoff" }, checkpoint);
@@ -265,9 +265,9 @@ describe("durable questions", () => {
     assert.equal(kvGet("fill.submitting.4"), "1");
     assert.equal(kvGet("fill.submitting.5"), "1");
     unsubscribe();
-  `));
+  `); });
 
-  it("imports legacy waits once and makes submit-marker ambiguity explicitly inspect-only", () => scenario(`
+  it("imports legacy waits once and makes submit-marker ambiguity explicitly inspect-only", () => { scenario(`
     job(1); job(2); job(3);
     updateJob(1, { status: "needs_input", pending: JSON.stringify({ kind: "question", text: "Missing legacy field", shot: 123 }) });
     kvSet("fill.submitting.2", "1"); kvSet("fill.slot.2", "3");
@@ -302,9 +302,9 @@ describe("durable questions", () => {
     answerGate(legacy.id, "Legacy answer", "application");
     assert.equal(resumeContext(1).answers[0].answer, "Legacy answer");
     assert.equal(findStoredAnswer(1, { kind: "question", text: "Missing legacy field", legacy: true }), null);
-  `));
+  `); });
 
-  it("requires explicit reservations for interactive gates and refuses frozen-resume checkpoint changes atomically", () => scenario(`
+  it("requires explicit reservations for interactive gates and refuses frozen-resume checkpoint changes atomically", () => { scenario(`
     job(1); job(2); job(3);
     assert.throws(() => parkGate(1, { kind: "manual", text: "Complete CAPTCHA" }, null), /checkpoint/);
     assert.equal(getJob(1).status, "filling");
@@ -329,8 +329,8 @@ describe("durable questions", () => {
     assert.deepEqual([...manualLeases()], [[2, 1]]);
     cancelJobGates(1);
     assert.deepEqual([...manualLeases()], []);
-  `));
-  it("allows same-slot handoffs until explicitly reserved, then clears reservations on replacement or close", () => scenario(`
+  `); });
+  it("allows same-slot handoffs until explicitly reserved, then clears reservations on replacement or close", () => { scenario(`
     job(1); job(2);
     const ambiguous = parkGate(1, { kind: "submission_ambiguous", text: "Inspect possible submission" }, checkpoint);
     kvSet("fill.submitting.1", "1");
@@ -355,9 +355,9 @@ describe("durable questions", () => {
     assert.equal(getGate(ambiguous.id).state, "closed");
     assert.equal(kvGet("fill.submitting.1"), "0");
     assert.deepEqual([...manualLeases()], []);
-  `));
+  `); });
 
-  it("reopens the database with queued answers, explicit reservations, and frozen checkpoints intact", () => scenario(`
+  it("reopens the database with queued answers, explicit reservations, and frozen checkpoints intact", () => { scenario(`
     job(1); job(2); job(3); job(4); job(5); job(6);
     const answered = parkGate(1, prompt, checkpoint);
     answerGate(answered.id, "No", "standing");
@@ -393,9 +393,9 @@ describe("durable questions", () => {
     assert.equal(kvGet("fill.submitting.5"), "1");
     assert.deepEqual([...manualLeases()], [[2, 6]]);
     assert.equal(kvGet("fill.manual.6"), getOpenGate(6).id);
-  `), 15000);
+  `); }, 15000);
 
-  it("queues manual and ambiguous recovery safely while enforcing guards and preserving evidence", () => scenario(`
+  it("queues manual and ambiguous recovery safely while enforcing guards and preserving evidence", () => { scenario(`
     job(1); job(2); job(3);
     recordCheckpoint(1, checkpoint);
     recordCheckpoint(2, checkpoint);
@@ -435,9 +435,9 @@ describe("durable questions", () => {
     assert.equal(kvGet("fill.verify.2"), "1");
     assert.equal(kvGet("fill.recovery.2"), "1");
     assert.deepEqual([...manualLeases()], []);
-  `));
+  `); });
 
-  it("enforces typed evidence validation and resolves submission ambiguity safely", () => scenario(`
+  it("enforces typed evidence validation and resolves submission ambiguity safely", () => { scenario(`
     job(1);
     recordCheckpoint(1, checkpoint);
     kvSet("fill.submitting.1", "1");
@@ -496,9 +496,9 @@ describe("durable questions", () => {
     assert.equal(kvGet("fill.submitting.2"), "0");
     assert.equal(kvGet("fill.verify.2"), "0");
     assert.equal(kvGet("fill.recovery.2"), "0");
-  `));
+  `); });
 
-  it("includes bounded handoff history in resumeContext preserving root failure and newest context", () => scenario(`
+  it("includes bounded handoff history in resumeContext preserving root failure and newest context", () => { scenario(`
     job(1);
     recordCheckpoint(1, checkpoint);
 
@@ -548,5 +548,5 @@ describe("durable questions", () => {
     assert.equal(ctx.handoffHistory[4].text, "Final submission timed out");
     assert.equal(ctx.handoffHistory[4].kind, "submission_ambiguous");
     assert.equal(ctx.handoffHistory[5].text, "Latest status check failed");
-  `));
+  `); });
 });

@@ -1,25 +1,25 @@
 // The pipeline: what runs when, and the host tools each kind of worker is given.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { randomBytes } from "node:crypto";
 import { autoApply, autoApproval, checkAutoApprovedPractice, confirmsSubmit, reconsiderAutoApproval } from "./auto";
 import { addCompany, ATS, feedNames, fetchCompany, fetchDescription, fetchFeed, isAts, loadCompanies, type Posting } from "./ats";
 import { boardMinutes, boardNames, fetchBoard, isBoardUrl, linkedinDescription, probeEmployer } from "./boards";
 import { activateApplicationTab, ensureChrome, prepareJobBrowser, pruneTabs, screenshot, tabs, type JobBrowser } from "./chrome";
-import { browserCount, browserSlot, config, DATA, jobDir, PROFILE, PROMPTS, readProfile, STOCK_MAIN } from "./config";
+import { browserCount, browserSlot, config, DATA, jobDir, PROMPTS, readProfile, STOCK_MAIN } from "./config";
 import { db, dedupeExisting, findTwin, getJob, insertJob, jobsByStatus, kvGet, nextToPrep, kvSet, logEvent, notifyJobChange, relocateJob, updateJob, type Job } from "./db";
 import * as gmail from "./gmail";
 import { changedTemplateFiles, freezeResume, frozenResume, MAIN, pageCount, PDF_NAME, stageResume, stockPages, workingPdf } from "./resume";
 import { checklistText, evaluate, loadRubric, type Verdict } from "./rubric";
-import { runWorker, S, schema, type HostTool, type WorkerHandle } from "./omp";
+import { arg, runWorker, S, schema, type HostTool, type WorkerHandle } from "./omp";
+import { errorMessage } from "./errors";
 import { assessPractice } from "./practice";
-import { answerGate, cancelJobGates, consumeSubmitApproval, findStoredAnswer, getOpenGate, importLegacyGates, manualLeases, parkGate, queueRecovery, readCheckpoint, recordCheckpoint, releaseManualLease, reserveManualLease, resolveAmbiguityWithEvidence, resumeContext, returnManualControl, type FillCheckpoint, type GateInput } from "./questions";
+import { answerGate, cancelJobGates, consumeSubmitApproval, findStoredAnswer, getOpenGate, importLegacyGates, manualLeases, parkGate, queueRecovery, readCheckpoint, recordCheckpoint, releaseManualLease, reserveManualLease, resolveAmbiguityWithEvidence, resumeContext, returnManualControl, type AmbiguityEvidence, type FillCheckpoint, type GateInput } from "./questions";
 import { resolveAccount } from "./accounts";
 import { tickQuestionDigest } from "./digest";
 
 const render = (name: string, vars: Record<string, string | number | null>) =>
   `Application phase: ${config.phase.toUpperCase()}\n\n` +
-  readFileSync(join(PROMPTS, `${name}.md`), "utf8").replace(/\{\{(\w+)\}\}/g, (_, k) => String(vars[k] ?? ""));
+  readFileSync(join(PROMPTS, `${name}.md`), "utf8").replace(/\{\{(\w+)\}\}/g, (_, k: string) => String(vars[k] ?? ""));
 
 const workDir = () => {
   const dir = join(DATA, "work");
@@ -35,8 +35,8 @@ export function profileProblems(files = ["targets.md", "resume", "rubric.yml", "
     if (f === "rubric.yml") {
       try {
         return loadRubric(), false;
-      } catch (err: any) {
-        logEvent("error", err.message);
+      } catch (err) {
+        logEvent("error", errorMessage(err));
         return true;
       }
     }
@@ -59,8 +59,8 @@ async function exclusive(name: string, fn: () => Promise<void>) {
   running.add(name);
   try {
     await fn();
-  } catch (err: any) {
-    logEvent("error", `${name}: ${err?.message ?? err}`);
+  } catch (err) {
+    logEvent("error", `${name}: ${errorMessage(err)}`);
   } finally {
     running.delete(name);
   }
@@ -68,10 +68,10 @@ async function exclusive(name: string, fn: () => Promise<void>) {
 
 // A board that is down would otherwise log the same error on every scan.
 const feedErrors = new Map<string, number>();
-function feedError(key: string, err: any) {
+function feedError(key: string, err: unknown) {
   if (Date.now() - (feedErrors.get(key) ?? 0) < 6 * 3600_000) return;
   feedErrors.set(key, Date.now());
-  logEvent("error", `feed ${key}: ${err?.message ?? err}`);
+  logEvent("error", `feed ${key}: ${errorMessage(err)}`);
 }
 const due = (key: string, minutes: number) => minutes > 0 && Date.now() - Date.parse(kvGet(key) ?? "1970-01-01") > minutes * 60_000;
 
@@ -101,7 +101,7 @@ export const scan = (opts: { discover?: boolean } = {}) =>
       }
     }
     for (const name of feedNames()) {
-      if (!due(`last.feed.${name}`, config.feeds![name].minutes)) continue;
+      if (!due(`last.feed.${name}`, config.feeds?.[name]?.minutes ?? 0)) continue;
       kvSet(`last.feed.${name}`, new Date().toISOString());
       try {
         take(name, await fetchFeed(name));
@@ -128,7 +128,7 @@ async function triage() {
     const batch = jobsByStatus("found", 50);
     if (!batch.length) return;
     const ids = new Set(batch.map(j => j.id));
-    let kept: number[] | null = null;
+    let kept = null as number[] | null; // set from the tool callback
     let held: number[] = [];
     const { done } = runWorker({
       name: "triage",
@@ -150,10 +150,11 @@ async function triage() {
             },
             ["keep"],
           ),
-          handler: ({ keep, hold }) => {
-            kept = (keep as number[]).filter(id => ids.has(id));
-            held = ((hold ?? []) as number[]).filter(id => ids.has(id) && !kept!.includes(id));
-            return `Recorded ${kept.length} kept, ${held.length} held, ${ids.size - kept.length - held.length} dropped.`;
+          handler: args => {
+            const keep = arg.ints(args, "keep").filter(id => ids.has(id));
+            kept = keep;
+            held = arg.ints(args, "hold").filter(id => ids.has(id) && !keep.includes(id));
+            return `Recorded ${keep.length} kept, ${held.length} held, ${ids.size - keep.length - held.length} dropped.`;
           },
         },
       },
@@ -180,11 +181,12 @@ async function triage() {
 const addCompanyTool = (also?: (postings: Posting[]) => string): HostTool => ({
   description: "Add a company job board to the watch list. Verifies the board exists.",
   parameters: schema({ name: S.str("Company name"), ats: { type: "string", enum: [...ATS] }, slug: S.str("Board slug; for workday '<tenant>.<wdN>/<site>'") }),
-  handler: async ({ name, ats, slug }) => {
+  handler: async args => {
+    const name = arg.str(args, "name"), ats = arg.str(args, "ats"), slug = arg.str(args, "slug").trim();
     if (!isAts(ats)) return `ERROR: ats must be one of ${ATS.join(", ")}`;
-    const company = { name, ats, slug: String(slug).trim() };
-    const postings = await fetchCompany(company).catch(err => {
-      throw new Error(`board ${ats}/${slug} not reachable (${err.message}); check the slug`);
+    const company = { name, ats, slug };
+    const postings = await fetchCompany(company).catch((err: unknown) => {
+      throw new Error(`board ${ats}/${slug} not reachable (${errorMessage(err)}); check the slug`);
     });
     return (addCompany(company) ? `Added ${name}: ${postings.length} open postings will be scanned.` : "Already on the watch list.") + (also?.(postings) ?? "");
   },
@@ -214,16 +216,17 @@ async function discover() {
           location: S.str("Location or 'Remote'"),
           description: S.str("Full job description text"),
         }),
-        handler: j => {
-          if (/linkedin\.com|indeed\.com/i.test(j.url)) return "ERROR: aggregator links are not accepted; find the original posting.";
-          return insertJob({ ...j, source: "discover" }, "triaged") ? "Saved." : "Already known.";
+        handler: args => {
+          const posting = { url: arg.str(args, "url"), company: arg.str(args, "company"), title: arg.str(args, "title"), location: arg.str(args, "location"), description: arg.str(args, "description") };
+          if (/linkedin\.com|indeed\.com/i.test(posting.url)) return "ERROR: aggregator links are not accepted; find the original posting.";
+          return insertJob({ ...posting, source: "discover" }, "triaged") ? "Saved." : "Already known.";
         },
       },
       discover_done: {
         description: "Finish the discovery task.",
         parameters: schema({ summary: S.str("One-line summary") }),
-        handler: ({ summary }) => {
-          logEvent("system", `Discover: ${summary}`);
+        handler: args => {
+          logEvent("system", `Discover: ${arg.str(args, "summary")}`);
           return "Done.";
         },
       },
@@ -273,14 +276,15 @@ export const locate = () =>
           found_posting: {
             description: "Record the employer's own posting for one job.",
             parameters: schema({ job_id: S.int("Job id from the list"), url: S.str("Direct URL of the posting on the employer's site"), description: S.str("Full job description text from that page") }),
-            handler: async ({ job_id, url, description }) => {
+            handler: async args => {
+              const job_id = arg.int(args, "job_id"), url = arg.str(args, "url");
               const job = open.get(job_id);
               if (!job) return "ERROR: unknown job id, or already reported.";
               if (!/^https?:\/\//i.test(url) || NOT_EMPLOYER.test(url)) return "ERROR: that is a job site, not the employer's own posting. Find the employer's page or call no_posting.";
               const status = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(20_000) }).then(r => r.status, () => 0);
               if (status === 404 || status === 410) return `ERROR: that URL answers ${status}. Check it, or call no_posting.`;
               open.delete(job_id);
-              const text = String(description ?? "").trim();
+              const text = (arg.optStr(args, "description") ?? "").trim();
               const merged = relocateJob(job, url, text.length >= 300 ? text : ((await fetchDescription(url)) ?? job.description ?? (await linkedinDescription(job.url)) ?? text)) === "merged";
               logEvent("system", `Found the employer's posting: ${url}`, merged ? null : job_id, "locate");
               return merged ? "Recorded (that posting was already known)." : "Recorded.";
@@ -294,16 +298,17 @@ export const locate = () =>
           no_posting: {
             description: "Report that a job has no findable posting on the employer's own site.",
             parameters: schema({ job_id: S.int("Job id from the list"), reason: S.str("Short reason") }),
-            handler: ({ job_id, reason }) => {
+            handler: args => {
+              const job_id = arg.int(args, "job_id");
               if (!open.delete(job_id)) return "ERROR: unknown job id, or already reported.";
-              updateJob(job_id, { status: "skipped", note: `no posting on the employer's own site: ${reason}` });
+              updateJob(job_id, { status: "skipped", note: `no posting on the employer's own site: ${arg.str(args, "reason")}` });
               return "Recorded.";
             },
           },
           locate_done: {
             description: "Finish the task.",
             parameters: schema({ summary: S.str("One-line summary") }),
-            handler: ({ summary }) => (logEvent("system", `Locate: ${summary}`), "Done."),
+            handler: args => (logEvent("system", `Locate: ${arg.str(args, "summary")}`), "Done."),
           },
         },
       });
@@ -324,8 +329,9 @@ async function prep(job: Job) {
   const maxPages = stockPages();
   updateJob(job.id, { status: "prepping", note: null });
   const feedback = kvGet(`feedback.${job.id}`); // set when the user asked for this job explicitly
-  let verdict: Verdict | null = null;
-  let reported = false;
+  // Both are set from tool callbacks.
+  let verdict = null as Verdict | null;
+  let reported = false as boolean;
   const { done } = runWorker({
     name: "prep",
     builtins: ["read", "write", "edit", "bash"],
@@ -371,7 +377,8 @@ async function prep(job: Job) {
           },
           config.phase === "practice" ? ["answers", "practice"] : ["answers"],
         ),
-        handler: ({ answers, practice }) => {
+        handler: args => {
+          const answers = args["answers"], practice = args["practice"];
           if (config.phase === "practice") {
             if (!practice || typeof practice !== "object" || Array.isArray(practice)) {
               return "ERROR: 'practice' evidence object is required in the practice phase with annualBaseMaxUsd, salaryEvidence, mandatoryNonlocalOnsite, and locationEvidence. Call submit_checklist again with practice evidence.";
@@ -406,7 +413,8 @@ async function prep(job: Job) {
           concerns: S.str("At most two short lines about real gaps or risks of this job; empty string if none"),
           resume_changes: S.str("Up to five short bullets: what changed in the resume and why"),
         }),
-        handler: ({ rationale, concerns, resume_changes }) => {
+        handler: args => {
+          const rationale = arg.str(args, "rationale"), concerns = arg.str(args, "concerns"), resume_changes = arg.str(args, "resume_changes");
           if (!verdict) return "ERROR: call submit_checklist first.";
           if (reported) return "ERROR: this job was already closed by the checklist; nothing more to do.";
           const pdf = workingPdf(job.id);
@@ -475,13 +483,15 @@ const navigationFields = {
 };
 
 async function checkpointFrom(session: FillSession, args: Record<string, unknown>): Promise<FillCheckpoint> {
-  for (const key of Object.keys(navigationFields))
-    if (typeof args[key] !== "string" || !String(args[key]).trim()) throw new Error(`checkpoint ${key} is required`);
+  for (const key of Object.keys(navigationFields)) {
+    const value = args[key];
+    if (typeof value !== "string" || !value.trim()) throw new Error(`checkpoint ${key} is required`);
+  }
   if (!ownsFill(session)) throw new Error("stale fill worker");
-  if (!session.browser?.ownsTarget(String(args.tab_id))) throw new Error("checkpoint tab is outside this application's browser scope");
-  const tab = (await tabs(session.slot)).find(t => t.id === String(args.tab_id));
+  if (!session.browser?.ownsTarget(String(args["tab_id"]))) throw new Error("checkpoint tab is outside this application's browser scope");
+  const tab = (await tabs(session.slot)).find(t => t.id === String(args["tab_id"]));
   if (!tab) throw new Error("current application tab id not found; re-observe before parking");
-  const url = new URL(String(args.url));
+  const url = new URL(String(args["url"]));
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash)
     throw new Error("checkpoint URL must omit credentials, query strings and fragments");
   const observed = new URL(tab.url);
@@ -490,7 +500,7 @@ async function checkpointFrom(session: FillSession, args: Record<string, unknown
   if (!ownsFill(session)) throw new Error("stale fill worker");
   const checkpoint: FillCheckpoint = {
     version: 1, slot: session.slot, tabId: tab.id, url: url.href,
-    step: String(args.step), notes: String(args.notes), resumeSha: session.checkpoint.resumeSha, savedAt: new Date().toISOString(),
+    step: String(args["step"]), notes: String(args["notes"]), resumeSha: session.checkpoint.resumeSha, savedAt: new Date().toISOString(),
   };
   session.checkpoint = checkpoint;
   recordCheckpoint(session.jobId, checkpoint);
@@ -506,7 +516,7 @@ async function parkFill(session: FillSession, input: GateInput, checkpoint = ses
   if (shot) await Bun.write(join(jobDir(session.jobId), "gate.png"), shot);
   if (!ownsFill(session)) throw new Error("stale fill worker");
   if (kvGet(`fill.submitting.${session.jobId}`) === "1") {
-    const reason = input.text?.trim();
+    const reason = input.text.trim();
     input = {
       kind: "submission_ambiguous",
       text: reason
@@ -626,17 +636,17 @@ const gmailTools = (): Record<string, HostTool> => ({
   gmail_search: {
     description: "Search the application mailbox with Gmail query syntax (e.g. 'from:greenhouse newer_than:1h'). Returns message summaries.",
     parameters: schema({ query: S.str("Gmail search query"), max: S.int("Max results (default 10, limit 25)") }, ["query"]),
-    handler: async ({ query, max }) => JSON.stringify(await gmail.search(query, max ?? 10), null, 1),
+    handler: async args => JSON.stringify(await gmail.search(arg.str(args, "query"), arg.optInt(args, "max") ?? 10), null, 1),
   },
   gmail_read: {
     description: "Read one message in full (headers and body text, with link targets).",
     parameters: schema({ id: S.str("Message id from gmail_search") }),
-    handler: async ({ id }) => JSON.stringify(await gmail.read(id), null, 1),
+    handler: async args => JSON.stringify(await gmail.read(arg.str(args, "id")), null, 1),
   },
   gmail_mark_read: {
     description: "Mark a message as read.",
     parameters: schema({ id: S.str("Message id") }),
-    handler: async ({ id }) => (await gmail.markRead(id), "Marked read."),
+    handler: async args => (await gmail.markRead(arg.str(args, "id")), "Marked read."),
   },
 });
 
@@ -709,7 +719,8 @@ async function fill(job: Job, session: FillSession) {
   }
   await pruneTabs(slot, 5, protectedTabs);
   if (!ownsFill(session)) return;
-  session.browser = await prepareJobBrowser(slot, session.checkpoint.tabId, excludedTargets);
+  const jobBrowser = await prepareJobBrowser(slot, session.checkpoint.tabId, excludedTargets);
+  session.browser = jobBrowser;
   if (!ownsFill(session)) return;
   session.checkpoint = {
     ...session.checkpoint, tabId: session.browser.tabId,
@@ -722,7 +733,7 @@ async function fill(job: Job, session: FillSession) {
     application_tabs: {
       description: "Get actual CDP tab IDs and sanitized navigation URLs owned by this application. Other parked/manual drafts are inaccessible.",
       parameters: schema({}),
-      handler: async () => JSON.stringify((await tabs(slot)).filter(tab => session.browser!.ownsTarget(tab.id)).flatMap(tab => {
+      handler: async () => JSON.stringify((await tabs(slot)).filter(tab => jobBrowser.ownsTarget(tab.id)).flatMap(tab => {
         const url = new URL(tab.url);
         return ["http:", "https:"].includes(url.protocol)
           ? [{ tab_id: tab.id, title: tab.title, url: `${url.origin}${url.pathname}` }]
@@ -740,9 +751,9 @@ async function fill(job: Job, session: FillSession) {
         domain: S.str("Site domain, e.g. acme.wd5.myworkdayjobs.com"),
         register: { type: "boolean", description: "Set true only if the site explicitly confirmed no existing account and registration is required" },
       }, ["domain"]),
-      handler: async ({ domain, register }) => {
-        const allowCreate = register === true && !isVerification && kvGet(`fill.submitting.${job.id}`) !== "1";
-        return await resolveAccount(String(domain), mailbox, allowCreate);
+      handler: args => {
+        const allowCreate = args["register"] === true && !isVerification && kvGet(`fill.submitting.${job.id}`) !== "1";
+        return resolveAccount(arg.str(args, "domain"), mailbox, allowCreate);
       },
     },
     ask_user: {
@@ -754,9 +765,10 @@ async function fill(job: Job, session: FillSession) {
         ...navigationFields,
       }),
       handler: async args => {
-        if (!Array.isArray(args.options) || !args.options.every((option: unknown) => typeof option === "string"))
+        const options: unknown = args["options"];
+        if (!Array.isArray(options) || !options.every((option): option is string => typeof option === "string"))
           return "ERROR: options must contain every current choice verbatim.";
-        const input: GateInput = { kind: "question", text: String(args.question), context: String(args.context), options: args.options };
+        const input: GateInput = { kind: "question", text: arg.str(args, "question"), context: arg.str(args, "context"), options };
         const answer = findStoredAnswer(job.id, input);
         if (answer !== null) return `Exact scoped candidate answer: ${answer}`;
         return parkFill(session, input, await checkpointFrom(session, args));
@@ -766,7 +778,7 @@ async function fill(job: Job, session: FillSession) {
       description: "Return this application's provided letter or durably park for it. Never write a letter.",
       parameters: schema({ prompt: S.str("Exact required cover-letter prompt, limits and upload/text requirements"), ...navigationFields }),
       handler: async args => {
-        const input: GateInput = { kind: "cover_letter", text: String(args.prompt), context: "Required cover letter for this application; exact constraints in prompt", options: [] };
+        const input: GateInput = { kind: "cover_letter", text: arg.str(args, "prompt"), context: "Required cover letter for this application; exact constraints in prompt", options: [] };
         const letter = findStoredAnswer(job.id, input);
         if (letter === null) return parkFill(session, input, await checkpointFrom(session, args));
         writeFileSync(join(dir, "cover_letter.txt"), letter + "\n");
@@ -779,7 +791,7 @@ async function fill(job: Job, session: FillSession) {
       handler: async args => {
         if (isVerification) return "ERROR: verification workers are strictly forbidden from submitting or authorizing applications.";
         await checkpointFrom(session, args);
-        return confirmSubmission(job.id, String(args.summary));
+        return confirmSubmission(job.id, arg.str(args, "summary"));
       },
     },
     need_manual: {
@@ -787,7 +799,7 @@ async function fill(job: Job, session: FillSession) {
       parameters: schema({ reason: S.str("Blocking evidence and what the candidate needs to do"), ...navigationFields }),
       handler: async args => {
         let checkpoint = session.checkpoint;
-        let reason = String(args.reason);
+        let reason = arg.str(args, "reason");
         try {
           checkpoint = await checkpointFrom(session, args);
         } catch (err) {
@@ -805,12 +817,13 @@ async function fill(job: Job, session: FillSession) {
     report_result: {
       description: "Report verified success/closed status, or failure. Failure after final authorization requires inspection, not retry.",
       parameters: schema({ outcome: { type: "string", enum: ["submitted", "already_applied", "closed", "failed"] }, note: S.str("Observed evidence") }),
-      handler: ({ outcome, note }) => {
+      handler: args => {
+        const outcome = arg.oneOf(args, "outcome", ["submitted", "already_applied", "closed", "failed"]), note = arg.str(args, "note");
         if (isVerification) {
           return "ERROR: verification workers must record status through verify_status with structured evidence, or hand off through need_manual.";
         }
         if (outcome !== "submitted" && outcome !== "already_applied" && kvGet(`fill.submitting.${job.id}`) === "1") {
-          stopFailedFill(session, String(note));
+          stopFailedFill(session, note);
           return "Submission ambiguity recorded; automatic retry forbidden.";
         }
         db.transaction(() => {
@@ -854,8 +867,8 @@ async function fill(job: Job, session: FillSession) {
       }, ["outcome", "evidence"]),
       handler: async args => {
         if (!isVerification) return "ERROR: verify_status is only available during verification mode.";
-        const outcome = String(args.outcome);
-        const evidence = String(args.evidence ?? "").trim();
+        const outcome = arg.str(args, "outcome");
+        const evidence = (arg.optStr(args, "evidence") ?? "").trim();
         if (evidence.length < 5) return "ERROR: detailed evidence text is required (minimum 5 characters).";
 
         if (outcome === "unresolved") {
@@ -869,9 +882,10 @@ async function fill(job: Job, session: FillSession) {
           }, cp);
         }
 
-        const source = String(args.source ?? "") as "portal" | "confirmation_email" | "submission_error";
-        const status = String(args.status ?? "") as "submitted" | "not_submitted" | "draft" | "incomplete" | "rejected";
-        const reqId = String(args.requisition_id ?? "").trim();
+        const source = (arg.optStr(args, "source") ?? "") as AmbiguityEvidence["source"];
+        const status = (arg.optStr(args, "status") ?? "") as AmbiguityEvidence["status"];
+        const reqId = (arg.optStr(args, "requisition_id") ?? "").trim();
+        const messageId = (arg.optStr(args, "message_id") ?? "").trim();
         if (!reqId) return "ERROR: exact non-empty requisition_id is required for verified resolution.";
         const cp = await checkpointFrom(session, args);
 
@@ -879,7 +893,7 @@ async function fill(job: Job, session: FillSession) {
           if (source !== "portal" && source !== "confirmation_email") {
             return "ERROR: submitted outcome requires source 'portal' or 'confirmation_email'.";
           }
-          if (source === "confirmation_email" && !String(args.message_id ?? "").trim()) {
+          if (source === "confirmation_email" && !messageId) {
             return "ERROR: confirmation_email requires message_id from gmail.";
           }
           if (source === "portal" && status !== "submitted") {
@@ -890,7 +904,7 @@ async function fill(job: Job, session: FillSession) {
             requisitionId: reqId,
             source,
             status,
-            messageId: args.message_id ? String(args.message_id) : undefined,
+            ...(messageId ? { messageId } : {}),
             checkpoint: cp,
           });
           session.active = false;
@@ -978,7 +992,7 @@ export const track = () =>
     const since = kvGet("last.track") ?? new Date(Date.now() - 7 * 86400_000).toISOString();
     const started = new Date().toISOString();
     const ids = new Set(open.map(j => j.id));
-    let finished = false;
+    let finished = false as boolean; // set from the tool callback
     const { done } = runWorker({
       name: "track",
       builtins: ["read", "write"],
@@ -1000,7 +1014,9 @@ export const track = () =>
             status: { type: "string", enum: ["submitted", "interview", "offer", "rejected_by_company"] },
             note: S.str("One line with the key fact"),
           }),
-          handler: ({ job_id, status, note }) => {
+          handler: args => {
+            const job_id = arg.int(args, "job_id"), note = arg.str(args, "note");
+            const status = arg.oneOf(args, "status", ["submitted", "interview", "offer", "rejected_by_company"]);
             if (!ids.has(job_id)) return "ERROR: unknown application id.";
             updateJob(job_id, { status, note });
             logEvent("mail", `${status}: ${note}`, job_id, "track");
@@ -1010,14 +1026,14 @@ export const track = () =>
         note: {
           description: "Flag a message for the candidate that matches no listed application.",
           parameters: schema({ summary: S.str("One-line summary including sender") }),
-          handler: ({ summary }) => (logEvent("mail", summary, null, "track"), "Noted."),
+          handler: args => (logEvent("mail", arg.str(args, "summary"), null, "track"), "Noted."),
         },
         track_done: {
           description: "Finish the tracking task.",
           parameters: schema({ summary: S.str("One-line summary") }),
-          handler: ({ summary }) => {
+          handler: args => {
             finished = true;
-            logEvent("system", `Track: ${summary}`);
+            logEvent("system", `Track: ${arg.str(args, "summary")}`);
             return "Done.";
           },
         },
@@ -1154,7 +1170,7 @@ export function pumpDeferredApprovals() {
 }
 // Start whatever work is waiting. Safe to call any time state changes.
 export function pump() {
-  if (!isRunning("locate") && usedToday("locate") < (config.limits.locatePerDay ?? 40) && jobsByStatus("locating", 1).length) locate();
+  if (!isRunning("locate") && usedToday("locate") < (config.limits.locatePerDay ?? 40) && jobsByStatus("locating", 1).length) void locate();
   if (profileProblems().length === 0) {
     pumpDeferredApprovals();
     while (prepActive < config.concurrency.prep && usedToday("prep") < config.limits.prepPerDay) {
@@ -1163,15 +1179,18 @@ export function pump() {
       prepActive++;
       countOne("prep");
       updateJob(job.id, { status: "prepping" });
-      prep(job)
-        .catch(err => updateJob(job.id, { status: "failed", note: `prep: ${err?.message ?? err}` }))
-        .finally(() => (prepActive--, pump()));
+      void prep(job)
+        .catch((err: unknown) => { updateJob(job.id, { status: "failed", note: `prep: ${errorMessage(err)}` }); })
+        .finally(() => {
+          prepActive--;
+          pump();
+        });
     }
   }
   const leases = manualLeases();
   for (let slot = 0; slot < filling.length; slot++) {
     if (filling[slot] || leases.has(slot) || manualActivations.has(slot) ||
-        Date.now() < Math.max(nextFillAt, restUntil[slot]!)) continue;
+        Date.now() < Math.max(nextFillAt, restUntil[slot] ?? 0)) continue;
     // Only current workers and explicit human inspection own employer sessions.
     const employers = new Set<string>();
     for (const owner of [...fillSessions.keys(), ...leases.values(), ...manualActivations.values()]) {
@@ -1215,8 +1234,8 @@ export function pump() {
     nextFillAt = Date.now() + min * 1000;
     kvSet("fill.nextAt", String(nextFillAt));
     fill(job, session)
-      .catch(async err => {
-        stopFailedFill(session, `fill: ${err instanceof Error ? err.message : String(err)}`);
+      .catch(async (err: unknown) => {
+        stopFailedFill(session, `fill: ${errorMessage(err)}`);
         // A thrown callback cannot free a still-running worker's slot.
         if (session.handle) {
           session.handle.abort();
@@ -1239,7 +1258,7 @@ export function startScheduler() {
   dedupeExisting();
   adoptLegacyDeferredJobs();
   importLegacyGates();
-  db.exec("UPDATE jobs SET status = 'triaged' WHERE status = 'prepping'");
+  db.run("UPDATE jobs SET status = 'triaged' WHERE status = 'prepping'");
   // Open gates remain parked; answered gates remain queued. A marker is never
   // cleared by startup, generic retry, or the act of requesting approval.
   for (const j of db.query<Job, []>("SELECT * FROM jobs WHERE status IN ('approved', 'filling', 'needs_input', 'awaiting_submit', 'needs_manual', 'failed')").all()) {
@@ -1261,14 +1280,15 @@ export function startScheduler() {
     }
   }
   // Upgrading from the single schedule: the last scan also ran discovery.
-  if (!kvGet("last.discover") && kvGet("last.scan")) kvSet("last.discover", kvGet("last.scan")!);
+  const lastScan = kvGet("last.scan");
+  if (!kvGet("last.discover") && lastScan) kvSet("last.discover", lastScan);
   const tick = () => {
-    if (due("last.scan", config.schedule.scanMinutes) && !profileProblems(["targets.md"]).length) scan({ discover: due("last.discover", config.schedule.discoverMinutes) });
+    if (due("last.scan", config.schedule.scanMinutes) && !profileProblems(["targets.md"]).length) void scan({ discover: due("last.discover", config.schedule.discoverMinutes) });
     if (due("last.track", config.schedule.trackMinutes) && !kvGet("last.track.attempt")?.startsWith(new Date().toISOString().slice(0, 13))) {
       kvSet("last.track.attempt", new Date().toISOString());
-      track();
+      void track();
     }
-    void tickQuestionDigest().catch(err => logEvent("error", `Question digest: ${err instanceof Error ? err.message : String(err)}`));
+    void tickQuestionDigest().catch((err: unknown) => { logEvent("error", `Question digest: ${errorMessage(err)}`); });
     pump();
   };
   setInterval(tick, 30_000);

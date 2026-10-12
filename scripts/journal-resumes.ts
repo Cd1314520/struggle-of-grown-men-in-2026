@@ -14,7 +14,6 @@ import {
   type ResumeReviewInput,
   type ResumeGap,
   type ApplicationResumeReview,
-  type GapStatus,
 } from "./resume-review-model";
 
 // Resolve repository root via import.meta.url so default paths are independent of process.cwd()
@@ -144,32 +143,40 @@ export function parseCliArgs(argv: string[]): CliOptions {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    const next = args[i + 1];
     if (arg === "--help" || arg === "-h") {
       help = true;
     } else if (arg === "--silent" || arg === "-q") {
       silent = true;
     } else if (arg === "--db") {
-      if (!args[i + 1]) throw new Error("Missing value for --db");
-      dbPath = resolve(process.cwd(), args[++i]);
+      if (!next) throw new Error("Missing value for --db");
+      dbPath = resolve(process.cwd(), next);
+      i++;
     } else if (arg === "--journal") {
-      if (!args[i + 1]) throw new Error("Missing value for --journal");
-      journalPath = resolve(process.cwd(), args[++i]);
+      if (!next) throw new Error("Missing value for --journal");
+      journalPath = resolve(process.cwd(), next);
+      i++;
     } else if (arg === "--state") {
-      if (!args[i + 1]) throw new Error("Missing value for --state");
-      statePath = resolve(process.cwd(), args[++i]);
+      if (!next) throw new Error("Missing value for --state");
+      statePath = resolve(process.cwd(), next);
+      i++;
     } else if (arg === "--notes") {
-      if (!args[i + 1]) throw new Error("Missing value for --notes");
-      notesPath = resolve(process.cwd(), args[++i]);
+      if (!next) throw new Error("Missing value for --notes");
+      notesPath = resolve(process.cwd(), next);
+      i++;
     } else if (arg === "--jobs-root") {
-      if (!args[i + 1]) throw new Error("Missing value for --jobs-root");
-      jobsRoot = resolve(process.cwd(), args[++i]);
+      if (!next) throw new Error("Missing value for --jobs-root");
+      jobsRoot = resolve(process.cwd(), next);
+      i++;
     } else if (arg === "--batch-size") {
-      if (!args[i + 1]) throw new Error("Missing value for --batch-size");
-      batchSize = parseInt(args[++i], 10);
+      if (!next) throw new Error("Missing value for --batch-size");
+      batchSize = parseInt(next, 10);
+      i++;
       if (isNaN(batchSize) || batchSize <= 0) throw new Error("Invalid batch-size value");
     } else if (arg === "--max-apps") {
-      if (!args[i + 1]) throw new Error("Missing value for --max-apps");
-      maxApps = parseInt(args[++i], 10);
+      if (!next) throw new Error("Missing value for --max-apps");
+      maxApps = parseInt(next, 10);
+      i++;
       if (isNaN(maxApps) || maxApps < 0) throw new Error("Invalid max-apps value");
     } else {
       throw new Error(`Unknown argument: ${arg}`);
@@ -191,7 +198,7 @@ export function loadResumeJournalState(statePath: string): ResumeJournalState {
 
   const raw = readFileSync(statePath, "utf8");
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as Partial<Record<keyof ResumeJournalState, unknown>> | null;
     if (!parsed || typeof parsed !== "object" || parsed.version !== 1) {
       throw new Error("Invalid state version or schema root");
     }
@@ -205,7 +212,8 @@ export function loadResumeJournalState(statePath: string): ResumeJournalState {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Corrupt resume journal state file at ${statePath}: ${msg}. Refusing to overwrite corrupt state.`
+      `Corrupt resume journal state file at ${statePath}: ${msg}. Refusing to overwrite corrupt state.`,
+      { cause: err }
     );
   }
 }
@@ -281,7 +289,7 @@ export function extractPublishedJournalMarkers(journalPath: string): {
   }
   // Match entry timestamp
   for (const m of content.matchAll(/<!--\s*journal-resume-review-entry:\s*timestamp=([^\s]+)\s*-->/g)) {
-    entryTimestamps.add(m[1]);
+    if (m[1] !== undefined) entryTimestamps.add(m[1]);
   }
 
   return { publishedJobFingerprints, publishedMissingKeys, entryTimestamps };
@@ -347,7 +355,7 @@ export function verifyJobAttributionAndEvidence(
   }
 
   // 2. Validate posting description
-  if (!job.description || !job.description.trim()) {
+  if (!job.description?.trim()) {
     return {
       valid: false,
       jobId: job.id,
@@ -358,7 +366,7 @@ export function verifyJobAttributionAndEvidence(
   }
 
   // 3. Validate stored resume SHA
-  if (!job.resume_sha || !job.resume_sha.trim()) {
+  if (!job.resume_sha?.trim()) {
     return {
       valid: false,
       jobId: job.id,
@@ -848,7 +856,7 @@ export async function runResumeJournal(
 
     for (const attempt of dbSnapshot.uniqueAttempts) {
       const jobDetail = dbSnapshot.jobDetailsMap.get(attempt.jobId);
-      const approvals = dbSnapshot.approvalsMap.get(attempt.jobId) || [];
+      const approvals = dbSnapshot.approvalsMap.get(attempt.jobId) ?? [];
 
       const res = verifyJobAttributionAndEvidence(
         jobDetail,
@@ -861,12 +869,14 @@ export async function runResumeJournal(
       if (res.valid) {
         validEvidenceList.push(res);
         // Clear stale missing evidence mapping on valid recovery
-        if (state.missingEvidence[String(res.jobId)]) {
-          delete state.missingEvidence[String(res.jobId)];
+        const recoveredKey = String(res.jobId);
+        if (state.missingEvidence[recoveredKey]) {
+          const { [recoveredKey]: _recovered, ...stillMissing } = state.missingEvidence;
+          state.missingEvidence = stillMissing;
         }
       } else {
         const existingMissing = state.missingEvidence[String(res.jobId)];
-        if (!existingMissing || existingMissing.reason !== res.reason) {
+        if (existingMissing?.reason !== res.reason) {
           const entry: MissingEvidenceEntry = {
             jobId: res.jobId,
             company: res.company,
@@ -886,7 +896,7 @@ export async function runResumeJournal(
 
     for (const ev of validEvidenceList) {
       const cached = state.reviews[String(ev.jobId)];
-      if (cached && cached.fingerprint === ev.fingerprint) {
+      if (cached?.fingerprint === ev.fingerprint) {
         // Cached exists and matches exact evidence fingerprint
         const key = `${cached.jobId}:${cached.fingerprint}`;
         if (!publishedJobFingerprints.has(key)) {

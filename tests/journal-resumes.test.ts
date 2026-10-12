@@ -7,19 +7,13 @@ import { createHash } from "node:crypto";
 import {
   runResumeJournal,
   loadResumeJournalState,
-  saveResumeJournalState,
   aggregateResumeThemes,
   formatResumeJournalEntry,
   verifyJobAttributionAndEvidence,
-  computeFingerprint,
-  computeFileSha256,
   parseCliArgs,
-  parseTimestampMs,
   REPO_ROOT,
   DEFAULT_DB_PATH,
   type CachedReviewEntry,
-  type MissingEvidenceEntry,
-  type ResumeJournalState,
   type CliOptions,
   type JobDetailRow,
   type ApprovalEventRow,
@@ -28,8 +22,18 @@ import {
 import type {
   ResumeReviewInput,
   ApplicationResumeReview,
-  ResumeGap,
 } from "../scripts/resume-review-model";
+
+/** Resolves with the Error a promise rejects with; fails the test if it settles any other way. */
+async function rejectionOf(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (err) {
+    if (err instanceof Error) return err;
+    throw new Error(`Expected rejection with an Error, got: ${String(err)}`, { cause: err });
+  }
+  throw new Error("Expected promise to reject, but it resolved");
+}
 
 describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
   const samplePdfBytes = readFileSync("data/jobs/8878/applied/2790dfe6397e/resume.pdf");
@@ -86,7 +90,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     );
 
     const db = new Database(dbPath, { create: true });
-    db.exec(`
+    db.run(`
       CREATE TABLE jobs (
         id INTEGER PRIMARY KEY,
         url TEXT NOT NULL UNIQUE,
@@ -147,7 +151,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     jobId: number,
     customPdfBytes?: Buffer
   ): { sha: string; pdfPath: string } {
-    const bytes = customPdfBytes || samplePdfBytes;
+    const bytes = customPdfBytes ?? samplePdfBytes;
     const sha = createHash("sha256").update(bytes).digest("hex");
     const dir = join(jobsRoot, String(jobId), "applied", sha.slice(0, 12));
     mkdirSync(dir, { recursive: true });
@@ -172,7 +176,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
 
     const db = new Database(dbPath);
     const now = "2026-10-10 03:00:00";
-    db.exec(`
+    db.run(`
       INSERT INTO jobs (id, url, source, company, title, description, status, approved_by, resume_sha, resume_frozen_at)
       VALUES (101, 'https://example.com/job/101', 'discover', 'Acme Corp', 'Engineer', 'Need Python and SQL', 'filling', 'auto', 'invalidsha', '2026-10-10T03:00:00.000Z');
       INSERT INTO events (id, job_id, worker, kind, message, at)
@@ -216,7 +220,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     );
 
     const db = new Database(dbPath);
-    db.exec(`
+    db.run(`
       INSERT INTO jobs (id, url, source, company, title, description, status, approved_by, resume_sha, resume_frozen_at)
       VALUES (102, 'https://example.com/102', 'discover', 'Retained Corp', 'Dev', 'Must know SQL', 'filling', 'auto', '${sha}', '${nowIso}');
       INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (1, 102, 'prep', 'auto', 'Approved by auto apply: ok', '${now}');
@@ -229,7 +233,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     expect(res.success).toBe(true);
     expect(res.changed).toBe(true);
     expect(mockCalls.length).toBe(1);
-    expect(mockCalls[0][0].jobId).toBe(102);
+    expect(mockCalls[0]?.[0]?.jobId).toBe(102);
   });
 
   it("5. Attributions handle interleaved approvals: auto -> user -> auto recognizes latest governing approval at freeze", () => {
@@ -296,7 +300,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     const nowIso = "2026-10-10T03:00:00.000Z";
 
     const db = new Database(dbPath);
-    db.exec(`
+    db.run(`
       INSERT INTO jobs (id, url, source, company, title, description, status, approved_by, resume_sha, resume_frozen_at)
       VALUES (301, 'https://example.com/301', 'discover', 'Changing Corp', 'Role', 'Initial posting text', 'filling', 'auto', '${sha}', '${nowIso}');
       INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (1, 301, 'prep', 'auto', 'Approved by auto apply: test', '${now}');
@@ -314,7 +318,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
 
     // Employer posting text updates in database (same resume SHA)
     const db2 = new Database(dbPath);
-    db2.exec(`UPDATE jobs SET description = 'Updated posting text with new requirements' WHERE id = 301`);
+    db2.run(`UPDATE jobs SET description = 'Updated posting text with new requirements' WHERE id = 301`);
     db2.close();
 
     mockCalls.length = 0;
@@ -326,7 +330,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     // Journal contains two distinct review entries reflecting the two different fingerprints
     const matches = Array.from(journalContent2.matchAll(/<!--\s*journal-resume-review:\s*jobId=301\s+fp=([0-9a-f]+)/g));
     expect(matches.length).toBe(2);
-    expect(matches[0][1]).not.toBe(matches[1][1]);
+    expect(matches[0]?.[1]).not.toBe(matches[1]?.[1]);
   });
 
   it("7. Groups themes strictly by bucket (never relabels unconfirmed as supported) with compact table format", () => {
@@ -381,16 +385,16 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
 
     // Verify structured segregation without majority conflation
     expect(supportedThemes.length).toBe(1);
-    expect(supportedThemes[0].theme).toBe("SQL Server Schema Design");
-    expect(supportedThemes[0].distinctJobIds.size).toBe(1);
-    expect(supportedThemes[0].requiredCount).toBe(1);
-    expect(supportedThemes[0].coreCount).toBe(0);
+    expect(supportedThemes[0]?.theme).toBe("SQL Server Schema Design");
+    expect(supportedThemes[0]?.distinctJobIds.size).toBe(1);
+    expect(supportedThemes[0]?.requiredCount).toBe(1);
+    expect(supportedThemes[0]?.coreCount).toBe(0);
 
     expect(unconfirmedThemes.length).toBe(1);
-    expect(unconfirmedThemes[0].theme).toBe("SQL Server Schema Design");
-    expect(unconfirmedThemes[0].distinctJobIds.size).toBe(1);
-    expect(unconfirmedThemes[0].requiredCount).toBe(0);
-    expect(unconfirmedThemes[0].coreCount).toBe(1);
+    expect(unconfirmedThemes[0]?.theme).toBe("SQL Server Schema Design");
+    expect(unconfirmedThemes[0]?.distinctJobIds.size).toBe(1);
+    expect(unconfirmedThemes[0]?.requiredCount).toBe(0);
+    expect(unconfirmedThemes[0]?.coreCount).toBe(1);
 
     // Verify formatted entry contains stable markers and verbatim posting quotes
     const formatted = formatResumeJournalEntry({
@@ -408,14 +412,14 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
 
   it("8. Strict throw when model review output lacks coverage for an input job (no fake fallback)", async () => {
     // Custom reviewer returns empty array (missing coverage for job 501)
-    const { dbPath, jobsRoot, defaultOpts } = setupTestEnv(async () => []);
+    const { dbPath, jobsRoot, defaultOpts } = setupTestEnv(() => Promise.resolve([]));
 
     const { sha } = createValidJobArtifacts(jobsRoot, 501);
     const now = "2026-10-10 03:00:00";
     const nowIso = "2026-10-10T03:00:00.000Z";
 
     const db = new Database(dbPath);
-    db.exec(`
+    db.run(`
       INSERT INTO jobs (id, url, source, company, title, description, status, approved_by, resume_sha, resume_frozen_at)
       VALUES (501, 'https://example.com/501', 'discover', 'Corp', 'Role', 'Posting text', 'filling', 'auto', '${sha}', '${nowIso}');
       INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (1, 501, 'prep', 'auto', 'Approved by auto apply: test', '${now}');
@@ -423,7 +427,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     `);
     db.close();
 
-    await expect(runResumeJournal(defaultOpts)).rejects.toThrow();
+    expect(await rejectionOf(runResumeJournal(defaultOpts))).toBeInstanceOf(Error);
 
     // Job 501 is NOT cached in state
     const state = loadResumeJournalState(defaultOpts.statePath);
@@ -438,7 +442,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
 
     const db = new Database(dbPath);
     // Job 601 starts with missing PDF file
-    db.exec(`
+    db.run(`
       INSERT INTO jobs (id, url, source, company, title, description, status, approved_by, resume_sha, resume_frozen_at)
       VALUES (601, 'https://example.com/601', 'discover', 'Recovering Corp', 'Role', 'Posting text', 'filling', 'auto', 'nonexistent_sha_value', '${nowIso}');
       INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (1, 601, 'prep', 'auto', 'Approved by auto apply: test', '${now}');
@@ -455,7 +459,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     // Fix the issue: create valid PDF artifact and update DB with real SHA
     const { sha: realSha } = createValidJobArtifacts(jobsRoot, 601);
     const db2 = new Database(dbPath);
-    db2.exec(`UPDATE jobs SET resume_sha = '${realSha}' WHERE id = 601`);
+    db2.run(`UPDATE jobs SET resume_sha = '${realSha}' WHERE id = 601`);
     db2.close();
 
     // Run 2: Evidence recovers, stale missing evidence is deleted from mapping
@@ -487,7 +491,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     const nowIso = "2026-10-10T05:00:05.000Z";
 
     const db = new Database(dbPath);
-    db.exec(`
+    db.run(`
       INSERT INTO jobs (id, url, source, company, title, description, status, approved_by, resume_sha, resume_frozen_at)
       VALUES (${jobId}, 'https://example.com/701', 'discover', 'Deferred Reconsidered Corp', 'Backend Engineer', 'Must know TypeScript and SQLite', 'submitted', 'auto', '${sha}', '${nowIso}');
       INSERT INTO events (id, job_id, worker, kind, message, at)
@@ -501,8 +505,8 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     expect(res.success).toBe(true);
     expect(res.changed).toBe(true);
     expect(mockCalls.length).toBe(1);
-    expect(mockCalls[0][0].jobId).toBe(jobId);
-    expect(mockCalls[0][0].company).toBe("Deferred Reconsidered Corp");
+    expect(mockCalls[0]?.[0]?.jobId).toBe(jobId);
+    expect(mockCalls[0]?.[0]?.company).toBe("Deferred Reconsidered Corp");
 
     const journalContent = readFileSync(defaultOpts.journalPath, "utf8");
     expect(journalContent).toContain("Deferred Reconsidered Corp");

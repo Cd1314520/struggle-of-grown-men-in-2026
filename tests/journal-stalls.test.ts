@@ -7,10 +7,18 @@ import {
   runMonitor,
   loadState,
   observeAutoApplyActivity,
-  categorizeQuestion,
-  sanitizeQuestionText,
-  sanitizeBlockerDetail,
 } from "../scripts/journal-stalls";
+
+/** Resolves with the Error a promise rejects with; fails the test if it settles any other way. */
+async function rejectionOf(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (err) {
+    if (err instanceof Error) return err;
+    throw new Error(`Expected rejection with an Error, got: ${String(err)}`, { cause: err });
+  }
+  throw new Error("Expected promise to reject, but it resolved");
+}
 
 describe("Auto-Apply Journal & Stalls Monitor - Consumer Regression Tests", () => {
   function setupTestEnv() {
@@ -20,7 +28,7 @@ describe("Auto-Apply Journal & Stalls Monitor - Consumer Regression Tests", () =
     const statePath = join(dir, "journal-state.json");
     const db = new Database(dbPath, { create: true });
 
-    db.exec(`
+    db.run(`
       CREATE TABLE jobs (
         id INTEGER PRIMARY KEY,
         url TEXT NOT NULL UNIQUE,
@@ -342,15 +350,17 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
     const { dbPath, journalPath, statePath } = setupTestEnv();
     writeFileSync(statePath, "{ corrupted json syntax --", "utf8");
 
-    expect(
+    const corruptErr = await rejectionOf(
       runMonitor({ dbPath, journalPath, statePath, silent: true, help: false })
-    ).rejects.toThrow("State file corrupted");
+    );
+    expect(corruptErr.message).toContain("State file corrupted");
 
     // Invalid schema
     writeFileSync(statePath, JSON.stringify({ version: 999 }), "utf8");
-    expect(
+    const schemaErr = await rejectionOf(
       runMonitor({ dbPath, journalPath, statePath, silent: true, help: false })
-    ).rejects.toThrow("Invalid schema");
+    );
+    expect(schemaErr.message).toContain("Invalid schema");
   });
 
   it("12. Separates non-KB blockers (fill errors, manual stalls, confirm_submit gates) with sanitized details", async () => {

@@ -40,7 +40,7 @@ function scenario(body: string) {
 }
 
 describe("application tab activation", () => {
-  it("activates only the exact existing page target", () => scenario(`
+  it("activates only the exact existing page target", () => { scenario(`
     targets = [
       { type: "page", id: "draft/id", title: "Draft", url: "https://fixture.invalid/draft" },
       { type: "page", id: "other", title: "Other", url: "https://fixture.invalid/other" },
@@ -50,9 +50,9 @@ describe("application tab activation", () => {
     assert.deepEqual(calls.map(url => new URL(url).pathname), ["/json/list", "/json/activate/draft%2Fid"]);
     assert.equal(calls.filter(url => url.includes("/json/new")).length, 0);
     assert.equal(calls.filter(url => url.includes("/json/navigate")).length, 0);
-  `));
+  `); });
 
-  it("rejects missing and non-page targets without an activation request", () => scenario(`
+  it("rejects missing and non-page targets without an activation request", () => { scenario(`
     targets = [
       { type: "background_page", id: "non-page", title: "Background", url: "" },
       { type: "iframe", id: "frame", title: "Frame", url: "https://fixture.invalid/frame" },
@@ -61,12 +61,12 @@ describe("application tab activation", () => {
     await assert.rejects(() => chrome.activateApplicationTab(0, "missing"));
     await assert.rejects(() => chrome.activateApplicationTab(0, "frame"));
     assert.ok(calls.every(url => url.endsWith("/json/list")));
-  `));
+  `); });
 
-  it("rejects a failed activation response", () => scenario(`
+  it("rejects a failed activation response", () => { scenario(`
     targets = [{ type: "page", id: "draft", title: "Draft", url: "https://fixture.invalid/draft" }];
     activationResponse = new Response("failed", { status: 503 });
     await assert.rejects(() => chrome.activateApplicationTab(0, "draft"));
     assert.equal(calls.filter(url => url.includes("/json/activate/")).length, 1);
-  `));
+  `); });
 });

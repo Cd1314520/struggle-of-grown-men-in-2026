@@ -78,7 +78,7 @@ export interface SannysoftResult {
   failedCount: number;
   warnCount: number;
   totalTests: number;
-  rows: Array<{ name: string; text: string; passed: boolean; failed: boolean; warn: boolean }>;
+  rows: { name: string; text: string; passed: boolean; failed: boolean; warn: boolean }[];
 }
 
 export interface CreepJsResult {
@@ -172,6 +172,26 @@ export interface NavigatorOwnKeysProbe {
   unexpectedKeys: string[];
 }
 
+export interface ProbeResults {
+  webdriver: Record<string, unknown>;
+  userAgent: Record<string, unknown>;
+  languages: Record<string, unknown>;
+  navigatorKeys: NavigatorOwnKeysProbe;
+  wireCoherence: WireDomCoherence;
+  capturedHeaders: {
+    navigation: CapturedHttpHeaders | null;
+    api: CapturedHttpHeaders | null;
+  };
+  plugins: Record<string, unknown>;
+  permissions: Record<string, unknown>;
+  windowMetrics: Record<string, unknown>;
+  webgl: Record<string, unknown>;
+  mediaDevicesInitial: Record<string, unknown>;
+  mediaDevicesGranted: Record<string, unknown> | null;
+  contextConsistency: Record<string, unknown>;
+  cdpArtifacts: Record<string, unknown>;
+}
+
 export interface RouteCheckers {
   botd?: { status: string; bot?: boolean | null; botKind?: string | null; durationMs?: number; clean?: boolean; verdict?: string };
   sannysoft?: { status: string; results?: SannysoftResult; durationMs?: number; clean?: boolean; verdict?: string };
@@ -186,7 +206,7 @@ export interface RouteAuditResult {
   frontendCovered: false;
   description: string;
   wireCoherence: WireDomCoherence | null;
-  probes: Record<string, unknown> | null;
+  probes: ProbeResults | null;
   checkers: RouteCheckers;
   clean: boolean;
   issues: string[];
@@ -220,8 +240,13 @@ function parseArgs(): AuditOptions {
   let routesExplicit = false;
   let timeoutExplicit = false;
 
+  // Value of a `--flag=value` argument: the text between the first and second "=".
+  const inlineValue = (flagArg: string): string => flagArg.split("=")[1] ?? "";
+
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    if (arg === undefined) continue;
+    const next = args[i + 1];
     if (arg === "--help" || arg === "-h") {
       console.log(`
 Usage: bun run scripts/browser-audit.ts [options]
@@ -239,46 +264,55 @@ Options:
 `);
       process.exit(0);
     } else if (arg.startsWith("--mode=")) {
-      opts.mode = arg.split("=")[1] as AuditMode;
-    } else if (arg === "--mode" && args[i + 1]) {
-      opts.mode = args[++i] as AuditMode;
+      opts.mode = inlineValue(arg) as AuditMode;
+    } else if (arg === "--mode" && next) {
+      opts.mode = next as AuditMode;
+      i++;
     } else if (arg.startsWith("--display=")) {
-      opts.display = arg.split("=")[1];
-    } else if (arg === "--display" && args[i + 1]) {
-      opts.display = args[++i];
+      opts.display = inlineValue(arg);
+    } else if (arg === "--display" && next) {
+      opts.display = next;
+      i++;
     } else if (arg.startsWith("--cdp-port=")) {
-      opts.cdpPort = Number(arg.split("=")[1]);
-    } else if (arg === "--cdp-port" && args[i + 1]) {
-      opts.cdpPort = Number(args[++i]);
+      opts.cdpPort = Number(inlineValue(arg));
+    } else if (arg === "--cdp-port" && next) {
+      opts.cdpPort = Number(next);
+      i++;
     } else if (arg.startsWith("--proxy-port=")) {
-      opts.proxyPort = Number(arg.split("=")[1]);
-    } else if (arg === "--proxy-port" && args[i + 1]) {
-      opts.proxyPort = Number(args[++i]);
+      opts.proxyPort = Number(inlineValue(arg));
+    } else if (arg === "--proxy-port" && next) {
+      opts.proxyPort = Number(next);
+      i++;
     } else if (arg.startsWith("--out=")) {
-      opts.outPath = arg.split("=")[1];
-    } else if (arg === "--out" && args[i + 1]) {
-      opts.outPath = args[++i];
+      opts.outPath = inlineValue(arg);
+    } else if (arg === "--out" && next) {
+      opts.outPath = next;
+      i++;
     } else if (arg.startsWith("--screenshot-dir=")) {
-      opts.screenshotDir = resolve(process.cwd(), arg.split("=")[1]);
-    } else if (arg === "--screenshot-dir" && args[i + 1]) {
-      opts.screenshotDir = resolve(process.cwd(), args[++i]);
+      opts.screenshotDir = resolve(process.cwd(), inlineValue(arg));
+    } else if (arg === "--screenshot-dir" && next) {
+      opts.screenshotDir = resolve(process.cwd(), next);
+      i++;
     } else if (arg.startsWith("--checkers=")) {
-      opts.checkers = arg.split("=")[1].split(",").map(s => s.trim().toLowerCase());
+      opts.checkers = inlineValue(arg).split(",").map(s => s.trim().toLowerCase());
       checkersExplicit = true;
-    } else if (arg === "--checkers" && args[i + 1]) {
-      opts.checkers = args[++i].split(",").map(s => s.trim().toLowerCase());
+    } else if (arg === "--checkers" && next) {
+      opts.checkers = next.split(",").map(s => s.trim().toLowerCase());
+      i++;
       checkersExplicit = true;
     } else if (arg.startsWith("--routes=")) {
-      opts.routes = arg.split("=")[1].split(",").map(s => s.trim().toLowerCase());
+      opts.routes = inlineValue(arg).split(",").map(s => s.trim().toLowerCase());
       routesExplicit = true;
-    } else if (arg === "--routes" && args[i + 1]) {
-      opts.routes = args[++i].split(",").map(s => s.trim().toLowerCase());
+    } else if (arg === "--routes" && next) {
+      opts.routes = next.split(",").map(s => s.trim().toLowerCase());
+      i++;
       routesExplicit = true;
     } else if (arg.startsWith("--timeout=")) {
-      opts.timeoutMs = Number(arg.split("=")[1]);
+      opts.timeoutMs = Number(inlineValue(arg));
       timeoutExplicit = true;
-    } else if (arg === "--timeout" && args[i + 1]) {
-      opts.timeoutMs = Number(args[++i]);
+    } else if (arg === "--timeout" && next) {
+      opts.timeoutMs = Number(next);
+      i++;
       timeoutExplicit = true;
     }
   }
@@ -306,7 +340,7 @@ function isPortInUse(port: number): Promise<boolean> {
     sock.destroy();
     resolve(true);
   });
-  sock.once("error", () => resolve(false));
+  sock.once("error", () => { resolve(false); });
   return promise;
 }
 
@@ -317,7 +351,7 @@ function isDisplayInUse(display: string): Promise<boolean> {
     sock.destroy();
     resolve(true);
   });
-  sock.once("error", () => resolve(false));
+  sock.once("error", () => { resolve(false); });
   return promise;
 }
 
@@ -379,7 +413,7 @@ async function setupSandbox(opts: AuditOptions): Promise<AuditSandbox> {
 
   // Exception: Dynamic import required because AUTO_APPLY_DATA must be populated in process.env
   // before src/config evaluates its top-level constants (DATA = process.env.AUTO_APPLY_DATA ?? ...).
-  process.env.AUTO_APPLY_DATA = dataDir;
+  process.env["AUTO_APPLY_DATA"] = dataDir;
 
   const { config, DATA } = await import("../src/config");
   if (DATA !== dataDir) {
@@ -402,37 +436,41 @@ async function setupSandbox(opts: AuditOptions): Promise<AuditSandbox> {
     const pids = await findAuditPids(opts.display, profileDir);
     if (pids.length > 0) {
       for (const pid of pids) {
-        try { process.kill(pid, "SIGTERM"); } catch {}
+        try { process.kill(pid, "SIGTERM"); } catch { /* already exited */ }
       }
       await Bun.sleep(400);
       const remaining = await findAuditPids(opts.display, profileDir);
       for (const pid of remaining) {
-        try { process.kill(pid, "SIGKILL"); } catch {}
+        try { process.kill(pid, "SIGKILL"); } catch { /* already exited */ }
       }
     }
 
     // Only unlink socket and lock if this audit process actually created it
     if (createdSocket && existsSync(socketPath)) {
-      try { rmSync(socketPath, { force: true }); } catch {}
+      try { rmSync(socketPath, { force: true }); } catch { /* best-effort cleanup */ }
     }
     if (createdSocket && existsSync(lockPath)) {
-      try { rmSync(lockPath, { force: true }); } catch {}
+      try { rmSync(lockPath, { force: true }); } catch { /* best-effort cleanup */ }
     }
 
     // Remove temporary data dir
     try {
       rmSync(dataDir, { recursive: true, force: true });
-    } catch {}
+    } catch {
+      // Best-effort cleanup of the temporary data dir
+    }
     console.log(`[audit-lifecycle] Isolated cleanup complete.`);
   };
 
-  process.on("SIGINT", async () => {
-    await cleanup();
-    process.exit(130);
+  process.on("SIGINT", () => {
+    void cleanup().then(() => {
+      process.exit(130);
+    });
   });
-  process.on("SIGTERM", async () => {
-    await cleanup();
-    process.exit(143);
+  process.on("SIGTERM", () => {
+    void cleanup().then(() => {
+      process.exit(143);
+    });
   });
 
   return {
@@ -464,15 +502,15 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
   let nextId = 1;
   let currentSessionId = initialSessionId;
   const pending = new Map<number, { resolve: (val: Record<string, unknown>) => void; reject: (err: Error) => void }>();
-  const events = new Map<string, Array<(params: Record<string, unknown>) => void>>();
+  const events = new Map<string, ((params: Record<string, unknown>) => void)[]>();
 
-  const { promise: connectPromise, resolve: resolveConnect, reject: rejectConnect } = Promise.withResolvers<void>();
-  const timer = setTimeout(() => rejectConnect(new Error(`WebSocket connection timeout to ${wsUrl}`)), 6000);
+  const { promise: connectPromise, resolve: resolveConnect, reject: rejectConnect } = Promise.withResolvers<undefined>();
+  const timer = setTimeout(() => { rejectConnect(new Error(`WebSocket connection timeout to ${wsUrl}`)); }, 6000);
   ws.onopen = () => {
     clearTimeout(timer);
-    resolveConnect();
+    resolveConnect(undefined);
   };
-  ws.onerror = (e) => {
+  ws.onerror = () => {
     clearTimeout(timer);
     rejectConnect(new Error(`WebSocket connection error to ${wsUrl}`));
     for (const [id, h] of pending) {
@@ -497,8 +535,8 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
         result?: Record<string, unknown>;
         error?: { message?: string };
       };
-      if (msg.id !== undefined && pending.has(msg.id)) {
-        const handler = pending.get(msg.id)!;
+      const handler = msg.id !== undefined ? pending.get(msg.id) : undefined;
+      if (msg.id !== undefined && handler) {
         pending.delete(msg.id);
         if (msg.error) {
           handler.reject(new Error(msg.error.message || JSON.stringify(msg.error)));
@@ -511,7 +549,9 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
           for (const fn of list) fn(msg.params);
         }
       }
-    } catch {}
+    } catch {
+      // Ignore frames that are not valid CDP JSON
+    }
   };
 
   const send = (method: string, params: Record<string, unknown> = {}, timeoutMs = 15000): Promise<Record<string, unknown>> => {
@@ -530,7 +570,7 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
     });
     try {
       const payload: Record<string, unknown> = { id, method, params };
-      if (currentSessionId) payload.sessionId = currentSessionId;
+      if (currentSessionId) payload["sessionId"] = currentSessionId;
       ws.send(JSON.stringify(payload));
     } catch (err) {
       clearTimeout(reqTimer);
@@ -561,18 +601,23 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
       return;
     }
 
-    let loaded = false;
-    const onLoad = () => { loaded = true; };
-    if (!events.has("Page.loadEventFired")) events.set("Page.loadEventFired", []);
-    events.get("Page.loadEventFired")!.push(onLoad);
+    // Held in an object so the flag set by the event listener is visible to the wait loop below.
+    const loadState = { fired: false };
+    const onLoad = () => { loadState.fired = true; };
+    let loadListeners = events.get("Page.loadEventFired");
+    if (!loadListeners) {
+      loadListeners = [];
+      events.set("Page.loadEventFired", loadListeners);
+    }
+    loadListeners.push(onLoad);
 
     try {
       const navRes = await send("Page.navigate", { url });
-      if (typeof navRes.errorText === "string" && navRes.errorText.trim().length > 0) {
-        throw new Error(`Page.navigate failed: ${navRes.errorText}`);
+      if (typeof navRes["errorText"] === "string" && navRes["errorText"].trim().length > 0) {
+        throw new Error(`Page.navigate failed: ${navRes["errorText"]}`);
       }
       const start = Date.now();
-      while (!loaded && Date.now() - start < 20000) {
+      while (!loadState.fired && Date.now() - start < 20000) {
         await Bun.sleep(100);
       }
     } finally {
@@ -587,9 +632,9 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
   const captureScreenshot = async (savePath: string): Promise<string | null> => {
     try {
       const res = await send("Page.captureScreenshot", { format: "png" });
-      if (typeof res.data === "string") {
+      if (typeof res["data"] === "string") {
         mkdirSync(resolve(savePath, ".."), { recursive: true });
-        const buf = Buffer.from(res.data, "base64");
+        const buf = Buffer.from(res["data"], "base64");
         writeFileSync(savePath, buf);
         return savePath;
       }
@@ -600,7 +645,7 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
   };
 
   const close = () => {
-    try { ws.close(); } catch {}
+    try { ws.close(); } catch { /* socket already closed */ }
   };
 
   return {
@@ -628,7 +673,7 @@ async function createAttachedSession(browserWsUrl: string, targetId: string): Pr
     targetId,
     flatten: true,
   });
-  const sessionId = typeof attachRes.sessionId === "string" ? attachRes.sessionId : undefined;
+  const sessionId = typeof attachRes["sessionId"] === "string" ? attachRes["sessionId"] : undefined;
   if (!sessionId) {
     throw new Error(`Target.attachToTarget failed to return sessionId for ${targetId}`);
   }
@@ -664,15 +709,15 @@ function computeWireDomCoherence(
   domUa: Record<string, unknown>,
   domLang: Record<string, unknown>
 ): WireDomCoherence {
-  const primaryWire = wireApi || wireNav;
+  const primaryWire = wireApi ?? wireNav;
   const mismatches: string[] = [];
 
-  const domUserAgent = typeof domUa.userAgent === "string" ? domUa.userAgent : "";
-  const domPlatform = typeof domUa.platformFromUad === "string" ? domUa.platformFromUad : (typeof domUa.platform === "string" ? domUa.platform : "");
-  const domMobile = Boolean(domUa.mobile);
-  const domBrands = Array.isArray(domUa.brands) ? (domUa.brands as Array<{ brand: string; version: string }>) : [];
-  const domLanguages = Array.isArray(domLang.languages) ? (domLang.languages as string[]) : [];
-  const highEntropy = (domUa.highEntropyValues ?? {}) as Record<string, unknown>;
+  const domUserAgent = typeof domUa["userAgent"] === "string" ? domUa["userAgent"] : "";
+  const domPlatform = typeof domUa["platformFromUad"] === "string" ? domUa["platformFromUad"] : (typeof domUa["platform"] === "string" ? domUa["platform"] : "");
+  const domMobile = Boolean(domUa["mobile"]);
+  const domBrands = Array.isArray(domUa["brands"]) ? (domUa["brands"] as { brand: string; version: string }[]) : [];
+  const domLanguages = Array.isArray(domLang["languages"]) ? (domLang["languages"] as string[]) : [];
+  const highEntropy = (domUa["highEntropyValues"] ?? {}) as Record<string, unknown>;
 
   // 1. User-Agent
   const wireUserAgent = primaryWire?.userAgent || "";
@@ -721,9 +766,10 @@ function computeWireDomCoherence(
   // 5. Languages (Accept-Language vs navigator.languages)
   const wireLang = primaryWire?.acceptLanguage || "";
   let languagesMatch = true;
-  if (wireLang && domLanguages.length > 0) {
-    const wirePrimary = wireLang.split(",")[0].trim().toLowerCase();
-    const domPrimary = domLanguages[0].toLowerCase();
+  const domFirstLanguage = domLanguages[0];
+  if (wireLang && domFirstLanguage !== undefined) {
+    const wirePrimary = (wireLang.split(",")[0] ?? "").trim().toLowerCase();
+    const domPrimary = domFirstLanguage.toLowerCase();
     languagesMatch = wirePrimary.startsWith(domPrimary) || domPrimary.startsWith(wirePrimary);
     if (!languagesMatch) {
       mismatches.push(`Accept-Language wire primary ('${wirePrimary}') does not match DOM primary language ('${domPrimary}')`);
@@ -733,17 +779,17 @@ function computeWireDomCoherence(
   // 6. High Entropy Arch & Bitness
   let highEntropyArchMatch: boolean | null = null;
   let highEntropyBitnessMatch: boolean | null = null;
-  if (primaryWire?.secChUaArch && typeof highEntropy.architecture === "string") {
+  if (primaryWire?.secChUaArch && typeof highEntropy["architecture"] === "string") {
     const wireArch = primaryWire.secChUaArch.replace(/^"|"$/g, "").toLowerCase();
-    const domArch = highEntropy.architecture.toLowerCase();
+    const domArch = highEntropy["architecture"].toLowerCase();
     highEntropyArchMatch = wireArch === domArch;
     if (!highEntropyArchMatch) {
       mismatches.push(`Sec-CH-UA-Arch wire ('${wireArch}') !== DOM highEntropy architecture ('${domArch}')`);
     }
   }
-  if (primaryWire?.secChUaBitness && typeof highEntropy.bitness === "string") {
+  if (primaryWire?.secChUaBitness && typeof highEntropy["bitness"] === "string") {
     const wireBitness = primaryWire.secChUaBitness.replace(/^"|"$/g, "");
-    const domBitness = highEntropy.bitness;
+    const domBitness = highEntropy["bitness"];
     highEntropyBitnessMatch = wireBitness === domBitness;
     if (!highEntropyBitnessMatch) {
       mismatches.push(`Sec-CH-UA-Bitness wire ('${wireBitness}') !== DOM highEntropy bitness ('${domBitness}')`);
@@ -766,10 +812,10 @@ function computeWireDomCoherence(
 }
 
 // --- Diagnostic In-Browser Probes ---
-async function runProbes(session: CdpSession, directCdpPort: number): Promise<Record<string, unknown>> {
+async function runProbes(session: CdpSession, directCdpPort: number): Promise<ProbeResults> {
   console.log(`[audit-probes] Executing diagnostic in-browser probes...`);
-  let navigationHeaders: CapturedHttpHeaders | null = null;
-  let apiHeaders: CapturedHttpHeaders | null = null;
+  // Held in an object so headers recorded by the server's fetch handler are visible below.
+  const captured: ProbeResults["capturedHeaders"] = { navigation: null, api: null };
 
   // Ephemeral diagnostic server on localhost (a trusted, secure context)
   const diagServer = Bun.serve({
@@ -779,7 +825,7 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Re
       const headers = extractCapturedHeaders(req);
 
       if (url.pathname === "/api/headers") {
-        apiHeaders = headers;
+        captured.api = headers;
         return new Response(JSON.stringify(headers), {
           headers: {
             "Content-Type": "application/json",
@@ -788,7 +834,7 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Re
         });
       }
 
-      navigationHeaders = headers;
+      captured.navigation = headers;
       return new Response(
         "<!DOCTYPE html><html><head><title>Diagnostic</title></head><body>Diagnostic Secure Context</body></html>",
         {
@@ -1116,8 +1162,8 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Re
     })()`);
 
     const wireDomCoherence = computeWireDomCoherence(
-      navigationHeaders,
-      apiHeaders || apiHeadersProbe,
+      captured.navigation,
+      captured.api ?? apiHeadersProbe,
       uaProbe,
       langProbe
     );
@@ -1129,8 +1175,8 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Re
       navigatorKeys: navigatorKeysProbe,
       wireCoherence: wireDomCoherence,
       capturedHeaders: {
-        navigation: navigationHeaders,
-        api: apiHeaders || apiHeadersProbe,
+        navigation: captured.navigation,
+        api: captured.api ?? apiHeadersProbe,
       },
       plugins: pluginsProbe,
       permissions: permissionsProbe,
@@ -1142,7 +1188,7 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Re
       cdpArtifacts: cdpArtifactsProbe,
     };
   } finally {
-    diagServer.stop(true);
+    void diagServer.stop(true);
   }
 }
 
@@ -1156,7 +1202,7 @@ async function checkSannysoft(session: CdpSession, screenshotPath: string, timeo
     await session.navigate("https://bot.sannysoft.com/", true);
 
     let done = false;
-    while (!done && Date.now() - startTime < timeoutMs) {
+    while (Date.now() - startTime < timeoutMs) {
       const ready = await session.evaluate<boolean>(`(() => {
         const el = document.getElementById('webdriver-result');
         return Boolean(el && el.textContent && el.textContent.trim().length > 0);
@@ -1233,12 +1279,11 @@ async function checkSannysoft(session: CdpSession, screenshotPath: string, timeo
       };
     })()`);
 
-    const isClean = Boolean(
+    const isClean =
       results.failedCount === 0 &&
       results.webdriverResult?.passed === true &&
       results.advancedWebdriverResult?.passed === true &&
-      results.chromeResult?.passed === true
-    );
+      results.chromeResult?.passed === true;
     const screenshot = await session.captureScreenshot(screenshotPath);
     return {
       status: "completed",
@@ -1263,7 +1308,7 @@ async function checkSannysoft(session: CdpSession, screenshotPath: string, timeo
 }
 
 // Fingerprint Open-Source BotD (openfpcdn.io/botd/v2)
-async function checkBotD(session: CdpSession, screenshotPath: string, timeoutMs: number) {
+async function checkBotD(session: CdpSession, screenshotPath: string, _timeoutMs: number) {
   console.log(`[checker:botd] Testing Open-Source BotD via openfpcdn.io/botd/v2...`);
   const startTime = Date.now();
   try {
@@ -1290,7 +1335,7 @@ async function checkBotD(session: CdpSession, screenshotPath: string, timeoutMs:
       }
     })()`);
 
-    const isClean = Boolean(result.status === "success" && result.detection && result.detection.bot === false);
+    const isClean = Boolean(result.status === "success" && result.detection && !result.detection.bot);
     const screenshot = await session.captureScreenshot(screenshotPath);
     return {
       status: result.status === "success" ? "completed" : "error",
@@ -1367,9 +1412,7 @@ async function checkCreepJS(session: CdpSession, screenshotPath: string, timeout
 
       if (state.hasDetector) {
         detectorReady = true;
-        if (detectorReadyTime === null) {
-          detectorReadyTime = Date.now();
-        }
+        detectorReadyTime ??= Date.now();
       }
       if (state.hasTrustScore) {
         trustScoreReady = true;
@@ -1401,7 +1444,7 @@ async function checkCreepJS(session: CdpSession, screenshotPath: string, timeout
           stealthRating: (fp?.headless && typeof fp.headless.stealthRating === 'number') ? fp.headless.stealthRating : null,
           isReady: false,
         };
-      })()`).catch(() => ({}));
+      })()`).catch((): Partial<CreepJsResult> => ({}));
 
       return {
         status: "timeout",
@@ -1525,7 +1568,7 @@ async function checkCreepJS(session: CdpSession, screenshotPath: string, timeout
 
     // Clean requires all ratings clean AND confirmed totalLies === 0 AND non-null trustScore
     const hasTrustScore = report.trustScore !== null;
-    const isClean = Boolean(
+    const isClean =
       report.isReady &&
       hasTrustScore &&
       report.totalLies === 0 &&
@@ -1533,8 +1576,7 @@ async function checkCreepJS(session: CdpSession, screenshotPath: string, timeout
       report.headlessRating === 0 &&
       report.stealthRating === 0 &&
       report.hasSwiftShader === false &&
-      report.hasBadWebGL === false
-    );
+      report.hasBadWebGL === false;
 
     report.clean = isClean;
     if (isClean) {
@@ -1579,7 +1621,7 @@ async function checkBrowserScan(session: CdpSession, screenshotPath: string, tim
     await session.navigate("https://www.browserscan.net/bot-detection", true);
 
     let done = false;
-    while (!done && Date.now() - startTime < timeoutMs) {
+    while (Date.now() - startTime < timeoutMs) {
       const state = await session.evaluate<{ hasResults: boolean; isScanning: boolean; isBlocked: boolean }>(`(() => {
         const text = document.body ? document.body.innerText : '';
         const isBlocked = /cf-challenge|challenge-running|Attention Required|Access Denied/i.test(text);
@@ -1799,7 +1841,7 @@ async function checkFingerprintDemo(session: CdpSession, screenshotPath: string,
     await session.navigate("https://demo.fingerprint.com/playground", true);
 
     let done = false;
-    while (!done && Date.now() - startTime < Math.min(timeoutMs, 30000)) {
+    while (Date.now() - startTime < Math.min(timeoutMs, 30000)) {
       const state = await session.evaluate<{ hasSignals: boolean; isBlocked: boolean; isRunning: boolean }>(`(() => {
         const text = document.body ? document.body.innerText : '';
         const isBlocked = /Cloudflare|Challenge|Turnstile|Captcha|Attention Required/i.test(text);
@@ -1942,12 +1984,11 @@ async function checkFingerprintDemo(session: CdpSession, screenshotPath: string,
 
     const screenshot = await session.captureScreenshot(screenshotPath);
     const hasGenuineVerdict = Boolean(data.bot || data.botVerdict);
-    const isClean = Boolean(
+    const isClean =
       hasGenuineVerdict &&
       data.accessible &&
       (data.bot === "not_detected" || data.botVerdict === "not_detected") &&
-      data.tampering === false
-    );
+      data.tampering === false;
     data.clean = isClean;
     data.verdict = isClean
       ? "clean"
@@ -2053,7 +2094,9 @@ export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
           cmdlineArgs = args;
           break;
         }
-      } catch {}
+      } catch {
+        // Process exited between listing and reading its cmdline
+      }
     }
     auditReport.launch = {
       ...auditReport.launch,
@@ -2077,7 +2120,7 @@ export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
       console.log(`Testing Route: ${routeName.toUpperCase()}`);
       console.log(`-------------------------------------------------------`);
 
-      let session: CdpSession | null = null;
+      let session: CdpSession;
       let proxyInstance: (CdpProxy & { tabId: string; reused: boolean }) | null = null;
 
       if (routeName === "direct") {
@@ -2088,8 +2131,8 @@ export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
         console.log(`[audit] Started scoped CDP proxy on port ${proxyInstance.port} for target ${proxyInstance.tabId}`);
         const listRes = await fetch(`http://127.0.0.1:${proxyInstance.port}/json/list`);
         const list = (await listRes.json()) as CdpTabInfo[];
-        const tab = list.find((t) => t.id === proxyInstance?.tabId) || list[0];
-        if (!tab || !tab.webSocketDebuggerUrl) {
+        const tab = list.find((t) => t.id === proxyInstance?.tabId) ?? list[0];
+        if (!tab?.webSocketDebuggerUrl) {
           throw new Error(`Failed to obtain scoped proxy tab WebSocket debugger URL`);
         }
         session = await createCdpSession(tab.webSocketDebuggerUrl, tab.id);
@@ -2129,8 +2172,9 @@ export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
 
       try {
         // Run deep diagnostic probes
-        routeResults.probes = await runProbes(session, options.cdpPort);
-        routeResults.wireCoherence = (routeResults.probes.wireCoherence as WireDomCoherence) || null;
+        const probes = await runProbes(session, options.cdpPort);
+        routeResults.probes = probes;
+        routeResults.wireCoherence = probes.wireCoherence;
 
         const checkersResults: RouteCheckers = {};
 
@@ -2163,36 +2207,34 @@ export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
         routeResults.checkers = checkersResults;
 
         const issues: string[] = [];
-        if (routeResults.wireCoherence && !routeResults.wireCoherence.coherent) {
-          issues.push(...routeResults.wireCoherence.mismatches);
+        if (!probes.wireCoherence.coherent) {
+          issues.push(...probes.wireCoherence.mismatches);
         }
 
-        if (routeResults.probes?.navigatorKeys) {
-          const nk = routeResults.probes.navigatorKeys as NavigatorOwnKeysProbe;
-          if (nk.hasModelContext) {
-            issues.push("navigator.modelContext present in DOM");
-          }
-          if (nk.hasWebMcpBridge) {
-            issues.push("__ompWebMcpBridge_v1 present in DOM window");
-          }
-          if (!nk.isNativeEmpty) {
-            issues.push(`navigator own properties not empty: [${nk.ownPropertyNames.join(", ")}]`);
-          }
+        const nk = probes.navigatorKeys;
+        if (nk.hasModelContext) {
+          issues.push("navigator.modelContext present in DOM");
+        }
+        if (nk.hasWebMcpBridge) {
+          issues.push("__ompWebMcpBridge_v1 present in DOM window");
+        }
+        if (!nk.isNativeEmpty) {
+          issues.push(`navigator own properties not empty: [${nk.ownPropertyNames.join(", ")}]`);
         }
 
-        if (checkersResults.botd && checkersResults.botd.clean === false) {
+        if (checkersResults.botd?.clean === false) {
           issues.push(`BotD: ${checkersResults.botd.verdict || "flagged"}`);
         }
-        if (checkersResults.sannysoft && checkersResults.sannysoft.clean === false) {
+        if (checkersResults.sannysoft?.clean === false) {
           issues.push(`Sannysoft: ${checkersResults.sannysoft.verdict || "failed"}`);
         }
-        if (checkersResults.creepjs && checkersResults.creepjs.clean === false) {
+        if (checkersResults.creepjs?.clean === false) {
           issues.push(`CreepJS: ${checkersResults.creepjs.verdict || checkersResults.creepjs.status}`);
         }
-        if (checkersResults.browserscan && checkersResults.browserscan.clean === false) {
+        if (checkersResults.browserscan?.clean === false) {
           issues.push(`BrowserScan: ${checkersResults.browserscan.verdict || checkersResults.browserscan.status}`);
         }
-        if (checkersResults.fingerprint_demo && checkersResults.fingerprint_demo.clean === false) {
+        if (checkersResults.fingerprint_demo?.clean === false) {
           issues.push(`Fingerprint Demo: ${checkersResults.fingerprint_demo.verdict || checkersResults.fingerprint_demo.status}`);
         }
 
@@ -2200,7 +2242,7 @@ export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
         routeResults.issues = issues;
         routesMap[routeName] = routeResults;
       } finally {
-        if (session) session.close();
+        session.close();
         if (proxyInstance) proxyInstance.close();
       }
     }
@@ -2241,23 +2283,21 @@ function printSummary(report: AuditReport) {
 
     const p = routeData.probes;
     if (p) {
-      if (p.navigatorKeys) {
-        const nk = p.navigatorKeys as NavigatorOwnKeysProbe;
-        console.log(`  [Probe] navigator.ownKeys: [${nk.ownPropertyNames.join(", ")}] (nativeEmpty: ${nk.isNativeEmpty}, modelContext: ${nk.hasModelContext}, webMcpBridge: ${nk.hasWebMcpBridge})`);
-      }
-      const wd = (p.webdriver ?? {}) as Record<string, unknown>;
-      const gl = (p.webgl ?? {}) as Record<string, unknown>;
-      const mdInit = (p.mediaDevicesInitial ?? {}) as Record<string, unknown>;
-      const mdGrant = p.mediaDevicesGranted as Record<string, unknown> | null | undefined;
-      const cc = (p.contextConsistency ?? {}) as Record<string, unknown>;
-      const cons = (cc.consistency ?? {}) as Record<string, unknown>;
-      console.log(`  [Probe] navigator.webdriver: ${wd.value} (hasOwn: ${wd.hasOwnOnInstance}, desc: ${wd.hasDescriptorOnProto})`);
-      console.log(`  [Probe] WebGL Vendor/Renderer: ${gl.vendor} | ${gl.renderer} (software: ${gl.isSoftwareRenderer})`);
-      console.log(`  [Probe] Media Devices Initial: fakeLabels = ${mdInit.hasFakeLabels} (${mdInit.count} devices)`);
+      const nk = p.navigatorKeys;
+      console.log(`  [Probe] navigator.ownKeys: [${nk.ownPropertyNames.join(", ")}] (nativeEmpty: ${nk.isNativeEmpty}, modelContext: ${nk.hasModelContext}, webMcpBridge: ${nk.hasWebMcpBridge})`);
+      const wd = p.webdriver;
+      const gl = p.webgl;
+      const mdInit = p.mediaDevicesInitial;
+      const mdGrant = p.mediaDevicesGranted;
+      const cc = p.contextConsistency;
+      const cons = (cc["consistency"] ?? {}) as Record<string, unknown>;
+      console.log(`  [Probe] navigator.webdriver: ${String(wd["value"])} (hasOwn: ${String(wd["hasOwnOnInstance"])}, desc: ${String(wd["hasDescriptorOnProto"])})`);
+      console.log(`  [Probe] WebGL Vendor/Renderer: ${String(gl["vendor"])} | ${String(gl["renderer"])} (software: ${String(gl["isSoftwareRenderer"])})`);
+      console.log(`  [Probe] Media Devices Initial: fakeLabels = ${String(mdInit["hasFakeLabels"])} (${String(mdInit["count"])} devices)`);
       if (mdGrant) {
-        console.log(`  [Probe] Media Devices Granted: fakeLabels = ${mdGrant.hasFakeLabels} (${mdGrant.count} devices, gUM ok: ${mdGrant.gumOk})`);
+        console.log(`  [Probe] Media Devices Granted: fakeLabels = ${String(mdGrant["hasFakeLabels"])} (${String(mdGrant["count"])} devices, gUM ok: ${String(mdGrant["gumOk"])})`);
       }
-      console.log(`  [Probe] Context Consistency: uaMatch=${cons.userAgentMatch}, langMatch=${cons.languageMatch}, platformMatch=${cons.platformMatch} (overall: ${cons.overallConsistent})`);
+      console.log(`  [Probe] Context Consistency: uaMatch=${String(cons["userAgentMatch"])}, langMatch=${String(cons["languageMatch"])}, platformMatch=${String(cons["platformMatch"])} (overall: ${String(cons["overallConsistent"])})`);
     }
 
     const c = routeData.checkers;
@@ -2271,7 +2311,7 @@ function printSummary(report: AuditReport) {
     if (c.creepjs?.results) {
       const cr = c.creepjs.results;
       console.log(`  [Checker] CreepJS: status=${c.creepjs.status}, clean=${c.creepjs.clean}, verdict=${c.creepjs.verdict}, trustScore=${cr.trustScore}, totalLies=${cr.totalLies}, likeHeadlessRating=${cr.likeHeadlessRating}%`);
-      if (cr.likeHeadlessReasons && cr.likeHeadlessReasons.length > 0) {
+      if (cr.likeHeadlessReasons.length > 0) {
         console.log(`    likeHeadlessReasons: [${cr.likeHeadlessReasons.join(", ")}]`);
       }
       if (cr.note) {
@@ -2290,7 +2330,7 @@ function printSummary(report: AuditReport) {
 }
 
 if (import.meta.main) {
-  runBrowserAudit().catch((err) => {
+  runBrowserAudit().catch((err: unknown) => {
     console.error("[FATAL]", err);
     process.exit(1);
   });

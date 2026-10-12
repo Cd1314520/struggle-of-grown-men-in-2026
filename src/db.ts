@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { DATA } from "./config";
 
 export const db = new Database(join(DATA, "app.db"), { create: true });
-db.exec("PRAGMA journal_mode = WAL");
+db.run("PRAGMA journal_mode = WAL");
 
-db.exec(`
+db.run(`
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY,
   url TEXT NOT NULL UNIQUE,
@@ -50,13 +50,13 @@ CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 // Columns added after the first version.
 for (const col of ["resume_sha TEXT", "resume_frozen_at TEXT", "checklist TEXT", "dedupe_key TEXT", "company_key TEXT", "posted_at TEXT", "approved_by TEXT", "practice_assessment TEXT", "fill_checkpoint TEXT"]) {
   try {
-    db.exec(`ALTER TABLE jobs ADD COLUMN ${col}`);
+    db.run(`ALTER TABLE jobs ADD COLUMN ${col}`);
   } catch {
     // already there
   }
 }
 
-db.exec(`
+db.run(`
 CREATE TABLE IF NOT EXISTS job_sources (
   url TEXT PRIMARY KEY,
   job_id INTEGER NOT NULL,
@@ -70,7 +70,7 @@ CREATE INDEX IF NOT EXISTS jobs_company ON jobs(company_key);
 `);
 
 // Durable human gates, application-only answers, and explicitly authorized exact standing rules.
-db.exec(`
+db.run(`
 CREATE TABLE IF NOT EXISTS question_gates (
   id TEXT PRIMARY KEY,
   job_id INTEGER NOT NULL,
@@ -186,7 +186,7 @@ const emit: Listener = change => {
 };
 
 // Transactional callers notify only after durable state has committed.
-export const notifyJobChange = (jobId: number) => emit({ type: "job", jobId });
+export const notifyJobChange = (jobId: number) => { emit({ type: "job", jobId }); };
 
 export const getJob = (id: number) => db.query<Job, [number]>("SELECT * FROM jobs WHERE id = ?").get(id);
 
@@ -195,9 +195,9 @@ export const getJob = (id: number) => db.query<Job, [number]>("SELECT * FROM job
 export function openedAt(j: Pick<Job, "posted_at" | "found_at">): number {
   const found = Date.parse(j.found_at.replace(" ", "T") + "Z");
   const said = j.posted_at ? Date.parse(j.posted_at) : NaN;
-  if (Number.isNaN(said)) return found;
+  if (!j.posted_at || Number.isNaN(said)) return found;
   // Only the day is known: a first sighting within a day or so of it is the closer estimate.
-  if (j.posted_at!.length === 10) return found - said < 36 * 3600_000 ? found : said + 12 * 3600_000;
+  if (j.posted_at.length === 10) return found - said < 36 * 3600_000 ? found : said + 12 * 3600_000;
   return Math.min(said, found);
 }
 
@@ -222,7 +222,7 @@ const TITLE_SYNONYMS: Record<string, string> = {
 };
 // What separates two genuinely different openings with otherwise similar titles.
 const LEVEL = new Set(["1", "2", "3", "4", "5", "senior", "junior", "staff", "principal", "lead", "manager", "intern", "associate", "director"]);
-const TITLE_TAGS = /[(\[][^)\]]*\b(remote|hybrid|onsite|on-site|usa?|united states|contract|full[- ]time|part[- ]time|req|r-?\d+|jr\d+|\d{4,})\b[^)\]]*[)\]]/gi;
+const TITLE_TAGS = /[([][^)\]]*\b(remote|hybrid|onsite|on-site|usa?|united states|contract|full[- ]time|part[- ]time|req|r-?\d+|jr\d+|\d{4,})\b[^)\]]*[)\]]/gi;
 const squash = (t: string) => t.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/&/g, " and ").replace(/[^a-z0-9+#]+/g, " ").trim();
 
 export const companyKey = (company: string) => squash(company).split(" ").filter(w => w && !COMPANY_NOISE.has(w)).join("") || squash(company).replace(/ /g, "");
@@ -261,12 +261,12 @@ export function findTwin(j: Twinnable, candidates?: Job[]): Job | null {
     if (differing.some(t => LEVEL.has(t))) continue; // "Engineer 1" and "Engineer 2" are different jobs
     // Close titles: accept unless both bodies are there to compare and they disagree.
     // Related titles: only when the body text is nearly identical.
-    const bodies = (j.description?.length ?? 0) > 400 && (c.description?.length ?? 0) > 400;
-    if (!bodies) {
+    const mine = j.description ?? "", other = c.description ?? "";
+    if (mine.length <= 400 || other.length <= 400) {
       if (overlap >= 0.8) return c;
       continue;
     }
-    if (jaccard((text ??= shingles(j.description!)), shingles(c.description!)) >= (overlap >= 0.8 ? 0.6 : 0.85)) return c;
+    if (jaccard((text ??= shingles(mine)), shingles(other)) >= (overlap >= 0.8 ? 0.6 : 0.85)) return c;
   }
   return null;
 }
@@ -376,13 +376,13 @@ export function updateJob(id: number, fields: Partial<Omit<Job, "id">>) {
   const keys = Object.keys(fields) as (keyof typeof fields)[];
   if (!keys.length) return;
   const sets = keys.map(k => `${k} = ?`).join(", ");
-  db.query(`UPDATE jobs SET ${sets}, updated_at = datetime('now') WHERE id = ?`).run(...keys.map(k => fields[k] as any), id);
+  db.query(`UPDATE jobs SET ${sets}, updated_at = datetime('now') WHERE id = ?`).run(...keys.map(k => fields[k] ?? null), id);
   emit({ type: "job", jobId: id });
 }
 
 export function logEvent(kind: string, message: string, jobId?: number | null, worker?: string) {
   db.query("INSERT INTO events (job_id, worker, kind, message) VALUES (?, ?, ?, ?)").run(jobId ?? null, worker ?? null, kind, message.slice(0, 4000));
-  emit({ type: "event", jobId: jobId ?? undefined });
+  emit(jobId == null ? { type: "event" } : { type: "event", jobId });
 }
 
 export const kvGet = (key: string) => db.query<{ value: string }, [string]>("SELECT value FROM kv WHERE key = ?").get(key)?.value ?? null;

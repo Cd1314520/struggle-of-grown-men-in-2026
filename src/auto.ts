@@ -8,11 +8,11 @@ import { evaluate, type Verdict } from "./rubric";
 
 export const autoApply = () => ({ enabled: false, phases: ["practice"], minScore: 80, allowConcerns: false, perDay: 5, submit: false, ...config.autoApply });
 
-export type AutoApprovalResult = {
+export interface AutoApprovalResult {
   approve: boolean;
   note: string | null;
   deferred?: "daily_cap";
-};
+}
 
 // Whether a freshly prepped job may skip gate 1. `note` says why not, for the job's page.
 export function autoApproval(verdict: Verdict, facts: { concerns: string | null; handPicked: boolean; approvedToday: number }): AutoApprovalResult {
@@ -107,27 +107,27 @@ export function reconsiderAutoApproval(
         return deny("malformed checklist item: expected object");
       }
       const record = item as Record<string, unknown>;
-      if (typeof record.key !== "string" || !record.key.trim()) {
+      if (typeof record["key"] !== "string" || !record["key"].trim()) {
         return deny("malformed checklist item: missing or invalid key");
       }
-      const key = record.key.trim();
+      const key = record["key"].trim();
       if (seenKeys.has(key)) {
         return deny(`malformed checklist: duplicate key ${key}`);
       }
       seenKeys.add(key);
 
-      if (record.answer !== "yes" && record.answer !== "no" && record.answer !== "unclear") {
+      if (record["answer"] !== "yes" && record["answer"] !== "no" && record["answer"] !== "unclear") {
         return deny(`malformed checklist item: invalid answer for ${key}`);
       }
 
-      if (typeof record.evidence !== "string") {
+      if (typeof record["evidence"] !== "string") {
         return deny(`malformed checklist item: invalid evidence for ${key}`);
       }
 
       raw.push({
         id: key,
-        answer: record.answer,
-        evidence: record.evidence,
+        answer: record["answer"],
+        evidence: record["evidence"],
       });
     }
   } catch {

@@ -70,13 +70,24 @@ export interface JournalSnapshot {
   newGates: QuestionGateEvidence[];
   otherBlockers: OtherBlockerEvidence[];
   themeCounts: Record<string, { count: number; suggestion: string }>;
-  currentlyStalled: Array<{
+  currentlyStalled: {
     jobId: number;
     company: string;
     title: string;
     stalledSince: string;
     reason: string;
-  }>;
+  }[];
+}
+
+export interface MonitorResult {
+  changed: boolean;
+  message: string;
+}
+
+/** Shape of the JSON stored in `jobs.pending`; fields are untrusted until checked. */
+interface PendingPayload {
+  text?: unknown;
+  shot?: unknown;
 }
 
 export function parseCliArgs(argv: string[]): CliOptions {
@@ -89,19 +100,23 @@ export function parseCliArgs(argv: string[]): CliOptions {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    const next = args[i + 1];
     if (arg === "--help" || arg === "-h") {
       help = true;
     } else if (arg === "--silent" || arg === "-q") {
       silent = true;
     } else if (arg === "--db") {
-      if (!args[i + 1]) throw new Error("Missing value for --db");
-      dbPath = resolve(process.cwd(), args[++i]);
+      if (!next) throw new Error("Missing value for --db");
+      dbPath = resolve(process.cwd(), next);
+      i++;
     } else if (arg === "--journal") {
-      if (!args[i + 1]) throw new Error("Missing value for --journal");
-      journalPath = resolve(process.cwd(), args[++i]);
+      if (!next) throw new Error("Missing value for --journal");
+      journalPath = resolve(process.cwd(), next);
+      i++;
     } else if (arg === "--state") {
-      if (!args[i + 1]) throw new Error("Missing value for --state");
-      statePath = resolve(process.cwd(), args[++i]);
+      if (!next) throw new Error("Missing value for --state");
+      statePath = resolve(process.cwd(), next);
+      i++;
     } else {
       throw new Error(`Unknown option: ${arg}`);
     }
@@ -160,40 +175,41 @@ export function loadState(statePath: string, journalPath?: string): JournalState
   try {
     raw = readFileSync(statePath, "utf8");
   } catch (err) {
-    throw new Error(`Failed to read state file at ${statePath}: ${(err as Error).message}`);
+    throw new Error(`Failed to read state file at ${statePath}: ${(err as Error).message}`, { cause: err });
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    throw new Error(`State file corrupted at ${statePath}: Invalid JSON (${(err as Error).message})`);
+    throw new Error(`State file corrupted at ${statePath}: Invalid JSON (${(err as Error).message})`, { cause: err });
   }
 
   if (
     typeof parsed !== "object" ||
     parsed === null ||
-    (parsed as Record<string, unknown>).version !== 1 ||
-    typeof (parsed as Record<string, unknown>).lastEventId !== "number" ||
-    !Array.isArray((parsed as Record<string, unknown>).reportedGateEventIds)
+    (parsed as Record<string, unknown>)["version"] !== 1 ||
+    typeof (parsed as Record<string, unknown>)["lastEventId"] !== "number" ||
+    !Array.isArray((parsed as Record<string, unknown>)["reportedGateEventIds"])
   ) {
     throw new Error(`State file corrupted at ${statePath}: Invalid schema (version 1 required)`);
   }
 
   const s = parsed as Record<string, unknown>;
-  const stateLastEventId = s.lastEventId as number;
+  const stateLastEventId = s["lastEventId"] as number;
   const mergedLastEventId = Math.max(stateLastEventId, journalWatermark);
-  const reportedSet = new Set<number>(s.reportedGateEventIds as number[]);
+  const reportedSet = new Set<number>(s["reportedGateEventIds"] as number[]);
+  const reportedJobStatuses = s["reportedJobStatuses"];
   for (const gid of journalGateIds) {
     reportedSet.add(gid);
   }
 
   return {
     version: 1,
-    lastRunAt: typeof s.lastRunAt === "string" ? s.lastRunAt : new Date().toISOString(),
+    lastRunAt: typeof s["lastRunAt"] === "string" ? s["lastRunAt"] : new Date().toISOString(),
     lastEventId: mergedLastEventId,
     reportedGateEventIds: Array.from(reportedSet).sort((a, b) => a - b),
-    reportedJobStatuses: (s.reportedJobStatuses as Record<number, string>) || {},
+    reportedJobStatuses: reportedJobStatuses ? (reportedJobStatuses as Record<number, string>) : {},
   };
 }
 
@@ -205,11 +221,11 @@ export function saveState(statePath: string, state: JournalState): void {
   renameSync(tmpPath, statePath);
 }
 
-const CATEGORY_RULES: Array<{
+const CATEGORY_RULES: {
   category: string;
   pattern: RegExp;
   suggestion: string;
-}> = [
+}[] = [
   {
     category: "Recruiting Communications & SMS Consent",
     pattern: /\b(sms|text\s*messages?|messaging\s*consent|consent\s*to\s*receive\b.*?\bsms)\b/i,
@@ -291,7 +307,7 @@ export function sanitizeBlockerDetail(raw: string): string {
   if (cleaned.startsWith("report_result")) {
     cleaned = cleaned.replace(/^report_result\s*/, "");
     try {
-      const parsed = JSON.parse(cleaned);
+      const parsed = JSON.parse(cleaned) as { note?: unknown } | null;
       if (parsed && typeof parsed.note === "string") {
         cleaned = parsed.note;
       }
@@ -336,7 +352,7 @@ interface AutoApprovalInterval {
 export function observeAutoApplyActivity(
   db: Database,
   state: JournalState | null,
-  existingJournalContent: string
+  _existingJournalContent: string
 ): {
   snapshot: JournalSnapshot | null;
   newState: JournalState | null;
@@ -365,16 +381,17 @@ export function observeAutoApplyActivity(
     `).all();
 
     // 3. Build non-overlapping auto-approval intervals for each job
-    const allAutoJobIds = Array.from(new Set(autoApprovalEvents.map((e) => e.job_id!)));
+    const allAutoJobIds = Array.from(
+      new Set(autoApprovalEvents.flatMap((e) => (e.job_id === null ? [] : [e.job_id])))
+    );
     const intervals: AutoApprovalInterval[] = [];
 
     for (const jobId of allAutoJobIds) {
       const jobAutos = autoApprovalEvents.filter((e) => e.job_id === jobId);
       const jobUsers = userApprovalEvents.filter((e) => e.job_id === jobId);
 
-      for (let i = 0; i < jobAutos.length; i++) {
-        const autoEv = jobAutos[i];
-        const nextAutoId = i + 1 < jobAutos.length ? jobAutos[i + 1].id : Infinity;
+      for (const [i, autoEv] of jobAutos.entries()) {
+        const nextAutoId = jobAutos[i + 1]?.id ?? Infinity;
         const nextUser = jobUsers.find((u) => u.id > autoEv.id);
         const nextUserId = nextUser ? nextUser.id : Infinity;
         const endId = Math.min(nextAutoId, nextUserId);
@@ -473,7 +490,7 @@ export function observeAutoApplyActivity(
     let pendingShot: number | null = null;
     if (job.pending) {
       try {
-        const parsed = JSON.parse(job.pending);
+        const parsed = JSON.parse(job.pending) as PendingPayload | null;
         if (parsed && typeof parsed.text === "string") pendingText = parsed.text;
         if (parsed && typeof parsed.shot === "number") pendingShot = parsed.shot;
       } catch {
@@ -519,7 +536,7 @@ export function observeAutoApplyActivity(
           isCurrentlyPending = true;
         } else {
           try {
-            const parsed = JSON.parse(job.pending);
+            const parsed = JSON.parse(job.pending) as PendingPayload | null;
             const pendingText = typeof parsed?.text === "string" ? parsed.text : job.pending;
             const snippet = sanitized.slice(0, 25);
             isCurrentlyPending = pendingText.includes(snippet) || sanitized.includes(pendingText.slice(0, 25));
@@ -559,7 +576,7 @@ export function observeAutoApplyActivity(
 
     if (!reportedGates.has(b.id)) {
       let kind: OtherBlockerEvidence["kind"] = "fill_failure";
-      let detail = "";
+      let detail: string;
       if (b.message.startsWith("confirm_submit:")) {
         kind = "confirm_submit_gate";
         detail = "Awaiting submission confirmation (not a knowledge-base question)";
@@ -629,22 +646,24 @@ export function observeAutoApplyActivity(
     const key = `${g.jobId}::${g.category}`;
     if (!seenJobCategory.has(key)) {
       seenJobCategory.add(key);
-      if (!themeCounts[g.category]) {
+      let theme = themeCounts[g.category];
+      if (!theme) {
         const { suggestion } = categorizeQuestion(g.rawQuestion);
-        themeCounts[g.category] = { count: 0, suggestion };
+        theme = { count: 0, suggestion };
+        themeCounts[g.category] = theme;
       }
-      themeCounts[g.category].count += 1;
+      theme.count += 1;
     }
   }
 
   // 10. Collect currently stalled jobs with accurate stall timestamps
-  const currentlyStalled: Array<{
+  const currentlyStalled: {
     jobId: number;
     company: string;
     title: string;
     stalledSince: string;
     reason: string;
-  }> = [];
+  }[] = [];
 
   for (const att of eligibleAttempts) {
     if (att.status === "needs_input") {
@@ -897,7 +916,14 @@ export function updateJournalFile(journalPath: string, entryContent: string): vo
   renameSync(tmpPath, journalPath);
 }
 
-export async function runMonitor(options: CliOptions): Promise<{ changed: boolean; message: string }> {
+export function runMonitor(options: CliOptions): Promise<MonitorResult> {
+  // The work is synchronous; the promise keeps failures surfacing as rejections for callers.
+  return new Promise((resolveResult) => {
+    resolveResult(monitorOnce(options));
+  });
+}
+
+function monitorOnce(options: CliOptions): MonitorResult {
   if (!existsSync(options.dbPath)) {
     throw new Error(`Database file not found at: ${options.dbPath}`);
   }

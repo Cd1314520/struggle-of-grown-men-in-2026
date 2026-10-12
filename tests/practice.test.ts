@@ -5,15 +5,17 @@ import { autoApproval, checkAutoApprovedPractice, confirmsSubmit, reconsiderAuto
 import { config } from "../src/config";
 
 // Snapshot config for clean restoration
-const initialConfig = JSON.parse(JSON.stringify(config));
+const initialConfig = JSON.stringify(config);
+const snapshot = () => JSON.parse(initialConfig) as Record<string, unknown>;
 
 function restoreConfig() {
+  const initial = snapshot();
   for (const key of Object.keys(config)) {
-    if (!(key in initialConfig)) {
-      delete (config as Record<string, unknown>)[key];
+    if (!(key in initial)) {
+      Reflect.deleteProperty(config, key);
     }
   }
-  Object.assign(config, JSON.parse(JSON.stringify(initialConfig)));
+  Object.assign(config, initial);
 }
 
 beforeEach(restoreConfig);

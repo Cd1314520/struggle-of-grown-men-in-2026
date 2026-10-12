@@ -10,7 +10,7 @@ export interface Boards {
   location: string;
   distance: number; // miles
   queries: string[];
-  initialHours: number;
+  initialHours?: number;
   linkedin?: { minutes: number; pages: number };
   indeed?: { minutes: number };
 }
@@ -28,9 +28,9 @@ const BLOCK_HOURS = 6;
 class Blocked extends Error {}
 
 // Hours of postings to ask for: since the last successful read plus an overlap, or the initial window.
-function windowHours(board: Board) {
+function windowHours(board: Board, b: Boards) {
   const last = Date.parse(kvGet(`last.board.${board}.ok`) ?? "");
-  const initial = config.boards!.initialHours ?? 72;
+  const initial = b.initialHours ?? 72;
   return Number.isNaN(last) ? initial : Math.min(initial, Math.ceil((Date.now() - last) / 3600_000) + 1);
 }
 
@@ -45,13 +45,14 @@ const LINKEDIN_PAGE = 10;
 async function linkedin(b: Boards): Promise<Posting[]> {
   const out: Posting[] = [];
   const seen = new Set<string>();
-  const hours = windowHours("linkedin");
+  const hours = windowHours("linkedin", b);
+  const pages = b.linkedin?.pages ?? 2;
   let requests = 0;
   for (const keywords of b.queries) {
-    for (let page = 0; page < (b.linkedin!.pages ?? 2); page++) {
+    for (let page = 0; page < pages; page++) {
       if (requests++) await pause();
       const params = new URLSearchParams({ keywords, location: b.location, distance: String(b.distance), f_TPR: `r${hours * 3600}`, sortBy: "DD", start: String(page * LINKEDIN_PAGE) });
-      const res = await fetch(`https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?${params}`, { headers: BROWSER, redirect: "manual", signal: AbortSignal.timeout(30_000) });
+      const res = await fetch(`https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?${params.toString()}`, { headers: BROWSER, redirect: "manual", signal: AbortSignal.timeout(30_000) });
       if (res.status !== 200) throw new Blocked(`search answered ${res.status}`);
       const html = await res.text();
       const cards = html.split(/<li>/).slice(1);
@@ -61,16 +62,16 @@ async function linkedin(b: Boards): Promise<Posting[]> {
       }
       let fresh = 0;
       for (const card of cards) {
-        const id = card.match(/jobPosting:(\d+)/)?.[1];
-        const title = text(card.match(/base-search-card__title[^>]*>([\s\S]*?)<\/h3>/)?.[1]);
-        const company = text(card.match(/base-search-card__subtitle[^>]*>([\s\S]*?)<\/h4>/)?.[1]);
+        const id = (/jobPosting:(\d+)/.exec(card))?.[1];
+        const title = text((/base-search-card__title[^>]*>([\s\S]*?)<\/h3>/.exec(card))?.[1]);
+        const company = text((/base-search-card__subtitle[^>]*>([\s\S]*?)<\/h4>/.exec(card))?.[1]);
         if (!id || !title || !company || seen.has(id)) continue;
         seen.add(id);
         const url = `https://www.linkedin.com/jobs/view/${id}`;
         if (knownUrl(url)) continue;
         if (NO_EMPLOYER.test(company)) continue;
         fresh++;
-        out.push({ url, source: "linkedin", company, title, location: text(card.match(/job-search-card__location[^>]*>([\s\S]*?)<\/span>/)?.[1]) || null, description: null, posted: posted(card.match(/<time[^>]*datetime="([^"]+)"/)?.[1]) });
+        out.push({ url, source: "linkedin", company, title, location: text((/job-search-card__location[^>]*>([\s\S]*?)<\/span>/.exec(card))?.[1]) || null, description: null, posted: posted((/<time[^>]*datetime="([^"]+)"/.exec(card))?.[1]) });
       }
       // Newest first: a page of postings already seen means the rest are older still.
       if (!fresh || cards.length < LINKEDIN_PAGE) break;
@@ -81,12 +82,12 @@ async function linkedin(b: Boards): Promise<Posting[]> {
 
 // The job page's description, for a posting whose employer page gave none. One request.
 export async function linkedinDescription(url: string): Promise<string | null> {
-  const id = url.match(/linkedin\.com\/jobs\/view\/(?:[^/?]*-)?(\d+)/)?.[1];
+  const id = (/linkedin\.com\/jobs\/view\/(?:[^/?]*-)?(\d+)/.exec(url))?.[1];
   if (!id) return null;
   try {
     const res = await fetch(`https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${id}`, { headers: BROWSER, redirect: "manual", signal: AbortSignal.timeout(30_000) });
     if (res.status !== 200) return null;
-    const body = (await res.text()).match(/show-more-less-html__markup[^>]*>([\s\S]*?)<\/div>/)?.[1];
+    const body = (/show-more-less-html__markup[^>]*>([\s\S]*?)<\/div>/.exec((await res.text())))?.[1];
     return body ? htmlToText(body) || null : null;
   } catch {
     return null;
@@ -104,24 +105,37 @@ const INDEED_HEADERS = {
   "indeed-co": "US",
   "indeed-locale": "en-US",
 };
+interface IndeedJob {
+  key?: string;
+  title?: string;
+  sourceEmployerName?: string | null;
+  description?: { html?: string | null } | null;
+  location?: { admin1Code?: string | null; city?: string | null } | null;
+  employer?: { name?: string | null } | null;
+  recruit?: { viewJobUrl?: string | null } | null;
+}
+interface IndeedResponse {
+  data?: { jobSearch?: { results?: { job?: IndeedJob | null }[] | null } | null } | null;
+  errors?: unknown;
+}
 async function indeed(b: Boards): Promise<Posting[]> {
   const out: Posting[] = [];
   const seen = new Set<string>();
-  const hours = windowHours("indeed");
+  const hours = windowHours("indeed", b);
   let requests = 0;
   for (const what of b.queries) {
     if (requests++) await pause();
-    const query = `query { jobSearch(what: ${JSON.stringify(what)} location: {where: ${JSON.stringify(b.location)}, radius: ${Number(b.distance)}, radiusUnit: MILES} limit: 100 sort: DATE filters: [{ date: { field: "dateOnIndeed", start: "${hours}h" } }]) { results { job { key title sourceEmployerName description { html } location { admin1Code city } employer { name } recruit { viewJobUrl } } } } }`;
+    const query = `query { jobSearch(what: ${JSON.stringify(what)} location: {where: ${JSON.stringify(b.location)}, radius: ${b.distance}, radiusUnit: MILES} limit: 100 sort: DATE filters: [{ date: { field: "dateOnIndeed", start: "${hours}h" } }]) { results { job { key title sourceEmployerName description { html } location { admin1Code city } employer { name } recruit { viewJobUrl } } } } }`;
     const res = await fetch("https://apis.indeed.com/graphql", { method: "POST", headers: INDEED_HEADERS, body: JSON.stringify({ query }), signal: AbortSignal.timeout(30_000) });
     if (res.status !== 200) throw new Blocked(`search answered ${res.status}`);
-    const data = (await res.json()) as any;
+    const data = (await res.json()) as IndeedResponse | null;
     if (!data?.data?.jobSearch) throw new Blocked(`search failed: ${JSON.stringify(data?.errors ?? data).slice(0, 200)}`);
     for (const { job: j } of data.data.jobSearch.results ?? []) {
-      const company = String(j?.employer?.name ?? j?.sourceEmployerName ?? "").trim();
+      const company = (j?.employer?.name ?? j?.sourceEmployerName ?? "").trim();
       if (!j?.key || !j.title || !company || seen.has(j.key) || NO_EMPLOYER.test(company)) continue;
       seen.add(j.key);
       // Postings that are not "Easily apply" carry the employer's own link.
-      const direct = j.recruit?.viewJobUrl && !isBoardUrl(j.recruit.viewJobUrl) ? String(j.recruit.viewJobUrl) : null;
+      const direct = j.recruit?.viewJobUrl && !isBoardUrl(j.recruit.viewJobUrl) ? j.recruit.viewJobUrl : null;
       out.push({
         url: direct ?? `https://www.indeed.com/viewjob?jk=${j.key}`,
         source: "indeed",
@@ -138,20 +152,25 @@ async function indeed(b: Boards): Promise<Posting[]> {
 const readers: Record<Board, (b: Boards) => Promise<Posting[]>> = { linkedin, indeed };
 
 export const boardNames = () => BOARDS.filter(n => Number(config.boards?.[n]?.minutes) > 0);
-export const boardMinutes = (name: Board) => Number(config.boards![name]!.minutes);
+export const boardMinutes = (name: Board) => {
+  const minutes = config.boards?.[name]?.minutes;
+  if (minutes === undefined) throw new Error(`board "${name}" is not configured`);
+  return minutes;
+};
 
 // New postings from one board, newest first. Throws when the board refused; it is then left alone for a while.
 export async function fetchBoard(name: Board): Promise<Posting[]> {
   if (Date.now() < Date.parse(kvGet(`board.${name}.blockedUntil`) ?? "1970-01-01")) return [];
   const started = new Date().toISOString();
   try {
-    const postings = await readers[name](config.boards!);
+    if (!config.boards) throw new Error("no boards are configured");
+    const postings = await readers[name](config.boards);
     kvSet(`last.board.${name}.ok`, started);
     return postings;
-  } catch (err: any) {
+  } catch (err) {
     if (err instanceof Blocked) {
       kvSet(`board.${name}.blockedUntil`, new Date(Date.now() + BLOCK_HOURS * 3600_000).toISOString());
-      throw new Error(`${err.message}; not asking again for ${BLOCK_HOURS}h`);
+      throw new Error(`${err.message}; not asking again for ${BLOCK_HOURS}h`, { cause: err });
     }
     throw err;
   }

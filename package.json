@@ -5,12 +5,20 @@
   "scripts": {
     "start": "bun src/server.ts",
     "dev": "bun --watch src/server.ts",
-    "reassess-backlog": "bun scripts/reassess-backlog.ts"
+    "reassess-backlog": "bun scripts/reassess-backlog.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "bun test",
+    "check": "bun run typecheck && bun run lint && bun test"
   },
   "dependencies": {
     "yaml": "^2.5.0"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@eslint/js": "^10.0.1",
+    "@types/bun": "latest",
+    "eslint": "^10.12.0",
+    "typescript": "^6",
+    "typescript-eslint": "^8.71.2"
   }
 }

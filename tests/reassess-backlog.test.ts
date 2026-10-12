@@ -13,7 +13,7 @@ describe("Backlog Reassessment Script - Migration Invariants & Edge Cases", () =
 
     const practiceColSql = options.withPracticeCol ? ", practice_assessment TEXT" : "";
 
-    db.exec(`
+    db.run(`
       CREATE TABLE jobs (
         id INTEGER PRIMARY KEY,
         url TEXT NOT NULL UNIQUE,

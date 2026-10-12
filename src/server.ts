@@ -14,6 +14,7 @@ import { currentThreshold } from "./rubric";
 import { abortFill, activeFillSession, autoApprovedToday, fillSlot, isRunning, manualBrowserReserved, profileProblems, pump, releaseBrowser, reserveBrowser, respond, scan, scheduleRecovery, startScheduler, track } from "./pipeline";
 import { answerGate, getOpenGate, listQuestionGroups, readCheckpoint, resolveAmbiguous } from "./questions";
 import { digestStatus, sendQuestionDigest } from "./digest";
+import { errorMessage } from "./errors";
 
 const PROFILE_FILES = ["targets.md", "rubric.yml", MAIN, "resume-notes.md", "answers.md", "personal.yml", "companies.yml"];
 const safeThreshold = () => {
@@ -75,7 +76,7 @@ function state() {
     redirectUri: gmail.redirectUri(),
     mailbox: config.mailbox,
     phase: config.phase,
-    home: config.boards?.location?.split(",")[0].trim() || null,
+    home: config.boards?.location.split(",")[0]?.trim() || null,
     profileFiles: PROFILE_FILES,
   };
 }
@@ -135,19 +136,19 @@ const server = Bun.serve({
   async fetch(req) {
     const url = new URL(req.url);
     const path = url.pathname;
-    const body = async () => (await req.json().catch(() => ({}))) as Record<string, any>;
+    const body = async () => (await req.json().catch(() => ({}))) as Record<string, unknown>;
 
-    if (path === "/") return new Response(Bun.file(process.env.AUTO_APPLY_UI ?? join(ROOT, "ui/index.html")));
+    if (path === "/") return new Response(Bun.file(process.env["AUTO_APPLY_UI"] ?? join(ROOT, "ui/index.html")));
     if (path === "/api/state") return json(state());
 
     if (path === "/api/questions" && req.method === "GET") return json({ groups: listQuestionGroups() });
-    const answerMatch = path.match(/^\/api\/questions\/([^/]+)\/answer$/);
+    const answerMatch = /^\/api\/questions\/([^/]+)\/answer$/.exec(path);
     if (answerMatch && req.method === "POST") {
       const { answer, scope } = await body();
       if (typeof answer !== "string" || !answer.trim()) return fail("answer text required");
       if (scope !== "application" && scope !== "standing") return fail("scope must be application or standing");
       try {
-        const { jobIds } = answerGate(decodeURIComponent(answerMatch[1]!), answer.trim(), scope);
+        const { jobIds } = answerGate(decodeURIComponent(answerMatch[1] ?? ""), answer.trim(), scope);
         logEvent("user", `Answered question (${scope}); queued applications: ${jobIds.join(", ")}`);
         pump();
         return json({ ok: true, jobIds });
@@ -165,7 +166,7 @@ const server = Bun.serve({
     }
 
     if (path === "/api/stream") {
-      let off = () => {};
+      let off: (() => void) | undefined;
       let timer: Timer;
       return new Response(
         new ReadableStream({
@@ -178,7 +179,7 @@ const server = Bun.serve({
             }, 1000);
           },
           cancel() {
-            off();
+            off?.();
             clearInterval(timer);
           },
         }),
@@ -186,7 +187,7 @@ const server = Bun.serve({
       );
     }
 
-    const jobMatch = path.match(/^\/api\/jobs\/(\d+)(\/[\w.]+)?$/);
+    const jobMatch = /^\/api\/jobs\/(\d+)(\/[\w.]+)?$/.exec(path);
     if (jobMatch) {
       const job = getJob(Number(jobMatch[1]));
       if (!job) return fail("no such job", 404);
@@ -217,7 +218,7 @@ const server = Bun.serve({
         const pdf = resumeFiles(job.id, job.resume_sha).pdf;
         if (!existsSync(pdf)) return fail("no resume yet", 404);
         const out = Bun.spawnSync(["pdftoppm", "-png", "-r", "120", "-f", "1", "-l", "1", pdf]);
-        return out.exitCode === 0 ? new Response(out.stdout as BodyInit, { headers: { "content-type": "image/png", "cache-control": "max-age=300" } }) : fail("could not render the resume", 500);
+        return out.exitCode === 0 ? new Response(out.stdout, { headers: { "content-type": "image/png", "cache-control": "max-age=300" } }) : fail("could not render the resume", 500);
       }
       if (sub === "/gate.png") {
         const file = Bun.file(join(jobDir(job.id), "gate.png"));
@@ -230,7 +231,7 @@ const server = Bun.serve({
         if (action === "confirmed_not_submitted" && (typeof gateId !== "string" || getOpenGate(job.id)?.kind !== "submission_ambiguous" || getOpenGate(job.id)?.id !== gateId))
           return fail("inspect the current ambiguous submission before resolving it; this gate has changed", 409);
         try {
-          const err = jobAction(job, String(action), String(text ?? "").trim());
+          const err = jobAction(job, typeof action === "string" ? action : "", typeof text === "string" ? text.trim() : "");
           return err ? fail(err, 409) : json({ ok: true });
         } catch (err) {
           return fail(err instanceof Error ? err.message : "job action failed", 409);
@@ -238,7 +239,7 @@ const server = Bun.serve({
       }
       if (sub === "/browser" && req.method === "POST") {
         const { action, gateId } = await body();
-        if (typeof gateId !== "string" || !gateId || !["reserve", "release"].includes(action))
+        if (typeof gateId !== "string" || !gateId || (action !== "reserve" && action !== "release"))
           return fail("action (reserve or release) and gateId are required", 400);
         try {
           if (action === "reserve") await reserveBrowser(job.id, gateId);
@@ -252,7 +253,7 @@ const server = Bun.serve({
         const { gateId } = await body();
         if (typeof gateId !== "string" || !gateId) return fail("gateId is required", 400);
         const open = getOpenGate(job.id);
-        if (!open || open.id !== gateId) return fail("this gate is no longer open; reload the application", 409);
+        if (open?.id !== gateId) return fail("this gate is no longer open; reload the application", 409);
         if (open.kind !== "manual" && open.kind !== "submission_ambiguous")
           return fail("only manual handoffs and ambiguous submissions can be recovered", 400);
         const checkpoint = readCheckpoint(job.id);
@@ -269,8 +270,9 @@ const server = Bun.serve({
 
     if (path === "/api/jobs" && req.method === "POST") {
       const { url: jobUrl, company, title } = await body();
-      if (!/^https?:\/\//.test(jobUrl ?? "")) return fail("a posting URL is required");
-      const id = insertJob({ url: jobUrl, source: "manual", company: company || new URL(jobUrl).hostname, title: title || "(untitled posting)", location: null, description: null }, "triaged");
+      if (typeof jobUrl !== "string" || !/^https?:\/\//.test(jobUrl)) return fail("a posting URL is required");
+      const text = (value: unknown) => (typeof value === "string" ? value : "");
+      const id = insertJob({ url: jobUrl, source: "manual", company: text(company) || new URL(jobUrl).hostname, title: text(title) || "(untitled posting)", location: null, description: null }, "triaged");
       if (!id) return fail("already known");
       pump();
       return json({ id });
@@ -281,20 +283,20 @@ const server = Bun.serve({
       if (what === "scan" || what === "discover") {
         const bad = profileProblems(["targets.md"]);
         if (bad.length) return fail("fill in profile/targets.md first");
-        scan({ discover: what === "discover" });
+        void scan({ discover: what === "discover" });
       } else if (what === "release_held") {
         // back through triage, which now judges them against the current phase
         const n = db.query("UPDATE jobs SET status = 'found', note = NULL, updated_at = datetime('now') WHERE status = 'held'").run().changes;
         logEvent("user", `released ${n} held jobs for re-triage`);
-        scan();
-      } else if (what === "track") track();
+        void scan();
+      } else if (what === "track") void track();
       else return fail("unknown run target");
       return json({ ok: true });
     }
 
-    const profileMatch = path.match(/^\/api\/profile\/([\w.-]+)$/);
+    const profileMatch = /^\/api\/profile\/([\w.-]+)$/.exec(path);
     if (profileMatch) {
-      const name = profileMatch[1]!;
+      const name = profileMatch[1] ?? "";
       if (!PROFILE_FILES.includes(name)) return fail("unknown profile file", 404);
       const file = profilePath(name);
       if (req.method === "PUT") {
@@ -310,14 +312,14 @@ const server = Bun.serve({
     if (path === "/api/browser/tabs") return json(await tabs(slot));
     if (path === "/api/browser/screenshot") {
       const png = await screenshot(slot, url.searchParams.get("tab") ?? undefined);
-      return png ? new Response(png as BodyInit, { headers: { "content-type": "image/png", "cache-control": "no-store" } }) : fail("browser not running", 404);
+      return png ? new Response(png, { headers: { "content-type": "image/png", "cache-control": "no-store" } }) : fail("browser not running", 404);
     }
 
     if (path === "/oauth/start") {
       try {
         return Response.redirect(gmail.authUrl());
-      } catch (err: any) {
-        return fail(err.message);
+      } catch (err) {
+        return fail(errorMessage(err));
       }
     }
     if (path === "/oauth/callback") {
@@ -327,8 +329,8 @@ const server = Bun.serve({
         await gmail.exchangeCode(code);
         logEvent("system", `Gmail connected: ${gmail.gmailStatus().address}`);
         return Response.redirect("/#settings");
-      } catch (err: any) {
-        return fail(err.message, 500);
+      } catch (err) {
+        return fail(errorMessage(err), 500);
       }
     }
 

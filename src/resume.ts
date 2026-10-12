@@ -21,7 +21,7 @@ export const changedTemplateFiles = (dir: string) =>
 
 export function pageCount(pdf: string): number | null {
   const out = Bun.spawnSync(["pdfinfo", pdf]).stdout.toString();
-  const m = out.match(/^Pages:\s+(\d+)/m);
+  const m = /^Pages:\s+(\d+)/m.exec(out);
   return m ? Number(m[1]) : null;
 }
 

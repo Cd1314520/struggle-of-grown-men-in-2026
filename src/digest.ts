@@ -16,7 +16,7 @@ export interface DigestStatus {
   undeliveredGroups: number;
 }
 
-type Result = { sent: boolean; groups: number; messageId?: string; reason?: string };
+interface Result { sent: boolean; groups: number; messageId?: string; reason?: string }
 interface Delivery {
   id: string;
   recipient: string;
@@ -33,7 +33,7 @@ interface Delivery {
 }
 
 // The ledger is independent of gate lifetime. Closing or adding jobs cannot erase delivery proof.
-db.exec(`
+db.run(`
 CREATE TABLE IF NOT EXISTS question_digest_deliveries (
   id TEXT PRIMARY KEY,
   recipient TEXT NOT NULL,
@@ -69,7 +69,7 @@ function localClock(now: Date, timeZone: string): { date: string; time: string }
     timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   }).formatToParts(now);
   const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
-  return { date: `${values.year}-${values.month}-${values.day}`, time: `${values.hour}:${values.minute}` };
+  return { date: `${values["year"]}-${values["month"]}-${values["day"]}`, time: `${values["hour"]}:${values["minute"]}` };
 }
 
 function recipient(): string | null {
@@ -241,5 +241,5 @@ export async function sendQuestionDigest(options: { force?: boolean; now?: Date 
 }
 
 export async function tickQuestionDigest(now?: Date): Promise<void> {
-  await sendQuestionDigest({ now });
+  await sendQuestionDigest(now ? { now } : {});
 }

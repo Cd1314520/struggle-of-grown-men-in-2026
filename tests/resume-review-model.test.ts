@@ -92,10 +92,10 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
 
     const result = validateResumeReviews(validReviews, [sampleJob101, sampleJob102]);
     expect(result.length).toBe(2);
-    expect(result[0].jobId).toBe(101);
-    expect(result[0].gaps.length).toBe(3);
-    expect(result[1].jobId).toBe(102);
-    expect(result[1].gaps.length).toBe(1);
+    expect(result[0]?.jobId).toBe(101);
+    expect(result[0]?.gaps.length).toBe(3);
+    expect(result[1]?.jobId).toBe(102);
+    expect(result[1]?.gaps.length).toBe(1);
   });
 
   it("rejects fabricated postingQuote not present in job posting", () => {
@@ -230,7 +230,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
 
     const result = validateResumeReviews(review, [postingWithNewlines]);
     expect(result.length).toBe(1);
-    expect(result[0].gaps[0].theme).toBe("Kubernetes");
+    expect(result[0]?.gaps[0]?.theme).toBe("Kubernetes");
   });
 
   it("handles confirmed_mismatch correctly and forbids recommending false addition", () => {
@@ -262,7 +262,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     ];
 
     const result = validateResumeReviews(validMismatchReview, [postingWithCpp]);
-    expect(result[0].gaps[0].status).toBe("confirmed_mismatch");
+    expect(result[0]?.gaps[0]?.status).toBe("confirmed_mismatch");
 
     // Negative invariant: confirmed_mismatch with resume evidence must throw
     const invalidMismatchWithResumeEvidence = [
@@ -748,8 +748,8 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     const excerpts = segmentText(sampleText, "P");
 
     expect(excerpts.length).toBeGreaterThanOrEqual(4);
-    expect(excerpts[0].id).toBe("P1");
-    expect(excerpts[0].text).toBe("First short line.");
+    expect(excerpts[0]?.id).toBe("P1");
+    expect(excerpts[0]?.text).toBe("First short line.");
 
     // Every excerpt must be an exact substring matching its recorded slice
     for (const excerpt of excerpts) {
@@ -806,12 +806,12 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
 
     const resolved = resolveModelWireReviews(wireModelOutput, excerptMaps);
     expect(resolved.length).toBe(2);
-    expect(resolved[0].gaps[0].postingQuote).toBeTruthy();
-    expect(resolved[0].gaps[0].notesEvidence).toBeTruthy();
-    expect(resolved[0].gaps[0].resumeEvidence).toBeNull();
-    expect(resolved[0].gaps[1].status).toBe("underemphasized");
-    expect(resolved[0].gaps[1].resumeEvidence).toBeTruthy();
-    expect(resolved[0].gaps[1].notesEvidence).toBeNull();
+    expect(resolved[0]?.gaps[0]?.postingQuote).toBeTruthy();
+    expect(resolved[0]?.gaps[0]?.notesEvidence).toBeTruthy();
+    expect(resolved[0]?.gaps[0]?.resumeEvidence).toBeNull();
+    expect(resolved[0]?.gaps[1]?.status).toBe("underemphasized");
+    expect(resolved[0]?.gaps[1]?.resumeEvidence).toBeTruthy();
+    expect(resolved[0]?.gaps[1]?.notesEvidence).toBeNull();
 
     // Resolved reviews pass authoritative validateResumeReviews provenance checks
     const validated = validateResumeReviews(resolved, [sampleJob101, sampleJob102]);
@@ -891,7 +891,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     ];
 
     const resolved = resolveModelWireReviews(multiIdWireOutput, excerptMaps);
-    expect(resolved[0].gaps[0].postingQuote).toBeTruthy();
+    expect(resolved[0]?.gaps[0]?.postingQuote).toBeTruthy();
     // Validates against sampleJob101 postingText
     expect(() => validateResumeReviews(resolved, [sampleJob101])).not.toThrow();
   });

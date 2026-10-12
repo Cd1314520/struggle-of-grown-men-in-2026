@@ -4,8 +4,8 @@ import YAML from "yaml";
 
 export const ROOT = resolve(import.meta.dir, "..");
 // Overridable so a test run can use throwaway state.
-export const DATA = process.env.AUTO_APPLY_DATA ?? join(ROOT, "data");
-export const PROFILE = process.env.AUTO_APPLY_PROFILE ?? join(ROOT, "profile");
+export const DATA = process.env["AUTO_APPLY_DATA"] ?? join(ROOT, "data");
+export const PROFILE = process.env["AUTO_APPLY_PROFILE"] ?? join(ROOT, "profile");
 export const PROMPTS = join(ROOT, "prompts");
 
 mkdirSync(join(DATA, "jobs"), { recursive: true });
@@ -30,7 +30,7 @@ export interface Config {
   chrome: { cdpPort: number; proxyPort: number; display: string; window: [number, number]; vncPort: number };
 }
 
-export const config: Config = YAML.parse(readFileSync(join(ROOT, "config.yml"), "utf8"));
+export const config = YAML.parse(readFileSync(join(ROOT, "config.yml"), "utf8")) as Config;
 config.questionDigest = {
   enabled: true,
   time: "09:00",
@@ -42,9 +42,9 @@ if (typeof config.questionDigest.enabled !== "boolean" || !/^([01]\d|2[0-3]):[0-
   throw new Error("questionDigest requires enabled: boolean, time: HH:mm (24-hour local time), and an IANA timeZone");
 // Intl validates the IANA zone; never silently schedule in the host's time zone.
 new Intl.DateTimeFormat("en-US", { timeZone: config.questionDigest.timeZone });
-if (process.env.AUTO_APPLY_PORT) {
+if (process.env["AUTO_APPLY_PORT"]) {
   // test runs: local port, no public URLs
-  config.port = Number(process.env.AUTO_APPLY_PORT);
+  config.port = Number(process.env["AUTO_APPLY_PORT"]);
   config.chrome.proxyPort = config.port + 1;
   config.publicUrl = config.vncUrl = null;
 }
@@ -68,7 +68,7 @@ export const vncUrl = (slot = 0) => {
   return `${url.href.replace(/\/$/, "")}/vnc.html?autoconnect=1&resize=scale`;
 };
 
-export const RESUME_DIR = process.env.AUTO_APPLY_RESUME_DIR ?? resolve(ROOT, config.resume.dir);
+export const RESUME_DIR = process.env["AUTO_APPLY_RESUME_DIR"] ?? resolve(ROOT, config.resume.dir);
 export const STOCK_MAIN = join(RESUME_DIR, config.resume.main);
 
 export const jobDir = (id: number) => {

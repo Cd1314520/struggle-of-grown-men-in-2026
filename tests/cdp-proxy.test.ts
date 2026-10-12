@@ -5,11 +5,11 @@ import { config } from "../src/config";
 import { startCdpProxy, type CdpProxy } from "../src/cdp-proxy";
 
 interface Wire {
-  id?: number;
-  method?: string;
-  sessionId?: string;
+  id?: number | undefined;
+  method?: string | undefined;
+  sessionId?: string | undefined;
   params: Record<string, unknown>;
-  result?: Record<string, unknown>;
+  result?: Record<string, unknown> | undefined;
   error?: unknown;
 }
 
@@ -31,19 +31,19 @@ function parsePacket(text: string): Wire {
     throw new Error("Invalid packet");
   }
   const obj = val as Record<string, unknown>;
-  const params = typeof obj.params === "object" && obj.params !== null && !Array.isArray(obj.params)
-    ? (obj.params as Record<string, unknown>)
+  const params = typeof obj["params"] === "object" && obj["params"] !== null && !Array.isArray(obj["params"])
+    ? (obj["params"] as Record<string, unknown>)
     : {};
-  const result = typeof obj.result === "object" && obj.result !== null && !Array.isArray(obj.result)
-    ? (obj.result as Record<string, unknown>)
+  const result = typeof obj["result"] === "object" && obj["result"] !== null && !Array.isArray(obj["result"])
+    ? (obj["result"] as Record<string, unknown>)
     : undefined;
   return {
-    id: typeof obj.id === "number" ? obj.id : undefined,
-    method: typeof obj.method === "string" ? obj.method : undefined,
-    sessionId: typeof obj.sessionId === "string" ? obj.sessionId : undefined,
+    id: typeof obj["id"] === "number" ? obj["id"] : undefined,
+    method: typeof obj["method"] === "string" ? obj["method"] : undefined,
+    sessionId: typeof obj["sessionId"] === "string" ? obj["sessionId"] : undefined,
     params,
     result,
-    error: obj.error,
+    error: obj["error"],
   };
 }
 
@@ -52,7 +52,7 @@ interface TestHarnessOptions {
   scopeTargetId?: string;
 }
 
-async function createHarness(options: TestHarnessOptions = {}) {
+function createHarness(options: TestHarnessOptions = {}) {
   const nativeUa = options.nativeUa === undefined
     ? "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
     : options.nativeUa;
@@ -131,7 +131,9 @@ async function createHarness(options: TestHarnessOptions = {}) {
 
   const savedCdpPort = config.chrome.cdpPort;
   const savedProxyPort = config.chrome.proxyPort;
-  config.chrome.cdpPort = upstream.port;
+  const upstreamPort = upstream.port;
+  if (upstreamPort === undefined) throw new Error("upstream fixture requires a TCP listener");
+  config.chrome.cdpPort = upstreamPort;
   config.chrome.proxyPort = 0;
 
   const scope = options.scopeTargetId
@@ -150,9 +152,9 @@ async function createHarness(options: TestHarnessOptions = {}) {
 
   async function connectClient(path = `/devtools/page/${options.scopeTargetId ?? "target-1"}`) {
     const ws = new WebSocket(`ws://127.0.0.1:${proxy.port}${path}`);
-    const ready = Promise.withResolvers<void>();
-    ws.onopen = () => ready.resolve();
-    ws.onerror = (e) => ready.reject(new Error(`WebSocket error: ${String(e)}`));
+    const ready: PromiseWithResolvers<void> = Promise.withResolvers();
+    ws.onopen = () => { ready.resolve(); };
+    ws.onerror = (e) => { ready.reject(new Error(`WebSocket error: ${e.type}`)); };
 
     const pending = new Map<number, (reply: Wire) => void>();
     const eventWaiters = new Map<string, ((event: Wire) => void)[]>();
@@ -184,7 +186,7 @@ async function createHarness(options: TestHarnessOptions = {}) {
     async function send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<Wire> {
       const id = ++nextId;
       const { promise, resolve } = Promise.withResolvers<Wire>();
-      pending.set(id, (reply) => resolve(reply));
+      pending.set(id, (reply) => { resolve(reply); });
       ws.send(JSON.stringify({ id, method, params, sessionId }));
       return promise;
     }
@@ -198,6 +200,7 @@ async function createHarness(options: TestHarnessOptions = {}) {
       const existingIdx = events.findIndex((e) => e.method === method);
       if (existingIdx !== -1) {
         const [found] = events.splice(existingIdx, 1);
+        if (!found) throw new Error(`Buffered ${method} event vanished`);
         return Promise.resolve(found);
       }
       const { promise, resolve } = Promise.withResolvers<Wire>();
@@ -215,7 +218,7 @@ async function createHarness(options: TestHarnessOptions = {}) {
 
   async function cleanup() {
     proxy.close();
-    upstream.stop(true);
+    await upstream.stop(true);
     config.chrome.cdpPort = savedCdpPort;
     config.chrome.proxyPort = savedProxyPort;
   }
@@ -233,7 +236,7 @@ async function createHarness(options: TestHarnessOptions = {}) {
 describe("CDP proxy native User-Agent normalization", () => {
   it("normalizes Network.setUserAgentOverride with matching native UA to empty string and returns upstream reply", async () => {
     const nativeUa = "Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0.0.0";
-    const harness = await createHarness({ nativeUa });
+    const harness = createHarness({ nativeUa });
     try {
       const client = await harness.connectClient();
       const reply = await client.send("Network.setUserAgentOverride", { userAgent: nativeUa });
@@ -241,7 +244,7 @@ describe("CDP proxy native User-Agent normalization", () => {
       assert.equal(reply.error, undefined);
       const forwarded = harness.upstreamMessages.find(m => m.method === "Network.setUserAgentOverride");
       assert.ok(forwarded, "Network.setUserAgentOverride was forwarded upstream");
-      assert.equal(forwarded.params.userAgent, "");
+      assert.equal(forwarded.params["userAgent"], "");
       assert.equal(Object.keys(forwarded.params).length, 1);
       client.ws.close();
     } finally {
@@ -251,7 +254,7 @@ describe("CDP proxy native User-Agent normalization", () => {
 
   it("normalizes Emulation.setUserAgentOverride with matching native UA to empty string", async () => {
     const nativeUa = "Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0.0.0";
-    const harness = await createHarness({ nativeUa });
+    const harness = createHarness({ nativeUa });
     try {
       const client = await harness.connectClient();
       const reply = await client.send("Emulation.setUserAgentOverride", { userAgent: nativeUa });
@@ -259,7 +262,7 @@ describe("CDP proxy native User-Agent normalization", () => {
       assert.equal(reply.error, undefined);
       const forwarded = harness.upstreamMessages.find(m => m.method === "Emulation.setUserAgentOverride");
       assert.ok(forwarded, "Emulation.setUserAgentOverride was forwarded upstream");
-      assert.equal(forwarded.params.userAgent, "");
+      assert.equal(forwarded.params["userAgent"], "");
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -269,7 +272,7 @@ describe("CDP proxy native User-Agent normalization", () => {
   it("preserves custom userAgent unchanged when different from native UA", async () => {
     const nativeUa = "Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0.0.0";
     const customUa = "Mozilla/5.0 (CustomBot; Linux x86_64) SpecialBrowser/2.0";
-    const harness = await createHarness({ nativeUa });
+    const harness = createHarness({ nativeUa });
     try {
       const client = await harness.connectClient();
       const reply = await client.send("Network.setUserAgentOverride", { userAgent: customUa });
@@ -277,7 +280,7 @@ describe("CDP proxy native User-Agent normalization", () => {
       assert.equal(reply.error, undefined);
       const forwarded = harness.upstreamMessages.find(m => m.method === "Network.setUserAgentOverride");
       assert.ok(forwarded);
-      assert.equal(forwarded.params.userAgent, customUa);
+      assert.equal(forwarded.params["userAgent"], customUa);
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -286,7 +289,7 @@ describe("CDP proxy native User-Agent normalization", () => {
 
   it("preserves override unchanged when userAgentMetadata is present (even if UA matches native)", async () => {
     const nativeUa = "Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0.0.0";
-    const harness = await createHarness({ nativeUa });
+    const harness = createHarness({ nativeUa });
     try {
       const client = await harness.connectClient();
       const metadata = { brands: [{ brand: "Chromium", version: "130" }], platform: "Linux" };
@@ -298,8 +301,8 @@ describe("CDP proxy native User-Agent normalization", () => {
       assert.equal(reply.error, undefined);
       const forwarded = harness.upstreamMessages.find(m => m.method === "Network.setUserAgentOverride");
       assert.ok(forwarded);
-      assert.equal(forwarded.params.userAgent, nativeUa);
-      assert.deepEqual(forwarded.params.userAgentMetadata, metadata);
+      assert.equal(forwarded.params["userAgent"], nativeUa);
+      assert.deepEqual(forwarded.params["userAgentMetadata"], metadata);
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -308,7 +311,7 @@ describe("CDP proxy native User-Agent normalization", () => {
 
   it("preserves override unchanged when userAgentMetadata is explicitly null", async () => {
     const nativeUa = "Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0.0.0";
-    const harness = await createHarness({ nativeUa });
+    const harness = createHarness({ nativeUa });
     try {
       const client = await harness.connectClient();
       const reply = await client.send("Network.setUserAgentOverride", {
@@ -319,8 +322,8 @@ describe("CDP proxy native User-Agent normalization", () => {
       assert.equal(reply.error, undefined);
       const forwarded = harness.upstreamMessages.find(m => m.method === "Network.setUserAgentOverride");
       assert.ok(forwarded);
-      assert.equal(forwarded.params.userAgent, nativeUa);
-      assert.equal(forwarded.params.userAgentMetadata, null);
+      assert.equal(forwarded.params["userAgent"], nativeUa);
+      assert.equal(forwarded.params["userAgentMetadata"], null);
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -329,7 +332,7 @@ describe("CDP proxy native User-Agent normalization", () => {
 
   it("preserves override unchanged when acceptLanguage or extra parameters are present", async () => {
     const nativeUa = "Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0.0.0";
-    const harness = await createHarness({ nativeUa });
+    const harness = createHarness({ nativeUa });
     try {
       const client = await harness.connectClient();
       const reply = await client.send("Network.setUserAgentOverride", {
@@ -341,8 +344,8 @@ describe("CDP proxy native User-Agent normalization", () => {
       assert.equal(reply.error, undefined);
       const forwarded = harness.upstreamMessages.find(m => m.method === "Network.setUserAgentOverride");
       assert.ok(forwarded);
-      assert.equal(forwarded.params.userAgent, nativeUa);
-      assert.equal(forwarded.params.acceptLanguage, "en-US,en;q=0.9");
+      assert.equal(forwarded.params["userAgent"], nativeUa);
+      assert.equal(forwarded.params["acceptLanguage"], "en-US,en;q=0.9");
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -351,7 +354,7 @@ describe("CDP proxy native User-Agent normalization", () => {
 
   it("preserves reset override with empty string unchanged", async () => {
     const nativeUa = "Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0.0.0";
-    const harness = await createHarness({ nativeUa });
+    const harness = createHarness({ nativeUa });
     try {
       const client = await harness.connectClient();
       const reply = await client.send("Network.setUserAgentOverride", { userAgent: "" });
@@ -359,7 +362,7 @@ describe("CDP proxy native User-Agent normalization", () => {
       assert.equal(reply.error, undefined);
       const forwarded = harness.upstreamMessages.find(m => m.method === "Network.setUserAgentOverride");
       assert.ok(forwarded);
-      assert.equal(forwarded.params.userAgent, "");
+      assert.equal(forwarded.params["userAgent"], "");
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -368,7 +371,7 @@ describe("CDP proxy native User-Agent normalization", () => {
 
   it("fails open and forwards original userAgent unchanged when native UA acquisition fails", async () => {
     const simulatedUa = "Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0.0.0";
-    const harness = await createHarness({ nativeUa: null });
+    const harness = createHarness({ nativeUa: null });
     try {
       const client = await harness.connectClient();
       const reply = await client.send("Network.setUserAgentOverride", { userAgent: simulatedUa });
@@ -376,7 +379,7 @@ describe("CDP proxy native User-Agent normalization", () => {
       assert.equal(reply.error, undefined);
       const forwarded = harness.upstreamMessages.find(m => m.method === "Network.setUserAgentOverride");
       assert.ok(forwarded);
-      assert.equal(forwarded.params.userAgent, simulatedUa);
+      assert.equal(forwarded.params["userAgent"], simulatedUa);
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -384,7 +387,7 @@ describe("CDP proxy native User-Agent normalization", () => {
   });
 
   it("learns native UA from client Browser.getVersion response and normalizes subsequent overrides", async () => {
-    const harness = await createHarness({ nativeUa: null });
+    const harness = createHarness({ nativeUa: null });
     try {
       const client = await harness.connectClient();
       const versionReply = await client.send("Browser.getVersion");
@@ -395,7 +398,7 @@ describe("CDP proxy native User-Agent normalization", () => {
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Network.setUserAgentOverride");
       assert.ok(forwarded);
-      assert.equal(forwarded.params.userAgent, "");
+      assert.equal(forwarded.params["userAgent"], "");
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -405,7 +408,7 @@ describe("CDP proxy native User-Agent normalization", () => {
 
 describe("CDP proxy scoped passive console capture", () => {
   it("transforms eager getter inspection of tracked console object to returnByValue:false, generatePreview:true", async () => {
-    const harness = await createHarness();
+    const harness = createHarness();
     try {
       const client = await harness.connectClient();
       const eventPromise = client.waitForEvent("Runtime.consoleAPICalled");
@@ -425,16 +428,16 @@ describe("CDP proxy scoped passive console capture", () => {
       }, "sess-1");
 
       assert.equal(reply.error, undefined);
-      const res = reply.result?.result as RemoteObject | undefined;
+      const res = reply.result?.["result"] as RemoteObject | undefined;
       assert.equal(res?.description, "Object");
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded, "Runtime.callFunctionOn was forwarded upstream");
       assert.equal(forwarded.sessionId, "sess-1");
-      assert.equal(forwarded.params.objectId, "obj-canary-42");
-      assert.equal(forwarded.params.returnByValue, false);
-      assert.equal(forwarded.params.generatePreview, true);
-      assert.equal(forwarded.params.silent, true);
+      assert.equal(forwarded.params["objectId"], "obj-canary-42");
+      assert.equal(forwarded.params["returnByValue"], false);
+      assert.equal(forwarded.params["generatePreview"], true);
+      assert.equal(forwarded.params["silent"], true);
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -442,7 +445,7 @@ describe("CDP proxy scoped passive console capture", () => {
   });
 
   it("consumes tracked object ID on single inspection so subsequent calls are not transformed", async () => {
-    const harness = await createHarness();
+    const harness = createHarness();
     try {
       const client = await harness.connectClient();
       const eventPromise = client.waitForEvent("Runtime.consoleAPICalled");
@@ -461,10 +464,10 @@ describe("CDP proxy scoped passive console capture", () => {
         silent: true,
       }, "sess-1");
 
-      const firstCall = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn" && m.params.objectId === "obj-single-inspect");
+      const firstCall = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn" && m.params["objectId"] === "obj-single-inspect");
       assert.ok(firstCall);
-      assert.equal(firstCall.params.returnByValue, false);
-      assert.equal(firstCall.params.generatePreview, true);
+      assert.equal(firstCall.params["returnByValue"], false);
+      assert.equal(firstCall.params["generatePreview"], true);
 
       harness.upstreamMessages.length = 0;
       await client.send("Runtime.callFunctionOn", {
@@ -474,10 +477,10 @@ describe("CDP proxy scoped passive console capture", () => {
         silent: true,
       }, "sess-1");
 
-      const secondCall = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn" && m.params.objectId === "obj-single-inspect");
+      const secondCall = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn" && m.params["objectId"] === "obj-single-inspect");
       assert.ok(secondCall);
-      assert.equal(secondCall.params.returnByValue, true, "second inspection preserves original returnByValue");
-      assert.equal(secondCall.params.generatePreview, undefined);
+      assert.equal(secondCall.params["returnByValue"], true, "second inspection preserves original returnByValue");
+      assert.equal(secondCall.params["generatePreview"], undefined);
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -485,7 +488,7 @@ describe("CDP proxy scoped passive console capture", () => {
   });
 
   it("enforces session isolation so tracked object in session A is unaffected when queried in session B", async () => {
-    const harness = await createHarness();
+    const harness = createHarness();
     try {
       const client = await harness.connectClient();
       const eventPromise = client.waitForEvent("Runtime.consoleAPICalled");
@@ -507,8 +510,8 @@ describe("CDP proxy scoped passive console capture", () => {
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded);
       assert.equal(forwarded.sessionId, "session-B");
-      assert.equal(forwarded.params.returnByValue, true, "different session leaves returnByValue:true untouched");
-      assert.equal(forwarded.params.generatePreview, undefined);
+      assert.equal(forwarded.params["returnByValue"], true, "different session leaves returnByValue:true untouched");
+      assert.equal(forwarded.params["generatePreview"], undefined);
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -516,7 +519,7 @@ describe("CDP proxy scoped passive console capture", () => {
   });
 
   it("leaves objects not originating from consoleAPICalled untouched", async () => {
-    const harness = await createHarness();
+    const harness = createHarness();
     try {
       const client = await harness.connectClient();
       await client.send("Runtime.callFunctionOn", {
@@ -528,8 +531,8 @@ describe("CDP proxy scoped passive console capture", () => {
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded);
-      assert.equal(forwarded.params.returnByValue, true);
-      assert.equal(forwarded.params.generatePreview, undefined);
+      assert.equal(forwarded.params["returnByValue"], true);
+      assert.equal(forwarded.params["generatePreview"], undefined);
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -537,7 +540,7 @@ describe("CDP proxy scoped passive console capture", () => {
   });
 
   it("leaves unrelated explicit function declarations and options untouched", async () => {
-    const harness = await createHarness();
+    const harness = createHarness();
     try {
       const client = await harness.connectClient();
       const eventPromise = client.waitForEvent("Runtime.consoleAPICalled");
@@ -558,8 +561,8 @@ describe("CDP proxy scoped passive console capture", () => {
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded);
-      assert.equal(forwarded.params.returnByValue, true);
-      assert.equal(forwarded.params.generatePreview, undefined);
+      assert.equal(forwarded.params["returnByValue"], true);
+      assert.equal(forwarded.params["generatePreview"], undefined);
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -567,7 +570,7 @@ describe("CDP proxy scoped passive console capture", () => {
   });
 
   it("leaves callFunctionOn with extra parameters untouched", async () => {
-    const harness = await createHarness();
+    const harness = createHarness();
     try {
       const client = await harness.connectClient();
       const eventPromise = client.waitForEvent("Runtime.consoleAPICalled");
@@ -589,8 +592,8 @@ describe("CDP proxy scoped passive console capture", () => {
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded);
-      assert.equal(forwarded.params.returnByValue, true);
-      assert.equal(forwarded.params.generatePreview, undefined);
+      assert.equal(forwarded.params["returnByValue"], true);
+      assert.equal(forwarded.params["generatePreview"], undefined);
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -598,7 +601,7 @@ describe("CDP proxy scoped passive console capture", () => {
   });
 
   it("clears tracked objects on execution context destruction or clear", async () => {
-    const harness = await createHarness();
+    const harness = createHarness();
     try {
       const client = await harness.connectClient();
       const logEvent = client.waitForEvent("Runtime.consoleAPICalled");
@@ -623,8 +626,8 @@ describe("CDP proxy scoped passive console capture", () => {
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded);
-      assert.equal(forwarded.params.returnByValue, true);
-      assert.equal(forwarded.params.generatePreview, undefined);
+      assert.equal(forwarded.params["returnByValue"], true);
+      assert.equal(forwarded.params["generatePreview"], undefined);
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -632,7 +635,7 @@ describe("CDP proxy scoped passive console capture", () => {
   });
 
   it("removes tracked object when client sends Runtime.releaseObject", async () => {
-    const harness = await createHarness();
+    const harness = createHarness();
     try {
       const client = await harness.connectClient();
       const eventPromise = client.waitForEvent("Runtime.consoleAPICalled");
@@ -655,8 +658,8 @@ describe("CDP proxy scoped passive console capture", () => {
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded);
-      assert.equal(forwarded.params.returnByValue, true);
-      assert.equal(forwarded.params.generatePreview, undefined);
+      assert.equal(forwarded.params["returnByValue"], true);
+      assert.equal(forwarded.params["generatePreview"], undefined);
       client.ws.close();
     } finally {
       await harness.cleanup();
@@ -664,7 +667,7 @@ describe("CDP proxy scoped passive console capture", () => {
   });
 
   it("removes session tracking when target is detached", async () => {
-    const harness = await createHarness();
+    const harness = createHarness();
     try {
       const client = await harness.connectClient();
       const logEvent = client.waitForEvent("Runtime.consoleAPICalled");
@@ -689,8 +692,8 @@ describe("CDP proxy scoped passive console capture", () => {
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded);
-      assert.equal(forwarded.params.returnByValue, true);
-      assert.equal(forwarded.params.generatePreview, undefined);
+      assert.equal(forwarded.params["returnByValue"], true);
+      assert.equal(forwarded.params["generatePreview"], undefined);
       client.ws.close();
     } finally {
       await harness.cleanup();

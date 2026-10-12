@@ -6,13 +6,72 @@ import { join } from "node:path";
 import YAML from "yaml";
 import { config, DATA, PROMPTS } from "./config";
 import { logEvent } from "./db";
+import { errorMessage } from "./errors";
+
+// Whatever the agent sent: nothing about it is trusted until read through `arg`.
+export type ToolArgs = Record<string, unknown>;
 
 export interface HostTool {
   description: string;
   parameters: Record<string, unknown>;
   // Return value is shown to the agent. May stay pending for a long time (human gates).
-  handler: (args: any) => Promise<string> | string;
+  handler: (args: ToolArgs) => Promise<string> | string;
 }
+
+// Typed reads of tool arguments. A wrong type throws, which the agent sees as an ERROR reply.
+export const arg = {
+  str(args: ToolArgs, key: string): string {
+    const value = args[key];
+    if (typeof value !== "string") throw new Error(`${key} must be a string`);
+    return value;
+  },
+  optStr(args: ToolArgs, key: string): string | undefined {
+    const value = args[key];
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== "string") throw new Error(`${key} must be a string`);
+    return value;
+  },
+  int(args: ToolArgs, key: string): number {
+    const value = args[key];
+    if (typeof value !== "number" || !Number.isInteger(value)) throw new Error(`${key} must be an integer`);
+    return value;
+  },
+  optInt(args: ToolArgs, key: string): number | undefined {
+    const value = args[key];
+    return value === undefined || value === null ? undefined : arg.int(args, key);
+  },
+  ints(args: ToolArgs, key: string): number[] {
+    const value = args[key];
+    if (value === undefined || value === null) return [];
+    if (!Array.isArray(value) || !value.every((v): v is number => typeof v === "number")) throw new Error(`${key} must be an array of integers`);
+    return value;
+  },
+  oneOf<T extends string>(args: ToolArgs, key: string, allowed: readonly T[]): T {
+    const value = args[key];
+    const found = allowed.find(a => a === value);
+    if (found === undefined) throw new Error(`${key} must be one of ${allowed.join(", ")}`);
+    return found;
+  },
+};
+
+type WorkerStatus = "completed" | "aborted" | "error";
+interface WorkerResult { status: WorkerStatus; error?: string }
+
+// The subset of omp's RPC frames this client reads.
+interface Frame {
+  type?: string;
+  id?: unknown;
+  success?: boolean;
+  command?: string;
+  error?: unknown;
+  toolName?: string;
+  arguments?: ToolArgs;
+  intent?: unknown;
+  message?: { role?: string; content?: { type?: string; text?: string }[] };
+  status?: unknown;
+  sessionSettled?: boolean;
+}
+const isStatus = (value: unknown): value is WorkerStatus => value === "completed" || value === "aborted" || value === "error";
 
 export interface WorkerOptions {
   name: string; // e.g. "prep", "fill"
@@ -29,7 +88,7 @@ export interface WorkerOptions {
 }
 
 export interface WorkerHandle {
-  done: Promise<{ status: "completed" | "aborted" | "error"; error?: string; lastText: string }>;
+  done: Promise<WorkerResult & { lastText: string }>;
   abort: () => void;
 }
 
@@ -82,19 +141,21 @@ export function runWorker(opts: WorkerOptions): WorkerHandle {
   active.add(proc);
   const send = (frame: unknown) => {
     try {
-      proc.stdin.write(JSON.stringify(frame) + "\n");
-      proc.stdin.flush();
+      void proc.stdin.write(JSON.stringify(frame) + "\n");
+      void proc.stdin.flush();
     } catch {
       // process already gone; the exit path reports it
     }
   };
-  const log = (kind: string, message: string) => logEvent(kind, message, opts.jobId, opts.name);
+  const log = (kind: string, message: string) => { logEvent(kind, message, opts.jobId, opts.name); };
 
   let lastText = "";
-  let result: { status: "completed" | "aborted" | "error"; error?: string } | null = null;
-  let abortRequested = false;
+  // Assigned from callbacks, which control-flow narrowing cannot see.
+  let result = null as WorkerResult | null;
+  let abortRequested = false as boolean;
 
-  const onFrame = (f: any) => {
+  const closeInput = () => void proc.stdin.end();
+  const onFrame = (f: Frame) => {
     switch (f.type) {
       case "ready":
         send({ id: "filter", type: "set_event_filter", events: ["tool_execution_start", "message_end"] });
@@ -113,31 +174,32 @@ export function runWorker(opts: WorkerOptions): WorkerHandle {
         break;
       case "response":
         if (!f.success) {
-          log("error", `omp rejected ${f.command}: ${f.error}`);
+          log("error", `omp rejected ${f.command ?? "?"}: ${String(f.error)}`);
           if (f.command === "prompt" || f.command === "set_host_tools") {
             result = { status: "error", error: String(f.error) };
-            proc.stdin.end();
+            closeInput();
           }
         }
         break;
       case "host_tool_call": {
-        const tool = opts.tools[f.toolName];
-        log("tool", `${f.toolName} ${JSON.stringify(f.arguments).slice(0, 600)}`);
-        Promise.resolve()
+        const toolName = f.toolName ?? "";
+        const tool = opts.tools[toolName];
+        log("tool", `${toolName} ${JSON.stringify(f.arguments ?? {}).slice(0, 600)}`);
+        void Promise.resolve()
           .then(() => {
-            if (!tool) throw new Error(`unknown tool ${f.toolName}`);
+            if (!tool) throw new Error(`unknown tool ${toolName}`);
             return tool.handler(f.arguments ?? {});
           })
-          .catch(err => `ERROR: ${err?.message ?? err}`)
-          .then(text => send({ type: "host_tool_result", id: f.id, result: { content: [{ type: "text", text }] } }));
+          .catch((err: unknown) => `ERROR: ${errorMessage(err)}`)
+          .then(text => { send({ type: "host_tool_result", id: f.id, result: { content: [{ type: "text", text }] } }); });
         break;
       }
       case "tool_execution_start":
-        if (f.intent) log("step", String(f.intent));
+        if (typeof f.intent === "string" && f.intent) log("step", f.intent);
         break;
       case "message_end":
         if (f.message?.role === "assistant") {
-          const text = (f.message.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n").trim();
+          const text = (f.message.content ?? []).filter(c => c.type === "text").map(c => c.text).join("\n").trim();
           if (text) {
             lastText = text;
             log("agent", text);
@@ -145,11 +207,11 @@ export function runWorker(opts: WorkerOptions): WorkerHandle {
         }
         break;
       case "prompt_result":
-        result = { status: f.status, error: f.error?.message };
-        if (f.sessionSettled) proc.stdin.end();
+        result = { status: isStatus(f.status) ? f.status : "error", ...(f.error instanceof Object && "message" in f.error ? { error: String(f.error.message) } : {}) };
+        if (f.sessionSettled) closeInput();
         break;
       case "session_settled":
-        proc.stdin.end();
+        closeInput();
         break;
     }
   };
@@ -165,7 +227,7 @@ export function runWorker(opts: WorkerOptions): WorkerHandle {
         buf = buf.slice(nl + 1);
         if (!line.trim()) continue;
         try {
-          onFrame(JSON.parse(line));
+          onFrame(JSON.parse(line) as Frame);
         } catch (err) {
           log("error", `bad frame from omp: ${String(err).slice(0, 200)}`);
         }
@@ -192,7 +254,7 @@ export function runWorker(opts: WorkerOptions): WorkerHandle {
       abortRequested = true;
       result ??= { status: "aborted" };
       send({ type: "abort" });
-      setTimeout(() => proc.kill(), 3000);
+      setTimeout(() => { proc.kill(); }, 3000);
     },
   };
 }

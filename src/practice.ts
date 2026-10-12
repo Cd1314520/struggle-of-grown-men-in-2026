@@ -22,8 +22,8 @@ export function assessPractice(raw: unknown): PracticeAssessment | null {
   const obj = raw as Record<string, unknown>;
 
   // Validate annualBaseMaxUsd
-  const rawSalary = obj.annualBaseMaxUsd;
-  let annualBaseMaxUsd: number | null = null;
+  const rawSalary = obj["annualBaseMaxUsd"];
+  let annualBaseMaxUsd: number | null;
   if (rawSalary === null) {
     annualBaseMaxUsd = null;
   } else if (typeof rawSalary === "number") {
@@ -36,26 +36,26 @@ export function assessPractice(raw: unknown): PracticeAssessment | null {
   }
 
   // Validate salaryEvidence
-  if (typeof obj.salaryEvidence !== "string") {
+  if (typeof obj["salaryEvidence"] !== "string") {
     return null;
   }
-  const salaryEvidence = obj.salaryEvidence.trim();
+  const salaryEvidence = obj["salaryEvidence"].trim();
   if (annualBaseMaxUsd !== null && salaryEvidence.length === 0) {
     return null;
   }
 
   // Validate mandatoryNonlocalOnsite
-  const rawLocation = obj.mandatoryNonlocalOnsite;
+  const rawLocation = obj["mandatoryNonlocalOnsite"];
   if (rawLocation !== "yes" && rawLocation !== "no" && rawLocation !== "unclear") {
     return null;
   }
   const mandatoryNonlocalOnsite: "yes" | "no" | "unclear" = rawLocation;
 
   // Validate locationEvidence
-  if (typeof obj.locationEvidence !== "string") {
+  if (typeof obj["locationEvidence"] !== "string") {
     return null;
   }
-  const locationEvidence = obj.locationEvidence.trim();
+  const locationEvidence = obj["locationEvidence"].trim();
   if (mandatoryNonlocalOnsite === "yes" && locationEvidence.length === 0) {
     return null;
   }
@@ -80,12 +80,12 @@ export function parsePracticeAssessment(serialized: string | null | undefined): 
   if (!trimmed) return null;
 
   try {
-    const parsed = JSON.parse(trimmed);
+    const parsed: unknown = JSON.parse(trimmed);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return null;
     }
     // Strict version check: persisted version must be exactly 1
-    if ((parsed as Record<string, unknown>).version !== 1) {
+    if ((parsed as Record<string, unknown>)["version"] !== 1) {
       return null;
     }
     const assessed = assessPractice(parsed);

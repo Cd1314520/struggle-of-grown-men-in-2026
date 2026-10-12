@@ -260,16 +260,23 @@ function resolveExcerptQuote(
     resolvedExcerpts.push(excerpt);
   }
 
-  if (resolvedExcerpts.length === 1) {
-    return resolvedExcerpts[0].text;
+  const [onlyExcerpt] = resolvedExcerpts;
+  if (resolvedExcerpts.length === 1 && onlyExcerpt) {
+    return onlyExcerpt.text;
   }
 
   resolvedExcerpts.sort((a, b) => a.startIndex - b.startIndex);
 
+  const first = resolvedExcerpts[0];
+  const last = resolvedExcerpts[resolvedExcerpts.length - 1];
+  if (!first || !last) {
+    throw new Error(`JobId ${jobId} gap #${gapIdx}: no ${field} excerpts to resolve`);
+  }
+
   let isContiguous = true;
-  for (let i = 0; i < resolvedExcerpts.length - 1; i++) {
-    const current = resolvedExcerpts[i];
+  for (const [i, current] of resolvedExcerpts.entries()) {
     const next = resolvedExcerpts[i + 1];
+    if (!next) break;
     if (next.startIndex < current.endIndex) {
       isContiguous = false;
       break;
@@ -282,12 +289,10 @@ function resolveExcerptQuote(
   }
 
   if (isContiguous) {
-    const first = resolvedExcerpts[0];
-    const last = resolvedExcerpts[resolvedExcerpts.length - 1];
     return sourceText.slice(first.startIndex, last.endIndex);
   }
 
-  return resolvedExcerpts[0].text;
+  return first.text;
 }
 
 /**
@@ -305,11 +310,11 @@ export function resolveModelWireReviews(
   const reviews: ApplicationResumeReview[] = [];
 
   for (let i = 0; i < raw.length; i++) {
-    const item = raw[i];
+    const item: unknown = raw[i];
     if (!item || typeof item !== "object") {
       throw new Error(`Review item at index ${i} is not an object`);
     }
-    const rawJobId = (item as Record<string, unknown>).jobId;
+    const rawJobId = (item as Record<string, unknown>)["jobId"];
     if (typeof rawJobId !== "number") {
       throw new Error(`Review item at index ${i} has invalid or missing numeric jobId`);
     }
@@ -320,22 +325,22 @@ export function resolveModelWireReviews(
       throw new Error(`Unexpected jobId ${jobId} not found in review inputs`);
     }
 
-    const rawGaps = (item as Record<string, unknown>).gaps;
+    const rawGaps = (item as Record<string, unknown>)["gaps"];
     if (!Array.isArray(rawGaps)) {
       throw new Error(`Gaps for jobId ${jobId} must be an array`);
     }
 
     const resolvedGaps: ResumeGap[] = [];
     for (let gIdx = 0; gIdx < rawGaps.length; gIdx++) {
-      const g = rawGaps[gIdx];
+      const g: unknown = rawGaps[gIdx];
       if (!g || typeof g !== "object") {
         throw new Error(`Gap at index ${gIdx} for jobId ${jobId} is not an object`);
       }
       const gap = g as Record<string, unknown>;
 
       // Resolve posting quote
-      let postingQuote = "";
-      const postingIds = extractEvidenceIds(gap.postingEvidenceId, gap.postingEvidenceIds);
+      let postingQuote: string;
+      const postingIds = extractEvidenceIds(gap["postingEvidenceId"], gap["postingEvidenceIds"]);
       if (postingIds.length > 0) {
         postingQuote = resolveExcerptQuote(
           postingIds,
@@ -345,15 +350,15 @@ export function resolveModelWireReviews(
           gIdx,
           "postingEvidence"
         );
-      } else if (typeof gap.postingQuote === "string" && gap.postingQuote.trim().length > 0) {
-        postingQuote = gap.postingQuote.trim();
+      } else if (typeof gap["postingQuote"] === "string" && gap["postingQuote"].trim().length > 0) {
+        postingQuote = gap["postingQuote"].trim();
       } else {
         throw new Error(`JobId ${jobId} gap #${gIdx}: missing postingEvidenceId`);
       }
 
       // Resolve resume evidence
       let resumeEvidence: string | null = null;
-      const resumeIds = extractEvidenceIds(gap.resumeEvidenceId, gap.resumeEvidenceIds);
+      const resumeIds = extractEvidenceIds(gap["resumeEvidenceId"], gap["resumeEvidenceIds"]);
       if (resumeIds.length > 0) {
         resumeEvidence = resolveExcerptQuote(
           resumeIds,
@@ -363,13 +368,13 @@ export function resolveModelWireReviews(
           gIdx,
           "resumeEvidence"
         );
-      } else if (typeof gap.resumeEvidence === "string" && gap.resumeEvidence.trim().length > 0) {
-        resumeEvidence = gap.resumeEvidence.trim();
+      } else if (typeof gap["resumeEvidence"] === "string" && gap["resumeEvidence"].trim().length > 0) {
+        resumeEvidence = gap["resumeEvidence"].trim();
       }
 
       // Resolve notes evidence
       let notesEvidence: string | null = null;
-      const notesIds = extractEvidenceIds(gap.notesEvidenceId, gap.notesEvidenceIds);
+      const notesIds = extractEvidenceIds(gap["notesEvidenceId"], gap["notesEvidenceIds"]);
       if (notesIds.length > 0) {
         notesEvidence = resolveExcerptQuote(
           notesIds,
@@ -379,19 +384,19 @@ export function resolveModelWireReviews(
           gIdx,
           "notesEvidence"
         );
-      } else if (typeof gap.notesEvidence === "string" && gap.notesEvidence.trim().length > 0) {
-        notesEvidence = gap.notesEvidence.trim();
+      } else if (typeof gap["notesEvidence"] === "string" && gap["notesEvidence"].trim().length > 0) {
+        notesEvidence = gap["notesEvidence"].trim();
       }
 
       resolvedGaps.push({
-        theme: typeof gap.theme === "string" ? gap.theme.trim() : "",
-        importance: gap.importance as ResumeGap["importance"],
-        status: gap.status as ResumeGap["status"],
+        theme: typeof gap["theme"] === "string" ? gap["theme"].trim() : "",
+        importance: gap["importance"] as ResumeGap["importance"],
+        status: gap["status"] as ResumeGap["status"],
         postingQuote,
         resumeEvidence,
         notesEvidence,
-        rationale: typeof gap.rationale === "string" ? gap.rationale.trim() : "",
-        suggestion: typeof gap.suggestion === "string" ? gap.suggestion.trim() : "",
+        rationale: typeof gap["rationale"] === "string" ? gap["rationale"].trim() : "",
+        suggestion: typeof gap["suggestion"] === "string" ? gap["suggestion"].trim() : "",
       });
     }
 
@@ -434,28 +439,28 @@ export function extractAssistantResponseText(stdout: string): string {
       continue;
     }
 
-    if (parsed.type === "model_change") {
-      if (parsed.resolvedModelIsFallback === true) {
-        throw new Error(`Model fallback detected: resolved model is fallback (${String(parsed.model)})`);
+    if (parsed["type"] === "model_change") {
+      if (parsed["resolvedModelIsFallback"] === true) {
+        throw new Error(`Model fallback detected: resolved model is fallback (${String(parsed["model"])})`);
       }
-      if (parsed.model !== "openai-codex/gpt-6-luna" && parsed.model !== "gpt-6-luna") {
-        throw new Error(`Model substitution detected: expected openai-codex/gpt-6-luna, got ${String(parsed.model)}`);
+      if (parsed["model"] !== "openai-codex/gpt-6-luna" && parsed["model"] !== "gpt-6-luna") {
+        throw new Error(`Model substitution detected: expected openai-codex/gpt-6-luna, got ${String(parsed["model"])}`);
       }
-    } else if (parsed.type === "message_end" || parsed.type === "turn_end") {
-      const msg = parsed.message as Record<string, unknown> | undefined;
-      if (msg && msg.role === "assistant") {
-        if (msg.provider !== "openai-codex") {
-          throw new Error(`Provider substitution detected: expected openai-codex, got ${String(msg.provider)}`);
+    } else if (parsed["type"] === "message_end" || parsed["type"] === "turn_end") {
+      const msg = parsed["message"] as Record<string, unknown> | undefined;
+      if (msg?.["role"] === "assistant") {
+        if (msg["provider"] !== "openai-codex") {
+          throw new Error(`Provider substitution detected: expected openai-codex, got ${String(msg["provider"])}`);
         }
-        if (msg.model !== "gpt-6-luna" && msg.model !== "openai-codex/gpt-6-luna") {
-          throw new Error(`Model substitution detected: expected gpt-6-luna, got ${String(msg.model)}`);
+        if (msg["model"] !== "gpt-6-luna" && msg["model"] !== "openai-codex/gpt-6-luna") {
+          throw new Error(`Model substitution detected: expected gpt-6-luna, got ${String(msg["model"])}`);
         }
-        if (msg.stopReason !== "stop") {
-          const errorDetail = typeof msg.errorMessage === "string" ? msg.errorMessage : String(msg.stopReason);
+        if (msg["stopReason"] !== "stop") {
+          const errorDetail = typeof msg["errorMessage"] === "string" ? msg["errorMessage"] : String(msg["stopReason"]);
           throw new Error(`Assistant stopped with incomplete stopReason: ${errorDetail}`);
         }
-        if (Array.isArray(msg.content)) {
-          const textParts = msg.content
+        if (Array.isArray(msg["content"])) {
+          const textParts = msg["content"]
             .filter(isTextContent)
             .map((c) => c.text);
           if (textParts.length > 0) {
@@ -463,22 +468,22 @@ export function extractAssistantResponseText(stdout: string): string {
           }
         }
       }
-    } else if (parsed.type === "agent_end" && Array.isArray(parsed.messages)) {
-      for (const rawMsg of parsed.messages) {
+    } else if (parsed["type"] === "agent_end" && Array.isArray(parsed["messages"])) {
+      for (const rawMsg of parsed["messages"]) {
         const msg = rawMsg as Record<string, unknown> | undefined;
-        if (msg && msg.role === "assistant") {
-          if (msg.provider !== "openai-codex") {
-            throw new Error(`Provider substitution detected: expected openai-codex, got ${String(msg.provider)}`);
+        if (msg?.["role"] === "assistant") {
+          if (msg["provider"] !== "openai-codex") {
+            throw new Error(`Provider substitution detected: expected openai-codex, got ${String(msg["provider"])}`);
           }
-          if (msg.model !== "gpt-6-luna" && msg.model !== "openai-codex/gpt-6-luna") {
-            throw new Error(`Model substitution detected: expected gpt-6-luna, got ${String(msg.model)}`);
+          if (msg["model"] !== "gpt-6-luna" && msg["model"] !== "openai-codex/gpt-6-luna") {
+            throw new Error(`Model substitution detected: expected gpt-6-luna, got ${String(msg["model"])}`);
           }
-          if (msg.stopReason !== "stop") {
-            const errorDetail = typeof msg.errorMessage === "string" ? msg.errorMessage : String(msg.stopReason);
+          if (msg["stopReason"] !== "stop") {
+            const errorDetail = typeof msg["errorMessage"] === "string" ? msg["errorMessage"] : String(msg["stopReason"]);
             throw new Error(`Assistant stopped with incomplete stopReason: ${errorDetail}`);
           }
-          if (Array.isArray(msg.content)) {
-            const textParts = msg.content
+          if (Array.isArray(msg["content"])) {
+            const textParts = msg["content"]
               .filter(isTextContent)
               .map((c) => c.text);
             if (textParts.length > 0) {
@@ -527,7 +532,7 @@ export function parseJsonPayload(text: string): unknown {
       try {
         return JSON.parse(candidate);
       } catch (e) {
-        throw new Error(`Failed to parse extracted JSON candidate from model output: ${e instanceof Error ? e.message : String(e)}`);
+        throw new Error(`Failed to parse extracted JSON candidate from model output: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
       }
     }
     throw new Error("Model output did not contain a valid JSON array");
@@ -560,7 +565,7 @@ export function validateResumeReviews(raw: unknown, inputs: ResumeReviewInput[])
   const reviews: ApplicationResumeReview[] = [];
 
   for (let i = 0; i < raw.length; i++) {
-    const item = raw[i];
+    const item: unknown = raw[i];
     if (!item || typeof item !== "object") {
       throw new Error(`Review item at index ${i} is not an object`);
     }
@@ -588,7 +593,7 @@ export function validateResumeReviews(raw: unknown, inputs: ResumeReviewInput[])
 
     const validatedGaps: ResumeGap[] = [];
     for (let gIdx = 0; gIdx < gaps.length; gIdx++) {
-      const gap = gaps[gIdx];
+      const gap: unknown = gaps[gIdx];
       if (!gap || typeof gap !== "object") {
         throw new Error(`Gap at index ${gIdx} for jobId ${jobId} is not an object`);
       }
@@ -596,53 +601,53 @@ export function validateResumeReviews(raw: unknown, inputs: ResumeReviewInput[])
       const g = gap as Record<string, unknown>;
 
       // theme
-      if (typeof g.theme !== "string" || g.theme.trim().length === 0) {
+      if (typeof g["theme"] !== "string" || g["theme"].trim().length === 0) {
         throw new Error(`JobId ${jobId} gap #${gIdx}: theme must be a non-empty string`);
       }
 
       // importance
-      if (typeof g.importance !== "string" || !Object.hasOwn(VALID_IMPORTANCE, g.importance)) {
-        throw new Error(`JobId ${jobId} gap #${gIdx}: invalid importance "${String(g.importance)}"`);
+      if (typeof g["importance"] !== "string" || !Object.hasOwn(VALID_IMPORTANCE, g["importance"])) {
+        throw new Error(`JobId ${jobId} gap #${gIdx}: invalid importance "${String(g["importance"])}"`);
       }
 
       // status
-      if (typeof g.status !== "string" || !Object.hasOwn(VALID_STATUSES, g.status)) {
-        throw new Error(`JobId ${jobId} gap #${gIdx}: invalid status "${String(g.status)}"`);
+      if (typeof g["status"] !== "string" || !Object.hasOwn(VALID_STATUSES, g["status"])) {
+        throw new Error(`JobId ${jobId} gap #${gIdx}: invalid status "${String(g["status"])}"`);
       }
 
       // postingQuote
-      if (typeof g.postingQuote !== "string" || g.postingQuote.trim().length === 0) {
+      if (typeof g["postingQuote"] !== "string" || g["postingQuote"].trim().length === 0) {
         throw new Error(`JobId ${jobId} gap #${gIdx}: postingQuote must be a non-empty string`);
       }
-      if (!normalizeWhitespace(input.postingText).includes(normalizeWhitespace(g.postingQuote))) {
+      if (!normalizeWhitespace(input.postingText).includes(normalizeWhitespace(g["postingQuote"]))) {
         throw new Error(`JobId ${jobId} gap #${gIdx}: postingQuote not found in job posting text`);
       }
 
       // resumeEvidence
-      if (g.resumeEvidence !== null && g.resumeEvidence !== undefined) {
-        if (typeof g.resumeEvidence !== "string" || g.resumeEvidence.trim().length === 0) {
+      if (g["resumeEvidence"] !== null && g["resumeEvidence"] !== undefined) {
+        if (typeof g["resumeEvidence"] !== "string" || g["resumeEvidence"].trim().length === 0) {
           throw new Error(`JobId ${jobId} gap #${gIdx}: resumeEvidence must be null or non-empty string`);
         }
-        if (!normalizeWhitespace(input.resumeText).includes(normalizeWhitespace(g.resumeEvidence))) {
+        if (!normalizeWhitespace(input.resumeText).includes(normalizeWhitespace(g["resumeEvidence"]))) {
           throw new Error(`JobId ${jobId} gap #${gIdx}: resumeEvidence not found in resume text`);
         }
       }
 
       // notesEvidence
-      if (g.notesEvidence !== null && g.notesEvidence !== undefined) {
-        if (typeof g.notesEvidence !== "string" || g.notesEvidence.trim().length === 0) {
+      if (g["notesEvidence"] !== null && g["notesEvidence"] !== undefined) {
+        if (typeof g["notesEvidence"] !== "string" || g["notesEvidence"].trim().length === 0) {
           throw new Error(`JobId ${jobId} gap #${gIdx}: notesEvidence must be null or non-empty string`);
         }
-        if (!normalizeWhitespace(input.notesText).includes(normalizeWhitespace(g.notesEvidence))) {
+        if (!normalizeWhitespace(input.notesText).includes(normalizeWhitespace(g["notesEvidence"]))) {
           throw new Error(`JobId ${jobId} gap #${gIdx}: notesEvidence not found in candidate notes text`);
         }
       }
 
-      const resumeEvidence = (g.resumeEvidence ?? null) as string | null;
-      const notesEvidence = (g.notesEvidence ?? null) as string | null;
+      const resumeEvidence = (g["resumeEvidence"] ?? null);
+      const notesEvidence = (g["notesEvidence"] ?? null);
 
       // Status invariants
-      switch (g.status) {
+      switch (g["status"]) {
         case "supported_omission":
           if (notesEvidence === null) {
             throw new Error(`JobId ${jobId} gap #${gIdx}: supported_omission requires notesEvidence`);
@@ -675,24 +680,24 @@ export function validateResumeReviews(raw: unknown, inputs: ResumeReviewInput[])
       }
 
       // rationale
-      if (typeof g.rationale !== "string" || g.rationale.trim().length === 0) {
+      if (typeof g["rationale"] !== "string" || g["rationale"].trim().length === 0) {
         throw new Error(`JobId ${jobId} gap #${gIdx}: rationale must be a non-empty string`);
       }
 
       // suggestion
-      if (typeof g.suggestion !== "string" || g.suggestion.trim().length === 0) {
+      if (typeof g["suggestion"] !== "string" || g["suggestion"].trim().length === 0) {
         throw new Error(`JobId ${jobId} gap #${gIdx}: suggestion must be a non-empty string`);
       }
 
       validatedGaps.push({
-        theme: g.theme.trim(),
-        importance: g.importance as ResumeGap["importance"],
-        status: g.status as ResumeGap["status"],
-        postingQuote: g.postingQuote,
+        theme: g["theme"].trim(),
+        importance: g["importance"] as ResumeGap["importance"],
+        status: g["status"] as ResumeGap["status"],
+        postingQuote: g["postingQuote"],
         resumeEvidence,
         notesEvidence,
-        rationale: g.rationale.trim(),
-        suggestion: g.suggestion.trim(),
+        rationale: g["rationale"].trim(),
+        suggestion: g["suggestion"].trim(),
       });
     }
 
@@ -753,29 +758,33 @@ export async function reviewResumes(
   });
 
   // Write payload to stdin and close stdin
-  if (proc.stdin) {
-    try {
-      proc.stdin.write(payload);
-      proc.stdin.flush();
-      proc.stdin.end();
-    } catch {
-      // If process exited immediately, handle on await
-    }
+  // Deliberately not awaited: the subprocess result (and the timeout below) decide the outcome.
+  try {
+    void proc.stdin.write(payload);
+    void proc.stdin.flush();
+    void proc.stdin.end();
+  } catch {
+    // If process exited immediately, handle on await
   }
 
   let timer: NodeJS.Timeout | undefined;
-  let didTimeout = false;
+  // Held in an object so the flag set inside the timer callback is visible to the cleanup below.
+  const timeoutState = { fired: false };
 
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      didTimeout = true;
+      timeoutState.fired = true;
       try {
         proc.kill("SIGTERM");
-      } catch {}
+      } catch {
+        // Process already exited; nothing to kill
+      }
       setTimeout(() => {
         try {
           proc.kill("SIGKILL");
-        } catch {}
+        } catch {
+          // Process already exited; nothing to kill
+        }
       }, 2000).unref();
       reject(new Error(`Resume review timed out after ${DEFAULT_TIMEOUT_MS}ms`));
     }, DEFAULT_TIMEOUT_MS);
@@ -791,7 +800,9 @@ export async function reviewResumes(
       const exitCode = await proc.exited;
 
       if (exitCode !== 0) {
-        const stderrFirstLine = stderrText.trim().split("\n")[0]?.slice(0, 200) || "unknown error";
+        const firstLine = stderrText.trim().split("\n")[0]?.slice(0, 200);
+        // Empty stderr must also fall back, so test truthiness rather than nullishness
+        const stderrFirstLine = firstLine ? firstLine : "unknown error";
         throw new Error(`Resume review subprocess exited with code ${exitCode}: ${stderrFirstLine}`);
       }
 
@@ -801,10 +812,12 @@ export async function reviewResumes(
       return validateResumeReviews(resolvedReviews, inputs);
     } finally {
       // Ensure process cleanup on any exit
-      if (proc.exitCode === null && !didTimeout) {
+      if (proc.exitCode === null && !timeoutState.fired) {
         try {
           proc.kill("SIGTERM");
-        } catch {}
+        } catch {
+          // Process already exited; nothing to kill
+        }
       }
     }
   })();

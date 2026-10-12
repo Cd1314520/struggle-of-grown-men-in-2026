@@ -8,6 +8,7 @@ import { assessPractice, practiceReason, type PracticeAssessment } from "./pract
 
 type Phase = "practice" | "real";
 export type Answer = "yes" | "no" | "unclear";
+const ANSWERS: readonly Answer[] = ["yes", "no", "unclear"];
 interface Criterion {
   id: string;
   label?: string; // short form for the at-a-glance view
@@ -44,15 +45,17 @@ export interface Verdict {
 }
 
 export function loadRubric(): Rubric {
-  const r = YAML.parse(readFileSync(join(PROFILE, "rubric.yml"), "utf8")) as Rubric;
+  // Hand-edited file: nothing is there until checked.
+  const r = YAML.parse(readFileSync(join(PROFILE, "rubric.yml"), "utf8")) as (Partial<Record<Phase, Partial<PhaseRubric>>> & { unclear?: number }) | null;
   for (const phase of ["practice", "real"] as const) {
-    if (!r?.[phase]?.criteria?.length) throw new Error(`profile/rubric.yml: no criteria for phase "${phase}"`);
-    for (const c of r[phase].criteria) {
+    const criteria = r?.[phase]?.criteria;
+    if (!criteria?.length) throw new Error(`profile/rubric.yml: no criteria for phase "${phase}"`);
+    for (const c of criteria) {
       if (!c.id || !c.statement) throw new Error(`profile/rubric.yml: every ${phase} criterion needs an id and a statement`);
       if (!c.required && typeof c.weight !== "number") throw new Error(`profile/rubric.yml: ${phase}.${c.id} needs "required: true" or a weight`);
     }
   }
-  return r;
+  return r as Rubric;
 }
 
 // In practice the real rubric is answered too, to decide what to hold back.
@@ -69,8 +72,9 @@ export function checklistText(r = loadRubric()) {
 function scorePhase(r: Rubric, phase: Phase, answers: Map<string, { answer: Answer; evidence: string }>) {
   const items: ChecklistItem[] = r[phase].criteria.map(c => {
     const key = `${phase}.${c.id}`;
-    const a = answers.get(key)!;
-    const weight = c.required ? 0 : c.weight!;
+    const a = answers.get(key);
+    if (!a) throw new Error(`no answer for ${key}`);
+    const weight = c.required ? 0 : (c.weight ?? 0);
     const points = a.answer === "yes" ? weight : a.answer === "unclear" && weight > 0 ? weight * r.unclear : 0;
     return { key, phase, label: c.label ?? c.id.replace(/_/g, " "), statement: c.statement, required: !!c.required, weight, answer: a.answer, evidence: a.evidence, points };
   });
@@ -82,12 +86,14 @@ function scorePhase(r: Rubric, phase: Phase, answers: Map<string, { answer: Answ
 }
 
 // Returns an error string when the answers are incomplete, otherwise the computed verdict.
-export function evaluate(raw: { id: string; answer: string; evidence?: string }[], practiceEvidence?: unknown): Verdict | string {
+export function evaluate(raw: unknown, practiceEvidence?: unknown): Verdict | string {
   const r = loadRubric();
   const answers = new Map<string, { answer: Answer; evidence: string }>();
-  for (const a of raw ?? []) {
-    if (!["yes", "no", "unclear"].includes(a.answer)) return `answer for ${a.id} must be yes, no or unclear`;
-    answers.set(a.id, { answer: a.answer as Answer, evidence: (a.evidence ?? "").slice(0, 300) });
+  for (const a of Array.isArray(raw) ? (raw as unknown[]) : []) {
+    if (!a || typeof a !== "object" || !("id" in a) || typeof a.id !== "string") return "every answer needs an id";
+    const answer = "answer" in a ? ANSWERS.find(x => x === a.answer) : undefined;
+    if (!answer) return `answer for ${a.id} must be yes, no or unclear`;
+    answers.set(a.id, { answer, evidence: ("evidence" in a && typeof a.evidence === "string" ? a.evidence : "").slice(0, 300) });
   }
   const expected = phasesToAsk().flatMap(phase => r[phase].criteria.map(c => `${phase}.${c.id}`));
   const missing = expected.filter(k => !answers.has(k));

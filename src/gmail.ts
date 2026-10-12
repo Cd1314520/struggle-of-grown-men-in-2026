@@ -10,15 +10,21 @@ const SCOPE = "https://www.googleapis.com/auth/gmail.modify";
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 export const redirectUri = () => `${publicUrl()}/oauth/callback`;
 
+interface OAuthClient { client_id: string; client_secret: string }
+interface TokenResponse { access_token: string; expires_in: number; refresh_token?: string; error?: string; error_description?: string }
+interface Part { mimeType?: string; body?: { data?: string }; parts?: Part[]; headers?: { name: string; value: string }[] }
+interface Message { id: string; threadId: string; labelIds?: string[]; snippet?: string; internalDate?: string; payload?: Part }
+interface MessageList { messages?: { id: string }[] }
+
 function client() {
-  let raw: any;
+  let raw: OAuthClient & { installed?: OAuthClient; web?: OAuthClient };
   try {
-    raw = JSON.parse(readFileSync(join(PROFILE, "gmail-client.json"), "utf8"));
+    raw = JSON.parse(readFileSync(join(PROFILE, "gmail-client.json"), "utf8")) as typeof raw;
   } catch {
     throw new Error("profile/gmail-client.json is missing; see README (Gmail setup)");
   }
   const c = raw.installed ?? raw.web ?? raw;
-  return { id: c.client_id as string, secret: c.client_secret as string };
+  return { id: c.client_id, secret: c.client_secret };
 }
 
 export function authUrl() {
@@ -30,7 +36,7 @@ export function authUrl() {
     access_type: "offline",
     prompt: "consent",
   });
-  return `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
+  return `https://accounts.google.com/o/oauth2/v2/auth?${q.toString()}`;
 }
 
 async function tokenRequest(params: Record<string, string>) {
@@ -39,7 +45,7 @@ async function tokenRequest(params: Record<string, string>) {
     method: "POST",
     body: new URLSearchParams({ client_id: c.id, client_secret: c.secret, ...params }),
   });
-  const body = (await res.json()) as any;
+  const body = (await res.json()) as TokenResponse;
   if (!res.ok) throw new Error(`Google token error: ${body.error_description ?? body.error}`);
   return body;
 }
@@ -48,7 +54,7 @@ export async function exchangeCode(code: string) {
   const t = await tokenRequest({ code, grant_type: "authorization_code", redirect_uri: redirectUri() });
   if (t.refresh_token) kvSet("gmail.refresh", t.refresh_token);
   kvSet("gmail.access", JSON.stringify({ token: t.access_token, exp: Date.now() + (t.expires_in - 60) * 1000 }));
-  const profile = await call("/profile");
+  const profile = (await call("/profile")) as { emailAddress: string };
   if (config.mailbox && profile.emailAddress.toLowerCase() !== config.mailbox.toLowerCase()) {
     kvSet("gmail.refresh", "");
     kvSet("gmail.access", "null");
@@ -60,21 +66,21 @@ export async function exchangeCode(code: string) {
 export const gmailStatus = () => ({ connected: !!kvGet("gmail.refresh"), address: kvGet("gmail.address") });
 
 async function accessToken() {
-  const cached = JSON.parse(kvGet("gmail.access") ?? "null");
-  if (cached && cached.exp > Date.now()) return cached.token as string;
+  const cached = JSON.parse(kvGet("gmail.access") ?? "null") as { token: string; exp: number } | null;
+  if (cached && cached.exp > Date.now()) return cached.token;
   const refresh = kvGet("gmail.refresh");
   if (!refresh) throw new Error("Gmail is not connected; connect it in the app's Settings tab");
   const t = await tokenRequest({ refresh_token: refresh, grant_type: "refresh_token" });
   kvSet("gmail.access", JSON.stringify({ token: t.access_token, exp: Date.now() + (t.expires_in - 60) * 1000 }));
-  return t.access_token as string;
+  return t.access_token;
 }
 
-async function call(path: string, init?: RequestInit, token?: string) {
+async function call(path: string, init?: RequestInit, token?: string): Promise<unknown> {
   const res = await fetch(API + path, {
     ...init,
     headers: { authorization: `Bearer ${token ?? await accessToken()}`, "content-type": "application/json" },
   });
-  const body = (await res.json()) as any;
+  const body = (await res.json()) as { error?: { message?: string } };
   if (!res.ok) throw new Error(`Gmail API ${res.status}: ${body.error?.message ?? "unknown error"}`);
   return body;
 }
@@ -87,10 +93,10 @@ const header = (msg: { payload?: { headers?: { name: string; value: string }[] }
 
 const decode = (data: string) => Buffer.from(data, "base64url").toString("utf8");
 
-function bodyText(payload: any): string {
+function bodyText(payload: Part | undefined): string {
   const plain: string[] = [];
   const html: string[] = [];
-  const walk = (p: any) => {
+  const walk = (p: Part | undefined) => {
     if (!p) return;
     if (p.body?.data && p.mimeType === "text/plain") plain.push(decode(p.body.data));
     if (p.body?.data && p.mimeType === "text/html") html.push(decode(p.body.data));
@@ -111,10 +117,10 @@ function bodyText(payload: any): string {
 }
 
 export async function search(query: string, max = 10) {
-  const list = await call(`/messages?${new URLSearchParams({ q: query, maxResults: String(Math.min(max, 25)) })}`);
+  const list = (await call(`/messages?${new URLSearchParams({ q: query, maxResults: String(Math.min(max, 25)) }).toString()}`)) as MessageList;
   const out = [];
   for (const m of list.messages ?? []) {
-    const msg = await call(`/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`);
+    const msg = (await call(`/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`)) as Message;
     out.push({
       id: m.id,
       thread: msg.threadId,
@@ -129,7 +135,7 @@ export async function search(query: string, max = 10) {
 }
 
 export async function read(id: string) {
-  const msg = await call(`/messages/${encodeURIComponent(id)}?format=full`);
+  const msg = (await call(`/messages/${encodeURIComponent(id)}?format=full`)) as Message;
   return {
     id: msg.id,
     thread: msg.threadId,
@@ -168,7 +174,7 @@ async function verifiedSelfIdentity(): Promise<{ recipient: string; token: strin
   // Keep this credential snapshot through all subsequent requests. OAuth callbacks can replace
   // the cache while profile verification is pending; rereading it would authorize another mailbox.
   const token = await accessToken();
-  const profile = await call("/profile", { signal: AbortSignal.timeout(30_000) }, token);
+  const profile = (await call("/profile", { signal: AbortSignal.timeout(30_000) }, token)) as { emailAddress?: unknown };
   if (typeof profile.emailAddress !== "string" || mailboxAddress(profile.emailAddress) !== expected)
     throw new Error("Authenticated Gmail identity does not match the digest mailbox");
   return { recipient: expected, token };
@@ -237,11 +243,11 @@ export async function findSentSelfMessage(messageId: string, expectedMailbox: st
   // Gmail may replace RFC Message-ID. Search the persisted body reference, then require the
   // exact custom identity header; search indexing alone is never delivery proof.
   const q = `in:sent "${reference}"`;
-  const list = await call(`/messages?${new URLSearchParams({ q, maxResults: "100" })}`, { signal: AbortSignal.timeout(30_000) }, token);
+  const list = (await call(`/messages?${new URLSearchParams({ q, maxResults: "100" }).toString()}`, { signal: AbortSignal.timeout(30_000) }, token)) as MessageList;
   for (const item of list.messages ?? []) {
-    const msg = await call(`/messages/${encodeURIComponent(item.id)}?format=metadata&metadataHeaders=X-Auto-Apply-Delivery-ID&metadataHeaders=From&metadataHeaders=To`, { signal: AbortSignal.timeout(30_000) }, token);
+    const msg = (await call(`/messages/${encodeURIComponent(item.id)}?format=metadata&metadataHeaders=X-Auto-Apply-Delivery-ID&metadataHeaders=From&metadataHeaders=To`, { signal: AbortSignal.timeout(30_000) }, token)) as Message;
     if ((msg.labelIds ?? []).includes("SENT") && header(msg, "X-Auto-Apply-Delivery-ID").trim() === reference
-      && [header(msg, "From"), header(msg, "To")].every(value => (value.match(/<([^<>]+)>/)?.[1] ?? value).trim().toLowerCase() === recipient)) {
+      && [header(msg, "From"), header(msg, "To")].every(value => ((/<([^<>]+)>/.exec(value))?.[1] ?? value).trim().toLowerCase() === recipient)) {
       const date = new Date(Number(msg.internalDate));
       if (!Number.isFinite(date.getTime())) throw new Error("Sent digest has no valid delivery timestamp");
       return { id: msg.id, sentAt: date.toISOString() };

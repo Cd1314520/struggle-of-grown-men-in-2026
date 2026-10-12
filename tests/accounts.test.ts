@@ -32,8 +32,7 @@ function scenario(body: string) {
 }
 
 describe("account resolution behavioral semantics", () => {
-  it("rejects unsafe URLs, non-http schemes, userinfo, and tenantless Workday domains without echoing secrets", () =>
-    scenario(`
+  it("rejects unsafe URLs, non-http schemes, userinfo, and tenantless Workday domains without echoing secrets", () => { scenario(`
     // URL with embedded credentials must be rejected without echoing secrets
     const userinfoRes = JSON.parse(await resolveAccount("https://user:supersecret@careers.rei.com/login", "app@example.com", false));
     assert.equal(userinfoRes.existing, false);
@@ -59,10 +58,9 @@ describe("account resolution behavioral semantics", () => {
     const emptyRes = JSON.parse(await resolveAccount("   ", "app@example.com", false));
     assert.equal(emptyRes.existing, false);
     assert.equal(emptyRes.error, "invalid_domain");
-  `));
+  `); });
 
-  it("safely looks up stored credentials without leaking secrets or creating unpermitted accounts", () =>
-    scenario(`
+  it("safely looks up stored credentials without leaking secrets or creating unpermitted accounts", () => { scenario(`
     // Lookup-only when account does not exist
     const raw = await resolveAccount("https://acrisure.wd5.myworkdayjobs.com/en-US/careers", "app@example.com", false);
     const parsed = JSON.parse(raw);
@@ -73,10 +71,9 @@ describe("account resolution behavioral semantics", () => {
     // Verify DB accounts table remains empty
     const count = db.query("SELECT COUNT(*) AS c FROM accounts").get();
     assert.equal(count.c, 0);
-  `));
+  `); });
 
-  it("creates and persists credentials only when allowCreate is true and mailbox is provided", () =>
-    scenario(`
+  it("creates and persists credentials only when allowCreate is true and mailbox is provided", () => { scenario(`
     // Missing mailbox returns error without inserting
     const noMailbox = JSON.parse(await resolveAccount("acrisure.wd5.myworkdayjobs.com", "", true));
     assert.equal(noMailbox.existing, false);
@@ -93,10 +90,9 @@ describe("account resolution behavioral semantics", () => {
     assert.ok(row !== null);
     assert.equal(row.email, "app@example.com");
     assert.equal(row.password, created.password);
-  `));
+  `); });
 
-  it("reuses existing stored credentials and refuses to overwrite known accounts even when allowCreate is true", () =>
-    scenario(`
+  it("reuses existing stored credentials and refuses to overwrite known accounts even when allowCreate is true", () => { scenario(`
     // Create initial account
     const initial = JSON.parse(await resolveAccount("careers.rei.com", "app@example.com", true));
     assert.equal(initial.existing, false);
@@ -117,10 +113,9 @@ describe("account resolution behavioral semantics", () => {
     // DB record remains unchanged
     const row = db.query("SELECT email, password FROM accounts WHERE domain = ?").get("careers.rei.com");
     assert.equal(row.password, password);
-  `));
+  `); });
 
-  it("strictly isolates credentials across different tenants on multi-tenant SaaS and Workday platforms", () =>
-    scenario(`
+  it("strictly isolates credentials across different tenants on multi-tenant SaaS and Workday platforms", () => { scenario(`
     // Create account for Acrisure Workday tenant
     const acrisure = JSON.parse(await resolveAccount("https://acrisure.wd5.myworkdayjobs.com/en-US/careers/job/1", "app@example.com", true));
     assert.equal(acrisure.existing, false);
@@ -144,5 +139,5 @@ describe("account resolution behavioral semantics", () => {
     const airbnbLookup = JSON.parse(await resolveAccount("https://boards.greenhouse.io/airbnb/jobs/101", "app@example.com", false));
     assert.equal(airbnbLookup.existing, true);
     assert.equal(airbnbLookup.password, airbnb.password);
-  `));
+  `); });
 });
