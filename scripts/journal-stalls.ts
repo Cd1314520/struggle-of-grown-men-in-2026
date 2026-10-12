@@ -352,7 +352,7 @@ export function observeAutoApplyActivity(
     const autoApprovalEvents = db.query<EventRow, []>(`
       SELECT id, job_id, worker, kind, message, at
       FROM events
-      WHERE kind = 'auto' AND worker = 'prep' AND message LIKE 'Approved by auto apply:%'
+      WHERE kind = 'auto' AND worker = 'prep' AND (message LIKE 'Approved by auto apply:%' OR message LIKE 'Approved by reconsidered auto apply:%')
       ORDER BY id ASC
     `).all();
 

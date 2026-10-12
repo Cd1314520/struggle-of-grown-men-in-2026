@@ -803,7 +803,7 @@ export async function runResumeJournal(
         .query<ApprovalEventRow & { job_id: number }, []>(
           `SELECT id, job_id, kind, message, at FROM events 
            WHERE job_id IN (${jobIds.join(",")}) AND (
-             (kind = 'auto' AND worker = 'prep' AND message LIKE 'Approved by auto apply:%')
+             (kind = 'auto' AND worker = 'prep' AND (message LIKE 'Approved by auto apply:%' OR message LIKE 'Approved by reconsidered auto apply:%'))
              OR (kind = 'user' AND message = 'approve')
            )
            ORDER BY id ASC`

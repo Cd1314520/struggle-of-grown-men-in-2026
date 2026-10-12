@@ -398,4 +398,94 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
     // No fill events at all, so excluded
     expect(res.changed).toBe(false);
   });
+
+  it("14. Correctly attributes reconsidered auto-approvals, excludes prep-only, respects user cutoff, and discovers historical attempts past watermark", async () => {
+    const { dbPath, journalPath, statePath, db } = setupTestEnv();
+
+    // Job 801: Reconsidered auto-approval entering fill with input stall (needs_input)
+    db.run(`
+      INSERT INTO jobs (id, url, source, company, title, status, approved_by, pending)
+      VALUES (801, 'https://test/801', 'board', 'Reconsidered Input Corp', 'SWE', 'needs_input', 'auto', '{"text":"Consent to receive SMS messages?","shot":1760000000000}')
+    `);
+    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (50, 801, 'prep', 'auto', 'Approved by reconsidered auto apply: daily_cap released', '2026-10-10 05:00:00')`);
+    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (51, 801, 'fill', 'step', 'Opening application form', '2026-10-10 05:01:00')`);
+    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (52, 801, 'fill', 'gate', 'question: Consent to receive SMS messages?', '2026-10-10 05:02:00')`);
+
+    // Job 802: Reconsidered auto-approval entering fill with manual stall (needs_manual)
+    db.run(`
+      INSERT INTO jobs (id, url, source, company, title, status, approved_by)
+      VALUES (802, 'https://test/802', 'board', 'Reconsidered Manual Corp', 'SRE', 'needs_manual', 'auto')
+    `);
+    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (60, 802, 'prep', 'auto', 'Approved by reconsidered auto apply: practice qualified', '2026-10-10 06:00:00')`);
+    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (61, 802, 'fill', 'step', 'Starting fill', '2026-10-10 06:01:00')`);
+    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (62, 802, 'fill', 'gate', 'manual: Cloudflare captcha challenge detected on form', '2026-10-10 06:02:00')`);
+
+    // Job 803: Reconsidered auto-approval that is PREP-ONLY (never reached fill worker) -> MUST be excluded
+    db.run(`
+      INSERT INTO jobs (id, url, source, company, title, status, approved_by)
+      VALUES (803, 'https://test/803', 'board', 'Prep Only Corp', 'QA', 'approved', 'auto')
+    `);
+    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (70, 803, 'prep', 'auto', 'Approved by reconsidered auto apply: qualified', '2026-10-10 07:00:00')`);
+    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (71, 803, 'prep', 'step', 'Tailoring resume in prep', '2026-10-10 07:01:00')`);
+
+    // Job 804: Reconsidered auto-approval superseded by later manual approval cutoff
+    db.run(`
+      INSERT INTO jobs (id, url, source, company, title, status, approved_by)
+      VALUES (804, 'https://test/804', 'board', 'Manual Cutoff Corp', 'DevOps', 'needs_input', 'user')
+    `);
+    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (80, 804, 'prep', 'auto', 'Approved by reconsidered auto apply: test', '2026-10-10 08:00:00')`);
+    // User manually approves at event 85 before fill starts
+    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (85, 804, 'user', 'user', 'approve', '2026-10-10 08:30:00')`);
+    // Fill starts after user approval at event 90
+    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (90, 804, 'fill', 'step', 'Fill started under manual approval', '2026-10-10 09:00:00')`);
+    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (91, 804, 'fill', 'gate', 'question: Travel percentage?', '2026-10-10 09:01:00')`);
+
+    // Seed an existing state file with a high watermark past all above events (e.g., watermark = 500)
+    // to test that previously omitted historical eligible attempts are discovered
+    writeFileSync(
+      statePath,
+      JSON.stringify(
+        {
+          version: 1,
+          lastRunAt: "2026-10-10T04:00:00.000Z",
+          lastEventId: 500,
+          reportedGateEventIds: [1, 2],
+          reportedJobStatuses: { "99": "submitted" },
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    // Initial run with existing state
+    const res = await runMonitor({ dbPath, journalPath, statePath, silent: true, help: false });
+    expect(res.changed).toBe(true);
+
+    const journalText = readFileSync(journalPath, "utf8");
+
+    // 1. Reconsidered jobs with fill evidence are INCLUDED in journal scope
+    expect(journalText).toContain("Reconsidered Input Corp");
+    expect(journalText).toContain("Reconsidered Manual Corp");
+    expect(journalText).toContain("Gate Event #52");
+    expect(journalText).toContain("Cloudflare captcha challenge detected on form");
+
+    // 2. Prep-only job is EXCLUDED
+    expect(journalText).not.toContain("Prep Only Corp");
+
+    // 3. User manual approval cutoff is RESPECTED (Job 804 fill was under manual approval)
+    expect(journalText).not.toContain("Manual Cutoff Corp");
+    expect(journalText).not.toContain("Gate Event #91");
+
+    // 4. Verify state persistence recorded the newly discovered attempts and gates
+    const updatedState = loadState(statePath);
+    expect(updatedState).not.toBeNull();
+    expect(updatedState?.reportedJobStatuses["801"]).toBe("needs_input");
+    expect(updatedState?.reportedJobStatuses["802"]).toBe("needs_manual");
+    expect(updatedState?.reportedJobStatuses["803"]).toBeUndefined();
+    expect(updatedState?.reportedJobStatuses["804"]).toBeUndefined();
+    expect(updatedState?.reportedGateEventIds).toContain(52);
+    expect(updatedState?.reportedGateEventIds).toContain(62);
+    expect(updatedState?.reportedGateEventIds).not.toContain(91);
+  });
 });

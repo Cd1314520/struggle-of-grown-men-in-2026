@@ -84,6 +84,7 @@ mock.module("../../src/omp", () => ({
   },
 }));
 const simulatedTabs = new Set<string>();
+const jobBrowsers: JobBrowser[] = [];
 let nextTab = 0;
 let activateWait: Promise<void> | null = null;
 if (scenario?.startsWith("restart-"))
@@ -101,7 +102,9 @@ mock.module("../../src/chrome", () => ({
     const id = saved !== null && reused ? saved : (++nextTab === 1 ? "draft-tab" : `draft-tab-${nextTab}`);
     simulatedTabs.add(id);
     let revoked = false;
-    return { tabId: id, reused, port: config.chrome.proxyPort, ownsTarget: target => !revoked && target === id, revoke: () => { revoked = true; }, close: () => { revoked = true; } };
+    const b: JobBrowser = { tabId: id, reused, port: config.chrome.proxyPort, ownsTarget: target => !revoked && target === id, revoke: () => { revoked = true; }, close: () => { revoked = true; } };
+    jobBrowsers.push(b);
+    return b;
   },
 }));
 mock.module("../../src/gmail", () => ({
@@ -230,8 +233,8 @@ if (scenario === "recovery-prefix") {
 }
 
 addJob(1);
-if (["release", "manual", "manual-same-employer", "manual-lost-tab", "confirm"].includes(scenario!)) addJob(2);
-if (scenario === "manual-same-employer") updateJob(2, { company: getJob(1)!.company, company_key: getJob(1)!.company_key });
+if (["release", "manual", "manual-same-employer", "manual-lost-tab", "confirm", "terminal-success", "terminal-closed", "terminal-persistence-failure"].includes(scenario!)) addJob(2);
+if (["manual-same-employer", "terminal-success", "terminal-closed", "terminal-persistence-failure"].includes(scenario!)) updateJob(2, { company: getJob(1)!.company, company_key: getJob(1)!.company_key });
 pipeline.pump();
 await until(() => workers.length === 1);
 const first = workers[0]!;
@@ -595,6 +598,123 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(core.getOpenGate(1)!.kind, "confirm_submit");
   fourth.exit();
   await repark;
+} else if (scenario === "terminal-success") {
+  const summary = "Salary 100000; all fields checked";
+  const parking = call(first, "confirm_submit", { ...navigation, summary });
+  await until(() => core.getOpenGate(1) !== null);
+  assert.equal(pipeline.respond(1, "approve"), true);
+  first.exit();
+  await parking;
+  await until(() => workers.length === 2);
+  const second = workers[1]!;
+  assert.match(await call(second, "confirm_submit", { ...navigation, summary }), /^APPROVED/);
+  assert.equal(kvGet("fill.submitting.1"), "1");
+
+  const terminalReport = call(second, "report_result", { outcome: "submitted", note: "Confirmation #ABC-123" });
+  assert.equal(await terminalReport, "Recorded.");
+
+  // Consumer-visible terminal status is immediate
+  assert.equal(getJob(1)!.status, "submitted");
+  assert.equal(getJob(1)!.pending, null);
+  assert.equal(core.getOpenGate(1), null, "success clears marker without ambiguity gate");
+  assert.equal(kvGet("fill.submitting.1"), "0", "submit marker cleared on conclusive success");
+  assert.equal(kvGet("fill.verify.1"), "0");
+  assert.equal(kvGet("fill.recovery.1"), "0");
+  assert.equal(second.aborted, true, "terminal result aborts worker process");
+  assert.equal(jobBrowsers[1]!.ownsTarget("draft-tab"), false, "browser revoked on terminal result");
+
+  // Scheduler and employer slot remain occupied until process exits
+  pipeline.pump();
+  assert.equal(workers.length, 2, "slot remains occupied until handle.done / process exit");
+  assert.equal(pipeline.activeFillSession(1), true, "session remains until process exit");
+  assert.equal(pipeline.fillSlot(1), null, "slot ownership revoked for inactive session");
+  assert.equal(getJob(2)!.status, "approved", "same-employer job cannot start while previous worker runs");
+
+  // Stale callbacks while process is winding down cannot alter terminal status
+  const staleSubmit = await call(second, "confirm_submit", { ...navigation, summary: "Stale attempt" });
+  assert.match(staleSubmit, /ERROR: stale or parked fill worker/);
+  const staleFail = await call(second, "report_result", { outcome: "failed", note: "Stale late failure" });
+  assert.match(staleFail, /ERROR: stale or parked fill worker/);
+  assert.equal(getJob(1)!.status, "submitted");
+  assert.equal(kvGet("fill.submitting.1"), "0");
+
+  // Worker process exits
+  second.exit();
+  pipeline.pump();
+  await until(() => workers.length === 3);
+  const third = workers[2]!;
+  assert.equal(third.options.jobId, 2, "same-employer job starts only after process exit");
+  assert.equal(pipeline.activeFillSession(1), false, "fill session freed after process exit");
+
+  // Stale callbacks after successor has started cannot touch terminal job or successor
+  const stalePostExit = await call(second, "report_result", { outcome: "closed", note: "Late callback" });
+  assert.match(stalePostExit, /ERROR: stale or parked fill worker/);
+  assert.equal(getJob(1)!.status, "submitted");
+  assert.equal(getJob(2)!.status, "filling");
+
+  // Tabs and frozen resume preserved
+  assert.equal(simulatedTabs.has("draft-tab"), true, "tabs preserved");
+  assert.equal(getJob(1)!.resume_sha, initialSha, "frozen resume preserved");
+  assert.equal(resume.frozenResume(1, initialSha).sha, initialSha);
+  third.exit();
+} else if (scenario === "terminal-closed") {
+  const terminalReport = call(first, "report_result", { outcome: "closed", note: "Posting expired" });
+  assert.equal(await terminalReport, "Recorded.");
+
+  assert.equal(getJob(1)!.status, "skipped");
+  assert.equal(getJob(1)!.note, "posting closed: Posting expired");
+  assert.equal(core.getOpenGate(1), null);
+  assert.equal(kvGet("fill.submitting.1"), "0");
+  assert.equal(first.aborted, true);
+  assert.equal(jobBrowsers[0]!.ownsTarget("draft-tab"), false, "browser revoked on closed report");
+
+  // Slot remains held until process exit
+  pipeline.pump();
+  assert.equal(workers.length, 1);
+  assert.equal(pipeline.activeFillSession(1), true);
+  assert.equal(getJob(2)!.status, "approved");
+
+  const staleCall = await call(first, "report_result", { outcome: "submitted", note: "Late submitted" });
+  assert.match(staleCall, /ERROR: stale or parked fill worker/);
+  assert.equal(getJob(1)!.status, "skipped");
+
+  first.exit();
+  pipeline.pump();
+  await until(() => workers.length === 2);
+  const second = workers[1]!;
+  assert.equal(second.options.jobId, 2);
+  assert.equal(pipeline.activeFillSession(1), false);
+  second.exit();
+} else if (scenario === "terminal-persistence-failure") {
+  const summary = "Salary 100000; all fields checked";
+  const parking = call(first, "confirm_submit", { ...navigation, summary });
+  await until(() => core.getOpenGate(1) !== null);
+  assert.equal(pipeline.respond(1, "approve"), true);
+  first.exit();
+  await parking;
+  await until(() => workers.length === 2);
+  const second = workers[1]!;
+  assert.match(await call(second, "confirm_submit", { ...navigation, summary }), /^APPROVED/);
+  assert.equal(kvGet("fill.submitting.1"), "1");
+
+  db.query("INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, created_at) VALUES ('gate-persist-test', 1, 'manual', 'group-persist-test', 'match-persist-test', 'Employer 1', 'Inspect draft', 'Employer 1 / draft', '[]', 'open', datetime('now'))").run();
+  assert.equal(core.getGate("gate-persist-test")?.state, "open");
+
+  db.exec("CREATE TRIGGER fail_jobs_update BEFORE UPDATE ON jobs BEGIN SELECT RAISE(ABORT, 'injected persistence failure'); END;");
+  assert.throws(() => call(second, "report_result", { outcome: "submitted", note: "Should fail persistence" }), /injected persistence failure/);
+
+  assert.equal(kvGet("fill.submitting.1"), "1", "failed persistence must not clear submit marker");
+  assert.equal(core.getGate("gate-persist-test")?.state, "open", "failed persistence must not drop durable gates");
+  assert.equal(getJob(1)!.status, "filling", "job status remains filling");
+  assert.equal(second.aborted, false, "worker must not be aborted when persistence fails");
+
+  db.exec("DROP TRIGGER fail_jobs_update;");
+  assert.equal(await call(second, "report_result", { outcome: "submitted", note: "Successful retry" }), "Recorded.");
+  assert.equal(kvGet("fill.submitting.1"), "0", "marker cleared upon successful persistence commit");
+  assert.equal(core.getGate("gate-persist-test")?.state, "closed", "gates dropped upon successful persistence commit");
+  assert.equal(getJob(1)!.status, "submitted");
+  assert.equal(second.aborted, true);
+  second.exit();
 } else {
   throw new Error(`Unknown fixture scenario: ${scenario}`);
 }

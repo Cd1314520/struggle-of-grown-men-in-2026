@@ -506,3 +506,153 @@ companies:
   - name: Sentry
     ats: ashby
     slug: sentry
+  - name: Giga
+    ats: ashby
+    slug: gigaml
+  - name: Pylon
+    ats: ashby
+    slug: pylon-labs
+  - name: Confido
+    ats: ashby
+    slug: confido
+  - name: Sierra
+    ats: ashby
+    slug: sierra
+  - name: DMC Engineering - Campus Recruiting
+    ats: greenhouse
+    slug: dmcengineering_campus
+  - name: Muon Space
+    ats: greenhouse
+    slug: muonspace
+  - name: Strada
+    ats: ashby
+    slug: stradahq
+  - name: Kustomer
+    ats: ashby
+    slug: Kustomer
+  - name: Together AI
+    ats: greenhouse
+    slug: togetherai
+  - name: ATOMS
+    ats: greenhouse
+    slug: cssmerge
+  - name: Sigma Computing
+    ats: greenhouse
+    slug: sigmacomputing
+  - name: Databricks
+    ats: greenhouse
+    slug: databricks
+  - name: SeatGeek
+    ats: greenhouse
+    slug: seatgeek
+  - name: Benchling
+    ats: ashby
+    slug: benchling
+  - name: Harvey
+    ats: ashby
+    slug: harvey
+  - name: Huntington National Bank
+    ats: workday
+    slug: huntington.wd12/HNBcareers
+  - name: CLA (CliftonLarsonAllen)
+    ats: workday
+    slug: cliftonlarsonallen.wd115/CLA
+  - name: ON.energy
+    ats: greenhouse
+    slug: onenergy
+  - name: Aspen Technology
+    ats: workday
+    slug: aspentech.wd5/aspentech
+  - name: Netic
+    ats: ashby
+    slug: netic
+  - name: InnoPhase IoT
+    ats: greenhouse
+    slug: innophaseiot
+  - name: SingleStore
+    ats: greenhouse
+    slug: singlestore
+  - name: Cboe Global Markets
+    ats: workday
+    slug: cboe.wd1/External_Career_CBOE
+  - name: Suno
+    ats: ashby
+    slug: suno
+  - name: Ironclad
+    ats: ashby
+    slug: ironcladhq
+  - name: Reframe Systems
+    ats: ashby
+    slug: reframesystems
+  - name: Formlabs
+    ats: greenhouse
+    slug: formlabs
+  - name: Woven by Toyota
+    ats: lever
+    slug: woven-by-toyota
+  - name: Nelnet
+    ats: workday
+    slug: nelnet.wd1/MyNelnet
+  - name: Roblox
+    ats: greenhouse
+    slug: roblox
+  - name: Scout AI
+    ats: greenhouse
+    slug: scoutai
+  - name: Anduril Industries
+    ats: greenhouse
+    slug: andurilindustries
+  - name: Schweitzer Engineering Laboratories
+    ats: workday
+    slug: selinc.wd1/SEL
+  - name: True Anomaly
+    ats: greenhouse
+    slug: trueanomalyinc
+  - name: Greenberg Traurig, LLP
+    ats: workday
+    slug: gtlaw.wd1/GTLAW
+  - name: Tenet3
+    ats: greenhouse
+    slug: tenet3
+  - name: Renterra
+    ats: ashby
+    slug: renterra
+  - name: Lumanu
+    ats: ashby
+    slug: lumanu
+  - name: Perpay
+    ats: greenhouse
+    slug: perpay
+  - name: Uare.ai
+    ats: greenhouse
+    slug: uareai
+  - name: Applied Intuition
+    ats: ashby
+    slug: applied
+  - name: Aurelian
+    ats: ashby
+    slug: aurelian
+  - name: ASSYST, Inc.
+    ats: greenhouse
+    slug: assystinc
+  - name: Chalk
+    ats: ashby
+    slug: chalk
+  - name: Amplitude
+    ats: ashby
+    slug: amplitude
+  - name: WHOOP
+    ats: ashby
+    slug: whoop
+  - name: Twitch
+    ats: greenhouse
+    slug: twitch
+  - name: First Orion
+    ats: workday
+    slug: firstorion.wd1/First_Orion
+  - name: T. Rowe Price
+    ats: workday
+    slug: troweprice.wd5/TRowePrice
+  - name: BMO
+    ats: workday
+    slug: bmo.wd3/External

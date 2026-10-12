@@ -69,13 +69,12 @@ export async function ensureChrome(slot = 0) {
       "--disable-session-crashed-bubble",
       "--password-store=basic",
       "--lang=en-US",
-      // Without these a GPU-less virtual display reports no WebGL and no media devices at all,
-      // which no real desktop does. Vulkan reaches the machine's actual GPU through its render node.
+      // Vulkan reaches the machine's actual GPU through its render node (/dev/dri/renderD128),
+      // providing genuine hardware WebGL and WebGL2 acceleration under Xvfb without spoofing.
       "--use-gl=angle",
       "--use-angle=vulkan",
       "--enable-features=Vulkan",
       "--ignore-gpu-blocklist",
-      "--use-fake-device-for-media-stream",
       "about:blank",
     ],
     { ...process.env, DISPLAY: display },

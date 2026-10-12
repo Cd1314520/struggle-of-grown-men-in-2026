@@ -813,13 +813,19 @@ async function fill(job: Job, session: FillSession) {
           stopFailedFill(session, String(note));
           return "Submission ambiguity recorded; automatic retry forbidden.";
         }
-        cancelJobGates(job.id);
-        kvSet(`fill.recovery.${job.id}`, "0");
-        if (outcome === "submitted" || outcome === "already_applied")
-          updateJob(job.id, { status: "submitted", pending: null, note, submitted_at: new Date().toISOString() });
-        else if (outcome === "closed") updateJob(job.id, { status: "skipped", pending: null, note: `posting closed: ${note}` });
-        else updateJob(job.id, { status: "failed", pending: null, note });
+        db.transaction(() => {
+          cancelJobGates(job.id);
+          kvSet(`fill.submitting.${job.id}`, "0");
+          kvSet(`fill.verify.${job.id}`, "0");
+          kvSet(`fill.recovery.${job.id}`, "0");
+          if (outcome === "submitted" || outcome === "already_applied")
+            updateJob(job.id, { status: "submitted", pending: null, note, submitted_at: new Date().toISOString() });
+          else if (outcome === "closed") updateJob(job.id, { status: "skipped", pending: null, note: `posting closed: ${note}` });
+          else updateJob(job.id, { status: "failed", pending: null, note });
+        })();
         session.active = false;
+        session.browser?.revoke();
+        session.handle?.abort();
         return "Recorded.";
       },
     },
@@ -940,7 +946,7 @@ async function fill(job: Job, session: FillSession) {
       approval: job.approved_by === "auto"
         ? "Approved by the candidate's standing auto-apply rules; they have not reviewed this application."
         : "The candidate has reviewed and approved this application.",
-      submitRule: "- **Before final submit:** re-observe and verify all fields, take a full-page screenshot, then call `confirm_submit` with an exact summary and current navigation checkpoint. Click only if it returns APPROVED. An unused approval is valid only for the unchanged summary. Any uncertainty after the final click requires `need_manual`; never click submit again.",
+      submitRule: "- **Before final submit:** re-observe and verify all fields, take a full-page screenshot, then call `confirm_submit` with an exact summary and current navigation checkpoint. Click only if it returns APPROVED. An unused approval is valid only for the unchanged summary. Immediate post-click verification challenges (email codes or CAPTCHAs) continue this pending attempt; complete them using challenge controls. Any other uncertainty or requirement to click final application submit again requires `need_manual`; never click final application submit a second time.",
     }),
     tools,
   });

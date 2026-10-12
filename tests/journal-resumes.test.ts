@@ -478,4 +478,37 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     const content = readFileSync(statePath, "utf8");
     expect(content).toContain("malformed json syntax error");
   });
+
+  it("11. Recognizes reconsidered auto-approvals as eligible for resume review", async () => {
+    const { dbPath, jobsRoot, defaultOpts, mockCalls } = setupTestEnv();
+    const jobId = 701;
+    const { sha } = createValidJobArtifacts(jobsRoot, jobId);
+    const now = "2026-10-10 05:00:00";
+    const nowIso = "2026-10-10T05:00:05.000Z";
+
+    const db = new Database(dbPath);
+    db.exec(`
+      INSERT INTO jobs (id, url, source, company, title, description, status, approved_by, resume_sha, resume_frozen_at)
+      VALUES (${jobId}, 'https://example.com/701', 'discover', 'Deferred Reconsidered Corp', 'Backend Engineer', 'Must know TypeScript and SQLite', 'submitted', 'auto', '${sha}', '${nowIso}');
+      INSERT INTO events (id, job_id, worker, kind, message, at)
+      VALUES (1, ${jobId}, 'prep', 'auto', 'Approved by reconsidered auto apply: daily_cap cleared', '${now}');
+      INSERT INTO events (id, job_id, worker, kind, message, at)
+      VALUES (2, ${jobId}, 'fill', 'step', 'Starting fill session', '${now}');
+    `);
+    db.close();
+
+    const res = await runResumeJournal(defaultOpts);
+    expect(res.success).toBe(true);
+    expect(res.changed).toBe(true);
+    expect(mockCalls.length).toBe(1);
+    expect(mockCalls[0][0].jobId).toBe(jobId);
+    expect(mockCalls[0][0].company).toBe("Deferred Reconsidered Corp");
+
+    const journalContent = readFileSync(defaultOpts.journalPath, "utf8");
+    expect(journalContent).toContain("Deferred Reconsidered Corp");
+    expect(journalContent).toContain(`jobId=${jobId}`);
+
+    const state = loadResumeJournalState(defaultOpts.statePath);
+    expect(state.reviews[String(jobId)]).toBeDefined();
+  });
 });

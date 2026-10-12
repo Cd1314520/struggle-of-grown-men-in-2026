@@ -28,6 +28,9 @@ interface Conn {
   queues: Map<string, Promise<void>>;
   injected: Set<number>;
   nextId: number;
+  nativeUserAgent?: string;
+  pendingBrowserVersion: Set<string>;
+  consoleObjects: Map<string, Set<string>>;
 }
 
 export interface CdpTargetScope {
@@ -112,6 +115,19 @@ const PROFILE_MUTATIONS: Record<string, true> = {
   "CacheStorage.deleteEntry": true,
 };
 
+const MAX_TRACKED_CONSOLE_OBJECTS = 1000;
+function trackConsoleObjectId(conn: Conn, session: string, id: string) {
+  let set = conn.consoleObjects.get(session);
+  if (!set) {
+    set = new Set();
+    conn.consoleObjects.set(session, set);
+  }
+  if (set.size >= MAX_TRACKED_CONSOLE_OBJECTS) {
+    const oldest = set.values().next().value;
+    if (oldest !== undefined) set.delete(oldest);
+  }
+  set.add(id);
+}
 function pointer(conn: Conn, session: string) {
   let p = conn.sessions.get(session);
   if (!p) conn.sessions.set(session, (p = { x: rand(200, 900), y: rand(120, 500), lastKeyAt: 0, lastMouseAt: 0, burst: 0 }));
@@ -217,6 +233,24 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
   const clients = new Set<ServerWebSocket<ProxyClient>>();
   let revoked = false;
   let contextId: string | undefined;
+  let cachedNativeUa: string | undefined;
+
+  async function getNativeUa(): Promise<string | undefined> {
+    if (cachedNativeUa) return cachedNativeUa;
+    try {
+      const res = await fetch(`${upstreamHttp}/json/version`, { signal: AbortSignal.timeout(1500) });
+      if (!res.ok) return undefined;
+      const data: unknown = await res.json();
+      if (!record(data)) return undefined;
+      const ua = data["User-Agent"] ?? data["userAgent"];
+      if (typeof ua === "string" && ua.length > 0) {
+        cachedNativeUa = ua;
+        return ua;
+      }
+    } catch {}
+    return undefined;
+  }
+
   const ownsTarget = (id: string) => !revoked && (allowed === null || allowed.has(id));
   const rewrite = (text: string) => text.replaceAll(`127.0.0.1:${cdpPort}`, `127.0.0.1:${server.port}`).replaceAll(`localhost:${cdpPort}`, `127.0.0.1:${server.port}`);
 
@@ -242,6 +276,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
     state.autoSessions.delete(sessionId);
     ws.data.conn!.sessions.delete(sessionId);
     ws.data.conn!.queues.delete(sessionId);
+    ws.data.conn!.consoleObjects.delete(sessionId);
     if (!target) return;
     for (const liveSession of state.autoSessions) {
       if (state.sessions.get(liveSession) === target) return;
@@ -307,13 +342,59 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
       open(ws) {
         clients.add(ws);
         const upstream = new WebSocket(`ws://127.0.0.1:${cdpPort}${ws.data.path}`);
-        const { promise: ready, resolve } = Promise.withResolvers<void>();
-        upstream.onopen = () => resolve();
-        const conn: Conn = { upstream, ready, sessions: new Map(), queues: new Map(), injected: new Set(), nextId: 1_500_000_000 };
+        const { promise: openPromise, resolve: resolveOpen } = Promise.withResolvers<void>();
+        upstream.onopen = () => resolveOpen();
+        const conn: Conn = {
+          upstream,
+          ready: Promise.all([
+            openPromise,
+            getNativeUa().then(ua => { if (ua) conn.nativeUserAgent = ua; }),
+          ]).then(() => {}),
+          sessions: new Map(),
+          queues: new Map(),
+          injected: new Set(),
+          nextId: 1_500_000_000,
+          pendingBrowserVersion: new Set(),
+          consoleObjects: new Map(),
+          nativeUserAgent: cachedNativeUa,
+        };
         ws.data.conn = conn;
         upstream.onmessage = ev => {
           if (revoked) return;
           const text = String(ev.data);
+          if (
+            text.includes("Runtime.consoleAPICalled") ||
+            text.includes("executionContext") ||
+            text.includes("detachedFromTarget") ||
+            conn.pendingBrowserVersion.size > 0
+          ) {
+            let pre: Packet | null = null;
+            try { pre = packet(text); } catch {}
+            if (pre) {
+              if (pre.method === "Runtime.consoleAPICalled" && Array.isArray(pre.params.args)) {
+                const session = pre.sessionId ?? "";
+                for (const arg of pre.params.args) {
+                  if (record(arg) && typeof arg.objectId === "string" && arg.objectId.length > 0) {
+                    trackConsoleObjectId(conn, session, arg.objectId);
+                  }
+                }
+              } else if (
+                pre.method === "Runtime.executionContextDestroyed" ||
+                pre.method === "Runtime.executionContextsCleared"
+              ) {
+                conn.consoleObjects.get(pre.sessionId ?? "")?.clear();
+              } else if (pre.method === "Target.detachedFromTarget") {
+                if (typeof pre.params.sessionId === "string") {
+                  conn.consoleObjects.delete(pre.params.sessionId);
+                }
+              } else if (pre.id !== undefined && conn.pendingBrowserVersion.delete(`${pre.sessionId ?? ""}:${pre.id}`)) {
+                if (typeof pre.result?.userAgent === "string" && pre.result.userAgent.length > 0) {
+                  conn.nativeUserAgent = pre.result.userAgent;
+                  cachedNativeUa = pre.result.userAgent;
+                }
+              }
+            }
+          }
           if (!ws.data.targets && conn.injected.size === 0) { ws.send(text); return; }
           let msg: Packet | null;
           try { msg = packet(text); } catch { ws.close(); return; }
@@ -340,6 +421,10 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
             state.requests.delete(key);
             if (!request) return;
             if (msg.error) { ws.send(text); return; }
+            if (request.method === "Browser.getVersion" && typeof msg.result?.userAgent === "string" && msg.result.userAgent.length > 0) {
+              conn.nativeUserAgent = msg.result.userAgent;
+              cachedNativeUa = msg.result.userAgent;
+            }
             if (request.method === "Target.getTargets" && Array.isArray(msg.result?.targetInfos)) {
               msg.result.targetInfos = msg.result.targetInfos.filter((info: unknown) => targetInfo(info) && accept(info));
             } else if (request.method === "Target.getTargetInfo") {
@@ -387,6 +472,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
               return;
             }
           } else if (msg.method === "Target.detachedFromTarget") {
+            if (typeof msg.params.sessionId === "string") conn.consoleObjects.delete(msg.params.sessionId);
             if (typeof msg.params.sessionId !== "string" || !state.sessions.has(msg.params.sessionId)) return;
             retireSession(ws, msg.params.sessionId);
           } else if (msg.method === "Target.targetDestroyed") {
@@ -413,18 +499,74 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
           if (msg.sessionId && !ownsTarget(state.sessions.get(msg.sessionId) ?? "")) return;
           ws.send(text);
         };
-        upstream.onclose = () => { resolve(); ws.close(); };
-        upstream.onerror = () => { resolve(); ws.close(); };
+        upstream.onclose = () => { resolveOpen(); ws.close(); };
+        upstream.onerror = () => { resolveOpen(); ws.close(); };
       },
       async message(ws, raw) {
         const conn = ws.data.conn!;
         await conn.ready;
         if (revoked || conn.upstream.readyState !== WebSocket.OPEN) return;
         const text = String(raw);
-        if (!ws.data.targets && !text.includes('"Input.')) { conn.upstream.send(text); return; }
+        if (
+          !ws.data.targets &&
+          !text.includes('"Input.') &&
+          !text.includes("setUserAgentOverride") &&
+          !text.includes("Browser.getVersion") &&
+          !text.includes("Runtime.callFunctionOn") &&
+          !text.includes("Runtime.releaseObject")
+        ) {
+          conn.upstream.send(text);
+          return;
+        }
         let msg: Packet | null;
         try { msg = packet(text); } catch { ws.close(); return; }
         if (!msg) { ws.close(); return; }
+
+        let modified = false;
+        if (
+          (msg.method === "Network.setUserAgentOverride" || msg.method === "Emulation.setUserAgentOverride") &&
+          conn.nativeUserAgent &&
+          Object.keys(msg.params).length === 1 &&
+          typeof msg.params.userAgent === "string" &&
+          msg.params.userAgent.length > 0 &&
+          msg.params.userAgent === conn.nativeUserAgent
+        ) {
+          msg.params = { ...msg.params, userAgent: "" };
+          modified = true;
+        }
+
+        if (msg.method === "Browser.getVersion" && msg.id !== undefined) {
+          conn.pendingBrowserVersion.add(`${msg.sessionId ?? ""}:${msg.id}`);
+        }
+
+        if (msg.method === "Runtime.releaseObject" && typeof msg.params.objectId === "string") {
+          conn.consoleObjects.get(msg.sessionId ?? "")?.delete(msg.params.objectId);
+        }
+
+        if (msg.method === "Runtime.callFunctionOn" && typeof msg.params.objectId === "string") {
+          const session = msg.sessionId ?? "";
+          const tracked = conn.consoleObjects.get(session);
+          if (tracked?.has(msg.params.objectId)) {
+            const keys = Object.keys(msg.params);
+            const fn = typeof msg.params.functionDeclaration === "string" ? msg.params.functionDeclaration.trim() : "";
+            const isEagerGetterFn =
+              fn === "function() { return this; }" ||
+              fn === "function(){return this}" ||
+              fn === "function () { return this; }" ||
+              fn.replace(/\s+/g, "") === "function(){returnthis;}";
+            if (
+              keys.length === 4 &&
+              keys.every(k => k === "objectId" || k === "functionDeclaration" || k === "returnByValue" || k === "silent") &&
+              isEagerGetterFn &&
+              msg.params.returnByValue === true &&
+              msg.params.silent === true
+            ) {
+              msg.params = { ...msg.params, returnByValue: false, generatePreview: true };
+              tracked.delete(msg.params.objectId);
+              modified = true;
+            }
+          }
+        }
         const state = ws.data.targets;
         if (state) {
           const incoming = msg;
@@ -480,7 +622,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
           }
           if (msg.id !== undefined) state.requests.set(`${msg.sessionId ?? ""}:${msg.id}`, request);
         }
-        if (!msg.method || !INPUT.has(msg.method)) return void conn.upstream.send(state ? JSON.stringify(msg) : text);
+        if (!msg.method || !INPUT.has(msg.method)) return void conn.upstream.send((state || modified) ? JSON.stringify(msg) : text);
         const session = msg.sessionId ?? "";
         const next = (conn.queues.get(session) ?? Promise.resolve())
           .then(() => { if (!revoked) return humanize(conn, msg); })
@@ -492,6 +634,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
       },
       close(ws) {
         clients.delete(ws);
+        ws.data.conn?.consoleObjects.clear();
         ws.data.conn?.upstream.close();
       },
     },
@@ -499,6 +642,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
   const revoke = () => {
     revoked = true;
     for (const ws of clients) {
+      ws.data.conn?.consoleObjects.clear();
       ws.data.conn?.upstream.close();
       ws.close();
     }
