@@ -1,3 +1,15 @@
 node_modules/
 data/
 profile/gmail-client.json
+
+# Personal details and answers used to fill forms
+profile/personal.yml
+profile/answers.md
+
+# Generated output
+artifacts/
+.playwright-mcp/
+reports/auto-apply-journal.md
+basic-resume/ats-tests/last_run.json
+__pycache__/
+*.pyc
