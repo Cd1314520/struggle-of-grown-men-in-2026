@@ -6,7 +6,7 @@ import { cap, esc, plural, unent, when } from "../util";
 import { SENT, statusOf, TAB_KEYS, TABS, VIEWS, type Tab } from "../views";
 import { eventRow } from "./common";
 import { gateHtml } from "./gate";
-import { practiceEvidenceHtml } from "./practice";
+import { practiceEvidenceHtml, practicePill } from "./practice";
 
 const NOISE = /compil|pdfinfo|typst|page count|one page|metadata/i; // build chatter that older assessments wrote into "concerns"
 
@@ -125,7 +125,7 @@ export function jobHtml(j: JobDetail) {
   return `<div class="doc"><button class="btn quiet back" data-back="1">← ${VIEWS[ui.view].label}</button>
     <div class="eyebrow"><span>${esc(j.company)}</span>${others ? `<span>${others} other role${others > 1 ? "s" : ""} here${sent ? `, ${sent} applied` : ""}</span>` : ""}<a href="${esc(j.url)}" target="_blank" rel="noopener">Original ↗</a></div>
     <h2>${esc(j.title)}</h2>
-    <div class="facts">${["ok", "bad"].includes(cls) && j.status !== "failed" ? `<span class="pill ${cls}">${label}</span>` : ""}<span>${esc(j.location ?? "Location not listed")}</span>${j.opened_at && !j.submitted_at ? `<span>Opened ${when(new Date(j.opened_at).toISOString())}</span>` : ""}${j.submitted_at ? `<span>Applied ${when(j.submitted_at)}</span>` : ""}</div>
+    <div class="facts">${["ok", "bad"].includes(cls) && j.status !== "failed" ? `<span class="pill ${cls}">${label}</span>` : ""}${practicePill(j)}<span>${esc(j.location ?? "Location not listed")}</span>${j.opened_at && !j.submitted_at ? `<span>Opened ${when(new Date(j.opened_at).toISOString())}</span>` : ""}${j.submitted_at ? `<span>Applied ${when(j.submitted_at)}</span>` : ""}</div>
     <div class="tabs" role="tablist">${TAB_KEYS.map(k => `<button class="tab ${k === ui.tab ? "on" : ""}" data-tab="${k}" role="tab" aria-selected="${String(k === ui.tab)}">${TABS[k]}</button>`).join("")}</div>
     ${BODY[ui.tab](j)}</div>`;
 }

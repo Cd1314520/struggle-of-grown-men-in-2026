@@ -1,3 +1,6 @@
+// Which jobs are for practice. Pure, with no imports: the web UI bundles this file to show the same
+// verdict (ui/views/practice.ts), so it must stay free of server code.
+
 // A posted ceiling at or under this is a reason to decline on its own.
 export const LOW_PAY_MAX_USD = 80_000;
 // Mandatory attendance somewhere else is a reason to decline too, but it does not make a well-paid
