@@ -12,7 +12,7 @@ You do not score this job. Answer each statement below about the posting with `y
 In addition, extract practice evaluation evidence from the posting:
 - `annualBaseMaxUsd`: The posted annual base salary ceiling in USD as a number (e.g. `75000`), or `null`.
   - A single fixed annual salary counts as the ceiling (e.g. "$75,000/year" -> `75000`).
-  - For salary ranges, extract the highest applicable base salary ceiling even when it exceeds $80,000 (e.g. "$65,000 - $78,000" -> `78000`; "$75,000 - $85,000" -> `85000`). The orchestrator, not you, compares that number with the practice cutoff.
+  - For salary ranges, extract the highest applicable base salary ceiling even when it exceeds any cutoff (e.g. "$65,000 - $78,000" -> `78000`; "$75,000 - $85,000" -> `85000`). The orchestrator, not you, compares that number with the practice cutoffs.
   - Must be `null` if: only a starting-at or minimum salary is stated without an explicit ceiling; salary is unknown or not posted; currency is non-USD; or hourly/daily/contract rate without an explicit annual ceiling stated in the posting.
   - Base salary only: do not guess or include bonus, equity, or total compensation.
 - `salaryEvidence`: Exact quote from the posting showing the salary statement, or empty string `""` if no salary is posted.
@@ -21,6 +21,11 @@ In addition, extract practice evaluation evidence from the posting:
   - `"no"`: The position is remote, allows remote work, or is located within the Houston/Austin area.
   - `"unclear"`: The posting does not clearly specify remote eligibility or office location requirements.
 - `locationEvidence`: Exact quote from the posting regarding work location and onsite/remote requirements (must not be empty if mandatoryNonlocalOnsite is "yes").
+- `highEndTech`: `"yes"` or `"no"`. Judge the company and the work, not the pay. It decides the job when no salary ceiling is posted, so always answer it.
+  - `"yes"`: a technology or tech-adjacent company (software, AI, cloud, developer tools, fintech, autonomy, robotics, aerospace or defense tech and the like) **and** work that is hard engineering: distributed systems, high scale or low latency, infrastructure and platforms, ML systems or research, or products whose core is the software. These are roles the candidate wants to keep for later.
+  - `"no"`: everything else. Internal business applications, corporate IT, integrations, reporting, QA, support or consulting delivery; or an employer whose business is not technology (insurance, banking operations, healthcare providers, government, education, manufacturing, retail), even when the role is a real engineering job.
+  - A famous or well-funded tech employer with ordinary-sounding duties is still `"yes"`. An ordinary employer using fashionable words (AI, cloud, scale) for routine work is still `"no"`.
+- `highEndTechEvidence`: one sentence naming what about the company and the work decides it. Never empty.
 
 Call `submit_checklist` with an answer for every checklist id and the `practice` evidence object. The orchestrator computes the score from fixed weights and replies either CONTINUE or STOP. On STOP you are finished: do not tailor anything.
 

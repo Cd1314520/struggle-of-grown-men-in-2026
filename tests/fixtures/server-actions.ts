@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 
 const scenario = process.argv[2];
 const { config } = await import("../../src/config");
-const { db, getJob, updateJob } = await import("../../src/db");
+const { db, getJob, statusHistory, updateJob } = await import("../../src/db");
 const { createHandler } = await import("../../src/server");
-const { Scheduler } = await import("../../src/scheduler");
+const { Scheduler, reviewStandingApprovals } = await import("../../src/scheduler");
 
 const scheduler = new Scheduler({
   runWorker: () => {
@@ -121,6 +121,66 @@ if (scenario === "action-guards") {
   await allowed({ origin: "http://localhost:9999", "sec-fetch-site": "same-origin" }, "http://localhost:9999");
   await allowed({});
   assert.equal((await handle(new Request(`${BASE}/api/state`))).status, 200);
+} else if (scenario === "standing-approvals") {
+  config.phase = "practice";
+  const away = {
+    version: 1,
+    annualBaseMaxUsd: null as number | null,
+    salaryEvidence: "",
+    mandatoryNonlocalOnsite: "yes",
+    locationEvidence: "Onsite in Denver",
+  };
+  const approved = (assessment: object | null, extra: { approved_by?: string; resume_sha?: string } = {}) => {
+    const id = job("approved", extra.resume_sha ? { resume_sha: extra.resume_sha } : {});
+    db.query("UPDATE jobs SET approved_by = ?, practice_assessment = ? WHERE id = ?").run(
+      extra.approved_by ?? "auto",
+      assessment ? JSON.stringify(assessment) : null,
+      id,
+    );
+    return id;
+  };
+  const wellPaid = approved({ ...away, annualBaseMaxUsd: 197000, salaryEvidence: "$153k - $197k" });
+  const modest = approved({ ...away, annualBaseMaxUsd: 95000, salaryEvidence: "$95k" });
+  const lowPay = approved({ ...away, annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" });
+  const unposted = approved(away);
+  const ordinary = approved({ ...away, version: 2, highEndTech: "no", highEndTechEvidence: "Insurer, internal tools" });
+  const frontier = approved({ ...away, version: 2, highEndTech: "yes", highEndTechEvidence: "Autonomy company" });
+  const unreadable = approved(null);
+  const byHand = approved({ ...away, annualBaseMaxUsd: 197000, salaryEvidence: "$197k" }, { approved_by: "user" });
+  const started = approved({ ...away, annualBaseMaxUsd: 197000, salaryEvidence: "$197k" }, { resume_sha: SHA });
+
+  reviewStandingApprovals();
+
+  // Still qualifies, approved by hand, or already under way: untouched.
+  for (const id of [modest, lowPay, ordinary, byHand, started]) assert.equal(statusOf(id), "approved", `job ${id}`);
+  // No longer a practice job: held for the user, with the reason, and no longer approved.
+  assert.equal(statusOf(wellPaid), "held");
+  assert.equal(
+    getJob(wellPaid)?.note,
+    "needs your review: auto-approved, but not a practice job: posted base ceiling $197,000 is above the $100,000 practice limit",
+  );
+  assert.equal(getJob(wellPaid)?.approved_by, null);
+  assert.equal(statusOf(frontier), "held");
+  assert.match(getJob(frontier)?.note ?? "", /high-end tech work \(Autonomy company\)/);
+  assert.equal(statusOf(unreadable), "held");
+  // Only lacks the judgment the rules now ask for: back to prep to get it.
+  assert.equal(statusOf(unposted), "triaged");
+  assert.equal(getJob(unposted)?.approved_by, null);
+  assert.deepEqual(
+    statusHistory(unposted).map(c => [c.from_status, c.to_status]),
+    [["approved", "triaged"]],
+  );
+
+  // Running it again changes nothing.
+  reviewStandingApprovals();
+  assert.equal(statusHistory(wellPaid).length, 1);
+  assert.equal(statusOf(modest), "approved");
+
+  // Outside the practice phase the practice rules do not apply.
+  config.phase = "real";
+  const real = approved({ ...away, annualBaseMaxUsd: 197000, salaryEvidence: "$197k" });
+  reviewStandingApprovals();
+  assert.equal(statusOf(real), "approved");
 } else {
   throw new Error(`unknown scenario: ${String(scenario)}`);
 }

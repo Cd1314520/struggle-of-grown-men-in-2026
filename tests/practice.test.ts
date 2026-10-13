@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { assessPractice, parsePracticeAssessment, practiceReason } from "../src/practice";
+import { assessPractice, needsJudgment, parsePracticeAssessment, practiceReason, practiceRefusal } from "../src/practice";
 import { evaluate, type Verdict } from "../src/rubric";
 import { autoApproval, checkAutoApprovedPractice, confirmsSubmit, reconsiderAutoApproval } from "../src/auto";
 import { config } from "../src/config";
@@ -23,15 +23,47 @@ afterEach(restoreConfig);
 afterAll(restoreConfig);
 
 describe("practice assessment boundaries", () => {
+  const away = { annualBaseMaxUsd: null, salaryEvidence: "", mandatoryNonlocalOnsite: "yes", locationEvidence: "Onsite in Seattle five days a week" };
   const CASES: [string, unknown, boolean][] = [
     ["<= 80k inclusive qualifies", { annualBaseMaxUsd: 80000, salaryEvidence: "$80k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }, true],
     ["> 80k crossing does not qualify", { annualBaseMaxUsd: 80001, salaryEvidence: "$80,001", mandatoryNonlocalOnsite: "no", locationEvidence: "" }, false],
     ["unknown salary + local does not qualify", { annualBaseMaxUsd: null, salaryEvidence: "", mandatoryNonlocalOnsite: "no", locationEvidence: "" }, false],
+    // Attendance elsewhere only makes a practice job of one that is not worth keeping for later.
     [
-      "valid nonlocal onsite qualifies independently",
-      { annualBaseMaxUsd: null, salaryEvidence: "", mandatoryNonlocalOnsite: "yes", locationEvidence: "Seattle" },
+      "nonlocal onsite, pay not posted, ordinary work qualifies",
+      { ...away, highEndTech: "no", highEndTechEvidence: "Insurer's internal claims tooling" },
       true,
     ],
+    [
+      "nonlocal onsite, pay not posted, high-end tech does not",
+      { ...away, highEndTech: "yes", highEndTechEvidence: "Autonomy company, distributed simulation platform" },
+      false,
+    ],
+    ["nonlocal onsite, pay not posted, not judged does not", away, false],
+    ["nonlocal onsite at the $100k ceiling qualifies", { ...away, annualBaseMaxUsd: 100000, salaryEvidence: "$85,000 - $100,000" }, true],
+    ["nonlocal onsite just above the ceiling does not", { ...away, annualBaseMaxUsd: 100001, salaryEvidence: "up to $100,001" }, false],
+    [
+      "nonlocal onsite well above the ceiling does not, whatever the work",
+      { ...away, annualBaseMaxUsd: 197000, salaryEvidence: "$153k - $197k", highEndTech: "no", highEndTechEvidence: "said to be routine" },
+      false,
+    ],
+    [
+      "posted pay under the ceiling decides it even at a high-end tech company",
+      { ...away, annualBaseMaxUsd: 95000, salaryEvidence: "$95,000", highEndTech: "yes", highEndTechEvidence: "Robotics company" },
+      true,
+    ],
+    [
+      "between $80k and $100k without mandatory attendance does not",
+      { annualBaseMaxUsd: 90000, salaryEvidence: "$90k", mandatoryNonlocalOnsite: "no", locationEvidence: "" },
+      false,
+    ],
+    [
+      "<= 80k qualifies wherever the job is and whatever the work",
+      { ...away, annualBaseMaxUsd: 70000, salaryEvidence: "$70k", highEndTech: "yes", highEndTechEvidence: "Tech company" },
+      true,
+    ],
+    ["a judgment without its evidence fails closed", { ...away, highEndTech: "no", highEndTechEvidence: "  " }, false],
+    ["a judgment that is neither yes nor no fails closed", { ...away, highEndTech: "unclear", highEndTechEvidence: "hard to say" }, false],
     [
       "nonlocal unclear does not qualify",
       { annualBaseMaxUsd: null, salaryEvidence: "", mandatoryNonlocalOnsite: "unclear", locationEvidence: "Hybrid" },
@@ -75,8 +107,21 @@ describe("parsePracticeAssessment version gate", () => {
       false,
     ],
     [
-      "future version 2 fails closed",
-      JSON.stringify({ version: 2, annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }),
+      "valid version 2 parses",
+      JSON.stringify({
+        version: 2,
+        annualBaseMaxUsd: null,
+        salaryEvidence: "",
+        mandatoryNonlocalOnsite: "yes",
+        locationEvidence: "Onsite in Omaha",
+        highEndTech: "no",
+        highEndTechEvidence: "Insurer, internal reporting",
+      }),
+      true,
+    ],
+    [
+      "future version 3 fails closed",
+      JSON.stringify({ version: 3, annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }),
       false,
     ],
     ["malformed json fails closed", "{ bad json", false],
@@ -89,6 +134,49 @@ describe("parsePracticeAssessment version gate", () => {
       expect(Boolean(parsed)).toBe(valid);
     });
   }
+});
+
+describe("why a job is or is not one for practice", () => {
+  const stored = (fields: Record<string, unknown>) =>
+    parsePracticeAssessment(
+      JSON.stringify({
+        version: 1,
+        annualBaseMaxUsd: null,
+        salaryEvidence: "",
+        mandatoryNonlocalOnsite: "yes",
+        locationEvidence: "Onsite in Denver",
+        ...fields,
+      }),
+    );
+
+  it("says which limit a well-paid onsite job is over", () => {
+    const assessment = stored({ annualBaseMaxUsd: 197000, salaryEvidence: "$153k - $197k" });
+    expect(practiceReason(assessment)).toBeNull();
+    expect(practiceRefusal(assessment)).toBe("posted base ceiling $197,000 is above the $100,000 practice limit");
+  });
+
+  it("reads an assessment from before version 2 as not judged, and decides it by pay where pay is posted", () => {
+    expect(practiceRefusal(stored({}))).toBe("pay is not posted and the company and work have not been judged yet");
+    expect(needsJudgment(stored({}))).toBe(true);
+    expect(practiceReason(stored({ annualBaseMaxUsd: 90000, salaryEvidence: "$90k" }))).toBe(
+      "practice: mandatory nonlocal onsite/hybrid with posted base ceiling $90,000 <= $100,000",
+    );
+    expect(practiceReason(stored({ annualBaseMaxUsd: 65000, salaryEvidence: "$65k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }))).toBe(
+      "practice: posted base ceiling $65,000 <= $80,000",
+    );
+    // Only a missing judgment sends a job back for assessment; a posted ceiling settles it either way.
+    expect(needsJudgment(stored({ annualBaseMaxUsd: 197000, salaryEvidence: "$197k" }))).toBe(false);
+    expect(needsJudgment(stored({ mandatoryNonlocalOnsite: "no", locationEvidence: "" }))).toBe(false);
+    expect(needsJudgment(null)).toBe(false);
+  });
+
+  it("quotes the judgment when it is what keeps a job out", () => {
+    const assessment = stored({ version: 2, highEndTech: "yes", highEndTechEvidence: "Autonomy company; distributed simulation at scale" });
+    expect(practiceRefusal(assessment)).toBe("pay is not posted and this is high-end tech work (Autonomy company; distributed simulation at scale)");
+    expect(practiceReason(stored({ version: 2, highEndTech: "no", highEndTechEvidence: "Insurer, internal tools" }))).toBe(
+      "practice: mandatory nonlocal onsite/hybrid; pay not posted, and not high-end tech work",
+    );
+  });
 });
 
 function answersList(overrides: Record<string, "yes" | "no" | "unclear"> = {}) {
@@ -198,14 +286,30 @@ describe("autoApproval and submission safety", () => {
     // High salary facts -> denied
     const highSalaryVerdict: Verdict = {
       ...baseVerdict,
-      practice: { version: 1, annualBaseMaxUsd: 150000, salaryEvidence: "$150k", mandatoryNonlocalOnsite: "no", locationEvidence: "" },
+      practice: {
+        version: 2,
+        annualBaseMaxUsd: 150000,
+        salaryEvidence: "$150k",
+        mandatoryNonlocalOnsite: "no",
+        locationEvidence: "",
+        highEndTech: null,
+        highEndTechEvidence: "",
+      },
     };
     expect(autoApproval(highSalaryVerdict, { concerns: null, handPicked: false, approvedToday: 0 }).approve).toBe(false);
 
     // Valid practice facts -> approved
     const validVerdict: Verdict = {
       ...baseVerdict,
-      practice: { version: 1, annualBaseMaxUsd: 75000, salaryEvidence: "$75k", mandatoryNonlocalOnsite: "no", locationEvidence: "" },
+      practice: {
+        version: 2,
+        annualBaseMaxUsd: 75000,
+        salaryEvidence: "$75k",
+        mandatoryNonlocalOnsite: "no",
+        locationEvidence: "",
+        highEndTech: null,
+        highEndTechEvidence: "",
+      },
     };
     expect(autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 0 }).approve).toBe(true);
 
@@ -302,6 +406,41 @@ describe("autoApproval and submission safety", () => {
   });
 });
 
+describe("applications already under way when the rules asked for a judgment", () => {
+  const unjudged = JSON.stringify({
+    version: 1,
+    annualBaseMaxUsd: null,
+    salaryEvidence: "",
+    mandatoryNonlocalOnsite: "yes",
+    locationEvidence: "Onsite in Omaha",
+  });
+  const wellPaid = JSON.stringify({
+    version: 1,
+    annualBaseMaxUsd: 197000,
+    salaryEvidence: "$197k",
+    mandatoryNonlocalOnsite: "yes",
+    locationEvidence: "Onsite",
+  });
+  const sha = "a".repeat(64);
+
+  it("may carry on filling, but never submit without the user", () => {
+    config.phase = "practice";
+    config.confirmBeforeSubmit = false;
+    config.autoApply = { enabled: true, phases: ["practice"], submit: true };
+    expect(checkAutoApprovedPractice({ approved_by: "auto", practice_assessment: unjudged, resume_sha: sha }).ok).toBe(true);
+    expect(confirmsSubmit({ approved_by: "auto", practice_assessment: unjudged })).toBe(true);
+  });
+
+  it("are still stopped when not started, or when the posted pay settles it", () => {
+    config.phase = "practice";
+    expect(checkAutoApprovedPractice({ approved_by: "auto", practice_assessment: unjudged, resume_sha: null }).ok).toBe(false);
+    expect(checkAutoApprovedPractice({ approved_by: "auto", practice_assessment: unjudged }).ok).toBe(false);
+    const stopped = checkAutoApprovedPractice({ approved_by: "auto", practice_assessment: wellPaid, resume_sha: sha });
+    expect(stopped.ok).toBe(false);
+    expect(stopped.reason).toBe("auto-approved, but not a practice job: posted base ceiling $197,000 is above the $100,000 practice limit");
+  });
+});
+
 describe("autoApproval deferred 'daily_cap' contract", () => {
   it("returns deferred: 'daily_cap' ONLY when all other gates pass and daily quota denies", () => {
     config.phase = "practice";
@@ -313,7 +452,15 @@ describe("autoApproval deferred 'daily_cap' contract", () => {
       threshold: 60,
       reason: "passed",
       items: [],
-      practice: { version: 1, annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" },
+      practice: {
+        version: 2,
+        annualBaseMaxUsd: 70000,
+        salaryEvidence: "$70k",
+        mandatoryNonlocalOnsite: "no",
+        locationEvidence: "",
+        highEndTech: null,
+        highEndTechEvidence: "",
+      },
     };
 
     // Quota below limit -> approves without deferred
@@ -341,7 +488,15 @@ describe("autoApproval deferred 'daily_cap' contract", () => {
     // Prior gate failure: practice assessment lacks evidence does NOT get deferred
     const noPracticeVerdict: Verdict = {
       ...validVerdict,
-      practice: { version: 1, annualBaseMaxUsd: 120000, salaryEvidence: "$120k", mandatoryNonlocalOnsite: "no", locationEvidence: "" },
+      practice: {
+        version: 2,
+        annualBaseMaxUsd: 120000,
+        salaryEvidence: "$120k",
+        mandatoryNonlocalOnsite: "no",
+        locationEvidence: "",
+        highEndTech: null,
+        highEndTechEvidence: "",
+      },
     };
     const noPracticeRes = autoApproval(noPracticeVerdict, { concerns: null, handPicked: false, approvedToday: 5 });
     expect(noPracticeRes.approve).toBe(false);
@@ -657,8 +812,8 @@ describe("reconsiderAutoApproval pure helper", () => {
     const resHigh = reconsiderAutoApproval({ ...base, practice_assessment: JSON.stringify(highSalaryObj) }, { handPicked: false, approvedToday: 0 });
     expect(resHigh.approved).toBe(false);
 
-    // Version not 1 (e.g. version 2 or missing version)
-    const badVersion = { ...validPracticeObj, version: 2 };
+    // A version this code does not know
+    const badVersion = { ...validPracticeObj, version: 3 };
     const resVer = reconsiderAutoApproval({ ...base, practice_assessment: JSON.stringify(badVersion) }, { handPicked: false, approvedToday: 0 });
     expect(resVer.approved).toBe(false);
   });

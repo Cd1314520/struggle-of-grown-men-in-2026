@@ -18,7 +18,8 @@ import {
   updateJob,
   type Job,
 } from "./db";
-import { pumpDeferredApprovals } from "./deferred-approvals";
+import { checkAutoApprovedPractice } from "./auto";
+import { forgetDeferredApproval, pumpDeferredApprovals } from "./deferred-approvals";
 import { tickQuestionDigest } from "./digest";
 import { errorMessage } from "./errors";
 import { fill } from "./fill";
@@ -27,6 +28,7 @@ import { beginAttempt, dropManualLease, endVerification, isRecovering, isSubmitt
 import { countOne, due, usedToday } from "./limits";
 import { locateEmployerPostings, locatePerDay } from "./locate";
 import { runWorker, type RunWorker } from "./omp";
+import { needsJudgment, parsePracticeAssessment } from "./practice";
 import { prep } from "./prep";
 import { profileProblems } from "./profile";
 import {
@@ -72,6 +74,26 @@ function fillQueue(): FillCandidate[] {
     .map(job => ({ job, verify: isVerifying(job.id), recovering: isRecovering(job.id) }))
     .filter(c => c.job.status === "approved" || c.verify)
     .sort((a, b) => rank(b) - rank(a) || a.job.id - b.job.id);
+}
+
+// Auto-approvals waiting for a browser are held to the rules as they stand now, before one is spent
+// on them: the rules may have changed since prep approved the job. One whose stored assessment only
+// lacks a judgment the rules now ask for goes back to prep to get it; any other that no longer
+// qualifies is held for the user. Applications already started are left to the check at fill start.
+export function reviewStandingApprovals() {
+  for (const job of jobsByStatus("approved")) {
+    if (job.approved_by !== "auto" || job.resume_sha || job.fill_checkpoint) continue;
+    const guard = checkAutoApprovedPractice(job);
+    if (guard.ok) continue;
+    forgetDeferredApproval(job.id);
+    if (needsJudgment(parsePracticeAssessment(job.practice_assessment))) {
+      updateJob(job.id, { ...to.triaged("assessing again: the practice rules now ask whether unposted pay hides a job to keep"), approved_by: null });
+      logEvent("auto", "Auto-approval withdrawn for a fresh assessment under the current practice rules", job.id);
+    } else {
+      updateJob(job.id, { ...to.held(`needs your review: ${guard.reason ?? "no longer a practice job"}`), approved_by: null });
+      logEvent("auto", `Auto-approval withdrawn and job held: ${guard.reason ?? "no longer a practice job"}`, job.id);
+    }
+  }
 }
 
 // How long agents' step-by-step records are kept when config.yml does not say.
@@ -331,6 +353,7 @@ export class Scheduler {
     dedupeExisting();
     requeueInterruptedPrep();
     recoverInterruptedFills();
+    reviewStandingApprovals();
     const tick = () => {
       if (due("last.scan", config.schedule.scanMinutes) && !profileProblems(["targets.md"]).length)
         void this.scan({ discover: due("last.discover", config.schedule.discoverMinutes) });

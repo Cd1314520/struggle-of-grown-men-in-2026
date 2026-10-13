@@ -3,7 +3,7 @@
 // Anything the rules do not clear lands in To review exactly as before.
 import { config } from "./config";
 import type { Job } from "./db";
-import { parsePracticeAssessment, practiceReason } from "./practice";
+import { needsJudgment, parsePracticeAssessment, practiceReason, practiceRefusal } from "./practice";
 import { evaluate, type Verdict } from "./rubric";
 
 export const autoApply = () => ({ enabled: false, phases: ["practice"], minScore: 80, allowConcerns: false, perDay: 5, submit: false, ...config.autoApply });
@@ -25,9 +25,8 @@ export function autoApproval(verdict: Verdict, facts: { concerns: string | null;
   if (verdict.decision !== "apply") return review(verdict.reason);
 
   // In practice mode, independently require positive practice evidence
-  if (config.phase === "practice" && !practiceReason(verdict.practice)) {
-    return review("practice assessment lacks qualifying evidence (salary <= $80k or mandatory nonlocal)");
-  }
+  const refusal = config.phase === "practice" ? practiceRefusal(verdict.practice) : null;
+  if (refusal) return review(`not a practice job: ${refusal}`);
 
   if (verdict.score < rules.minScore) return review(`score ${verdict.score} is below the auto-apply bar of ${rules.minScore}`);
   const unclear = verdict.items.filter(i => i.phase === config.phase && i.required && i.answer === "unclear");
@@ -88,9 +87,8 @@ export function reconsiderAutoApproval(job: ReconsiderJob, facts: ReconsiderFact
   let practice = null;
   if (config.phase === "practice") {
     practice = parsePracticeAssessment(job.practice_assessment);
-    if (!practice || !practiceReason(practice)) {
-      return deny("practice assessment lacks qualifying evidence (salary <= $80k or mandatory nonlocal)");
-    }
+    const refusal = practiceRefusal(practice);
+    if (refusal) return deny(`not a practice job: ${refusal}`);
   }
 
   if (!job.checklist?.trim()) return deny("job checklist is missing");
@@ -176,17 +174,20 @@ export function confirmsSubmit(job: { approved_by: string | null; practice_asses
 }
 
 // Early gate before freeze/navigation: re-check auto-approved practice jobs at fill start.
-export function checkAutoApprovedPractice(job: { approved_by: string | null; practice_assessment?: string | null }): { ok: boolean; reason?: string } {
+export function checkAutoApprovedPractice(job: { approved_by: string | null; practice_assessment?: string | null; resume_sha?: string | null }): {
+  ok: boolean;
+  reason?: string;
+} {
   if (job.approved_by !== "auto" || config.phase !== "practice") {
     return { ok: true };
   }
   const assessment = parsePracticeAssessment(job.practice_assessment);
-  const reason = practiceReason(assessment);
-  if (!assessment || !reason) {
-    return {
-      ok: false,
-      reason: "auto-approved practice job has missing or non-qualifying practice assessment",
-    };
-  }
-  return { ok: true, reason };
+  const refusal = practiceRefusal(assessment);
+  if (!refusal) return { ok: true, reason: practiceReason(assessment) ?? "" };
+  // An application already under way cannot be assessed again: its resume is frozen. When all its
+  // assessment lacks is a judgment asked for since, it may carry on filling; confirmsSubmit still
+  // sees that it does not qualify and stops it for the user before anything is sent.
+  if (job.resume_sha && needsJudgment(assessment))
+    return { ok: true, reason: "started before the practice rules asked for a judgment; final submit needs your confirmation" };
+  return { ok: false, reason: `auto-approved, but not a practice job: ${refusal}` };
 }

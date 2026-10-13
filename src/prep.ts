@@ -68,8 +68,14 @@ export async function prep(job: Job, run: RunWorker) {
                   description: "Whether mandatory nonlocal onsite/hybrid with no remote/local alternative",
                 },
                 locationEvidence: S.str("Quote of location evidence from job description"),
+                highEndTech: {
+                  type: "string",
+                  enum: ["yes", "no"],
+                  description: "Whether this is high-end tech: hard distributed or high-scale engineering at a tech or tech-adjacent company",
+                },
+                highEndTechEvidence: S.str("One sentence naming what about the company and the work decides it"),
               },
-              required: ["annualBaseMaxUsd", "salaryEvidence", "mandatoryNonlocalOnsite", "locationEvidence"],
+              required: ["annualBaseMaxUsd", "salaryEvidence", "mandatoryNonlocalOnsite", "locationEvidence", "highEndTech", "highEndTechEvidence"],
               additionalProperties: false,
             },
           },
@@ -81,11 +87,14 @@ export async function prep(job: Job, run: RunWorker) {
             practice = args["practice"];
           if (config.phase === "practice") {
             if (!practice || typeof practice !== "object" || Array.isArray(practice)) {
-              return "ERROR: 'practice' evidence object is required in the practice phase with annualBaseMaxUsd, salaryEvidence, mandatoryNonlocalOnsite, and locationEvidence. Call submit_checklist again with practice evidence.";
+              return "ERROR: 'practice' evidence object is required in the practice phase with annualBaseMaxUsd, salaryEvidence, mandatoryNonlocalOnsite, locationEvidence, highEndTech, and highEndTechEvidence. Call submit_checklist again with practice evidence.";
             }
             const assessed = assessPractice(practice);
+            // Stored assessments may lack the judgment; a worker's must carry it.
+            if (assessed?.highEndTech === null)
+              return "ERROR: practice.highEndTech must be 'yes' or 'no', with one sentence in highEndTechEvidence saying what about the company and the work decides it. Call submit_checklist again.";
             if (!assessed) {
-              return "ERROR: malformed practice evidence. Ensure: annualBaseMaxUsd is a positive number or null; salaryEvidence is a non-empty quote when salary is given; mandatoryNonlocalOnsite is 'yes', 'no', or 'unclear'; and locationEvidence is a non-empty quote when mandatoryNonlocalOnsite is 'yes'. Do not include a version field. Call submit_checklist again.";
+              return "ERROR: malformed practice evidence. Ensure: annualBaseMaxUsd is a positive number or null; salaryEvidence is a non-empty quote when salary is given; mandatoryNonlocalOnsite is 'yes', 'no', or 'unclear'; locationEvidence is a non-empty quote when mandatoryNonlocalOnsite is 'yes'; highEndTech is 'yes' or 'no' with a non-empty highEndTechEvidence. Do not include a version field. Call submit_checklist again.";
             }
           }
           const result = evaluate(answers, practice);

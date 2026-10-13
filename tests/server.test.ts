@@ -27,6 +27,10 @@ async function runScenario(scenario: string, env: Record<string, string> = {}) {
   }
 }
 
+describe("auto-approvals waiting for a browser", () => {
+  it("are held to the practice rules as they stand at start", () => runScenario("standing-approvals"));
+});
+
 describe("job actions over HTTP", () => {
   it("refuses an action the job's status does not allow, and changes nothing", () => runScenario("action-guards"));
   it("refuses requests that come from another site or arrive under another host name", () => runScenario("other-sites"));

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
 import { config, PROFILE } from "./config";
-import { assessPractice, practiceReason, type PracticeAssessment } from "./practice";
+import { assessPractice, practiceVerdict, type PracticeAssessment } from "./practice";
 
 type Phase = "practice" | "real";
 export type Answer = "yes" | "no" | "unclear";
@@ -133,15 +133,15 @@ export function evaluate(raw: unknown, practiceEvidence?: unknown): Verdict | st
         practice,
         reason: `score ${current.score} below threshold ${current.threshold}`,
       };
-    const reason = practiceReason(practice);
-    if (!reason)
+    const { qualifies, reason } = practiceVerdict(practice);
+    if (!qualifies)
       return {
         decision: "hold",
         score: current.score,
         threshold: current.threshold,
         items,
         practice,
-        reason: "practice: no qualifying practice evidence (salary <= $80k or mandatory nonlocal)",
+        reason: `not a practice job: ${reason}`,
       };
     return {
       decision: "apply",
