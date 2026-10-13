@@ -23,5 +23,5 @@
     "allowUnreachableCode": false,
     "allowUnusedLabels": false
   },
-  "include": ["src", "scripts", "tests"]
+  "include": ["src", "scripts", "tests", ".claude/skills/**/*.ts"]
 }
