@@ -7,19 +7,32 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { MIGRATIONS, SCHEMA_VERSION, openDatabase, schemaVersion } from "../src/schema";
 
-export interface MigrationReport { path: string; from: number; to: number; pending: string[]; applied: boolean }
+export interface MigrationReport {
+  path: string;
+  from: number;
+  to: number;
+  pending: string[];
+  applied: boolean;
+}
 
 const describe = (from: number) => MIGRATIONS.filter(m => m.version > from).map(m => `${m.version} (${m.name})`);
 
 export function runMigrate(options: { dbPath: string; status?: boolean; silent?: boolean }): MigrationReport {
   const { dbPath } = options;
   if (!existsSync(dbPath)) throw new Error(`Database file not found: ${dbPath}`);
-  const say = (line: string) => { if (!options.silent) console.log(line); };
+  const say = (line: string) => {
+    if (!options.silent) console.log(line);
+  };
 
   const before = new Database(dbPath, { readonly: true });
   let from: number;
-  try { from = schemaVersion(before); } finally { before.close(); }
-  if (from > SCHEMA_VERSION) throw new Error(`${dbPath} is at schema version ${from}, but this code only knows up to version ${SCHEMA_VERSION}. Run the newer code.`);
+  try {
+    from = schemaVersion(before);
+  } finally {
+    before.close();
+  }
+  if (from > SCHEMA_VERSION)
+    throw new Error(`${dbPath} is at schema version ${from}, but this code only knows up to version ${SCHEMA_VERSION}. Run the newer code.`);
   const pending = describe(from);
 
   if (options.status || !pending.length) {
@@ -28,7 +41,11 @@ export function runMigrate(options: { dbPath: string; status?: boolean; silent?:
   }
   const db = openDatabase(dbPath, "migrate");
   let to: number;
-  try { to = schemaVersion(db); } finally { db.close(); }
+  try {
+    to = schemaVersion(db);
+  } finally {
+    db.close();
+  }
   say(`${dbPath}: upgraded schema version ${from} -> ${to}; applied: ${pending.join(", ")}`);
   return { path: dbPath, from, to, pending, applied: true };
 }

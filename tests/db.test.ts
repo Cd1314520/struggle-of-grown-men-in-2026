@@ -10,7 +10,7 @@ import { BEFORE_COMPANY_KEYS_SCHEMA, createLegacyDatabase } from "./fixtures/leg
 const prelude = `
 import assert from "node:assert/strict";
 import * as store from ${JSON.stringify(join(import.meta.dir, "../src/db.ts"))};
-import { SCHEMA_VERSION, schemaVersion } from ${JSON.stringify(join(import.meta.dir, "../src/schema.ts"))};
+import { MIGRATIONS, SCHEMA_VERSION, schemaVersion } from ${JSON.stringify(join(import.meta.dir, "../src/schema.ts"))};
 const { db } = store;
 const changes = [];
 store.onChange(change => changes.push(change));
@@ -26,7 +26,8 @@ function run(body: string, dir: string) {
   const child = Bun.spawnSync([process.execPath, "--eval", prelude + body + "\ndb.close();"], {
     cwd: join(import.meta.dir, ".."),
     env: { ...process.env, AUTO_APPLY_DATA: dir, AUTO_APPLY_PROFILE: join(dir, "profile") },
-    stdout: "pipe", stderr: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
   });
   return { code: child.exitCode, output: `${child.stdout.toString()}\n${child.stderr.toString()}` };
 }
@@ -38,7 +39,9 @@ function scenario(body: string, options: { before?: (dir: string) => void; resta
       const result = run(step, dir);
       if (result.code !== 0) throw new Error(`Database scenario failed (${result.code}):\n${result.output}`);
     }
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 describe("app database startup", () => {
@@ -51,18 +54,30 @@ describe("app database startup", () => {
     expect(resolve(db.filename)).toBe(resolve(DATA, "app.db"));
   });
 
-  it("creates a new database at the current schema version without logging anything", () => { scenario(`
+  it("creates a new database at the current schema version without logging anything", () => {
+    scenario(
+      `
     assert.equal(schemaVersion(db), SCHEMA_VERSION);
     assert.equal(db.query("PRAGMA journal_mode").get().journal_mode, "wal");
     assert.deepEqual(store.recentEvents(), []);
-  `, { restart: `
+  `,
+      {
+        restart: `
     assert.equal(schemaVersion(db), SCHEMA_VERSION);
     assert.deepEqual(store.recentEvents(), []);
-  ` }); });
+  `,
+      },
+    );
+  });
 
-  it("upgrades an existing database in place, records it once, and keeps its rows", () => { scenario(`
+  it("upgrades an existing database in place, records it once, and keeps its rows", () => {
+    scenario(
+      `
     assert.equal(schemaVersion(db), SCHEMA_VERSION);
-    assert.deepEqual(store.recentEvents().map(e => [e.kind, e.message, e.job_id]), [["system", "Database schema upgraded to version 1 (baseline)", null]]);
+    // One event for each migration the old database needed, newest first.
+    assert.deepEqual(store.recentEvents().map(e => [e.kind, e.message, e.job_id]),
+      MIGRATIONS.map(m => ["system", "Database schema upgraded to version " + m.version + " (" + m.name + ")", null]).reverse());
+    assert.equal(store.recentEvents().at(-1).message, "Database schema upgraded to version 1 (baseline)");
     const kept = store.getJob(4);
     assert.equal(kept.title, "Engineer");
     assert.equal(kept.status, "submitted");
@@ -73,19 +88,24 @@ describe("app database startup", () => {
     // Columns the old database lacked are usable straight away.
     store.updateJob(4, { company_key: "acme", fill_checkpoint: "{}", practice_assessment: "{}" });
     assert.deepEqual(ids(store.jobsWithCheckpoint()), [4]);
-  `, {
-    before: dir => {
-      const legacy = createLegacyDatabase(join(dir, "app.db"), BEFORE_COMPANY_KEYS_SCHEMA);
-      legacy.run("INSERT INTO jobs (id, url, source, company, title, status, dedupe_key) VALUES (4, 'https://ats.example/jobs/4', 'lever', 'Acme', 'Engineer', 'submitted', 'acme|engineer')");
-      legacy.run("INSERT INTO kv (key, value) VALUES ('last.scan', 'then')");
-      legacy.close();
-    },
-    restart: `
+  `,
+      {
+        before: dir => {
+          const legacy = createLegacyDatabase(join(dir, "app.db"), BEFORE_COMPANY_KEYS_SCHEMA);
+          legacy.run(
+            "INSERT INTO jobs (id, url, source, company, title, status, dedupe_key) VALUES (4, 'https://ats.example/jobs/4', 'lever', 'Acme', 'Engineer', 'submitted', 'acme|engineer')",
+          );
+          legacy.run("INSERT INTO kv (key, value) VALUES ('last.scan', 'then')");
+          legacy.close();
+        },
+        restart: `
     assert.equal(schemaVersion(db), SCHEMA_VERSION);
-    assert.equal(store.recentEvents().filter(e => e.message.startsWith("Database schema upgraded")).length, 1);
+    assert.equal(store.recentEvents().filter(e => e.message.startsWith("Database schema upgraded")).length, MIGRATIONS.length);
     assert.equal(store.getJob(4).company_key, "acme");
   `,
-  }); });
+      },
+    );
+  });
 
   it("refuses to start on a database newer than the code and leaves it untouched", () => {
     const dir = mkdtempSync(join(tmpdir(), "auto-apply-db-"));
@@ -105,13 +125,18 @@ describe("app database startup", () => {
         expect(schemaVersion(after)).toBe(SCHEMA_VERSION + 1);
         expect(after.query("SELECT key, value FROM kv").all()).toEqual([{ key: "k", value: "v" }]);
         expect(after.query<{ n: number }, []>("SELECT count(*) AS n FROM events").get()?.n).toBe(0);
-      } finally { after.close(); }
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+      } finally {
+        after.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
 describe("job queries", () => {
-  it("selects jobs by status set, checkpoint and outcome", () => { scenario(`
+  it("selects jobs by status set, checkpoint and outcome", () => {
+    scenario(`
     job(1, { status: "approved" }); job(2, { status: "filling", fill_checkpoint: "{}" }); job(3, { status: "skipped" });
     job(4, { status: "approved", fill_checkpoint: "{}" }); job(5, { status: "needs_manual" });
     job(6, { status: "submitted", submitted_at: "2026-10-02T00:00:00Z" }); job(7, { status: "interview", submitted_at: "2026-10-03T00:00:00Z" });
@@ -130,9 +155,11 @@ describe("job queries", () => {
     assert.deepEqual(ids(store.jobsWithCheckpoint()).sort(), [2, 4]);
     assert.deepEqual(ids(store.applicationsAwaitingOutcome()), [7, 6, 8]);
     assert.deepEqual(ids(store.applicationsAwaitingOutcome(2)), [7, 6]);
-  `); });
+  `);
+  });
 
-  it("lists the board, counts and siblings the UI shows", () => { scenario(`
+  it("lists the board, counts and siblings the UI shows", () => {
+    scenario(`
     job(1, { status: "found", company_key: "acme" }); job(2, { status: "skipped", company_key: "acme" });
     job(3, { status: "triaged", company_key: "acme", description: "long text", updated_at: "2026-10-01 00:00:00" });
     job(4, { status: "approved", company_key: "acme", updated_at: "2026-10-03 00:00:00" });
@@ -150,9 +177,11 @@ describe("job queries", () => {
     // A job without a company key has no siblings, not every other keyless job.
     job(7, { status: "approved", company_key: null });
     assert.deepEqual(store.siblingJobs(store.getJob(6)), []);
-  `); });
+  `);
+  });
 
-  it("reads events newest first, with and without worker chatter", () => { scenario(`
+  it("reads events newest first, with and without worker chatter", () => {
+    scenario(`
     job(1);
     store.logEvent("user", "approve", 1);
     store.logEvent("step", "clicked next", 1, "fill");
@@ -174,9 +203,11 @@ describe("job queries", () => {
     assert.deepEqual(store.jobEvents(1, 1).map(e => e.kind), ["gate"]);
     assert.deepEqual(store.jobEvents(99), []);
     assert.deepEqual(changes, [{ type: "event", jobId: 1 }, { type: "event", jobId: 1 }, { type: "event" }, { type: "event", jobId: 1 }, { type: "event", jobId: 2 }]);
-  `); });
+  `);
+  });
 
-  it("stores, replaces, lists and deletes kv entries", () => { scenario(`
+  it("stores, replaces, lists and deletes kv entries", () => {
+    scenario(`
     assert.equal(store.kvGet("a.1"), null);
     store.kvSet("a.1", "one"); store.kvSet("a.2", "two"); store.kvSet("ab", "other"); store.kvSet("a.1", "uno");
     assert.equal(store.kvGet("a.1"), "uno");
@@ -186,11 +217,13 @@ describe("job queries", () => {
     store.kvDelete("a.1");
     assert.equal(store.kvGet("a.1"), null);
     assert.deepEqual(store.kvEntries("a."), [{ key: "a.2", value: "two" }]);
-  `); });
+  `);
+  });
 });
 
 describe("job writes", () => {
-  it("writeJob stamps updated_at and stays silent; updateJob also notifies", () => { scenario(`
+  it("writeJob stamps updated_at and stays silent; updateJob also notifies", () => {
+    scenario(`
     job(1, { updated_at: "2020-01-01 00:00:00", note: "old", pending: "{}" });
 
     store.writeJob(1, { status: "approved", note: null, pending: undefined, score: 70 });
@@ -210,9 +243,11 @@ describe("job writes", () => {
     assert.equal(store.getJob(1).status, "filling");
     assert.notEqual(store.getJob(1).updated_at, "2020-01-01 00:00:00");
     assert.deepEqual(changes, [{ type: "job", jobId: 1 }]);
-  `); });
+  `);
+  });
 
-  it("only ever writes known columns", () => { scenario(`
+  it("only ever writes known columns", () => {
+    scenario(`
     job(1, { note: "kept" }); job(2, { note: "kept" });
     for (const fields of [{ id: 5 }, { updated_at: "x" }, { nope: 1 }, { "note = 'pwned' --": "x" }, { status: "approved", "note = 'pwned' WHERE 1 = 1 --": "x" }, { toString: "x" }]) {
       assert.throws(() => store.writeJob(1, fields), /Not a writable jobs column/);
@@ -226,17 +261,11 @@ describe("job writes", () => {
     for (const column of columns) store.writeJob(2, { [column]: column === "score" ? 1 : column === "status" ? "held" : column + "-value" });
     const written = store.getJob(2);
     for (const column of columns) assert.equal(written[column], column === "score" ? 1 : column === "status" ? "held" : column + "-value", column);
-  `); });
+  `);
+  });
 
-  it("sqlNow matches what SQLite's datetime('now') writes", () => { scenario(`
-    const before = db.query("SELECT datetime('now') AS at").get().at;
-    const ours = store.sqlNow();
-    const after = db.query("SELECT datetime('now', '+1 second') AS at").get().at;
-    assert.match(ours, /^\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d$/);
-    assert(before <= ours && ours <= after, [before, ours, after].join(" | "));
-  `); });
-
-  it("requeues interrupted prep and releases held jobs in bulk", () => { scenario(`
+  it("requeues interrupted prep and releases held jobs in bulk", () => {
+    scenario(`
     job(1, { status: "prepping", updated_at: "2020-01-01 00:00:00" }); job(2, { status: "prepping" }); job(3, { status: "triaged" });
     job(4, { status: "held", note: "set aside", updated_at: "2020-01-01 00:00:00" }); job(5, { status: "held" }); job(6, { status: "skipped", note: "no" });
 
@@ -252,11 +281,95 @@ describe("job writes", () => {
     assert.notEqual(store.getJob(4).updated_at, "2020-01-01 00:00:00");
     assert.deepEqual([store.getJob(6).status, store.getJob(6).note], ["skipped", "no"]);
     assert.deepEqual(changes, []);
-  `); });
+  `);
+  });
+});
+
+describe("event retention", () => {
+  it("removes only old step-by-step records", () => {
+    scenario(`
+    const add = (kind, age) => db.query("INSERT INTO events (job_id, worker, kind, message, at) VALUES (1, 'fill', ?, ?, datetime('now', ?))").run(kind, kind + " " + age, age);
+    for (const kind of ["step", "tool", "agent", "gate", "auto", "user", "error", "mail", "system"]) { add(kind, "-40 days"); add(kind, "-2 days"); }
+
+    assert.equal(store.pruneChatter(0), 0, "0 keeps everything");
+    assert.equal(store.pruneChatter(-5), 0);
+    assert.equal(store.pruneChatter(NaN), 0);
+    assert.equal(db.query("SELECT count(*) AS n FROM events").get().n, 18);
+
+    assert.equal(store.pruneChatter(30), 3);
+    assert.deepEqual(db.query("SELECT message FROM events WHERE at < datetime('now', '-30 days') ORDER BY message").all().map(r => r.message),
+      ["auto -40 days", "error -40 days", "gate -40 days", "mail -40 days", "system -40 days", "user -40 days"]);
+    assert.equal(db.query("SELECT count(*) AS n FROM events WHERE at > datetime('now', '-30 days')").get().n, 9);
+    assert.equal(store.pruneChatter(30), 0);
+  `);
+  });
+});
+
+describe("status history", () => {
+  it("records every change of status with what was written alongside it, and nothing else", () => {
+    scenario(`
+    job(1, { note: "seen" }); job(2);
+    assert.deepEqual(store.statusHistory(1), [], "history starts with the first change");
+
+    store.updateJob(1, { status: "triaged", note: null });
+    store.updateJob(1, { status: "prepping" });                       // leaves the note alone
+    store.updateJob(1, { status: "awaiting_approval", note: "needs your review: score 55" });
+    store.updateJob(1, { score: 55, note: "edited" });                // not a status change
+    store.updateJob(1, { status: "awaiting_approval", note: "same status again" });
+    store.writeJob(1, { status: "approved", approved_by: "auto", note: null });
+    store.writeJob(1, { status: "filling", pending: null });
+    store.writeJob(1, { status: "submitted", note: "confirmation page seen", submitted_at: "2026-10-01T00:00:00.000Z" });
+
+    const history = store.statusHistory(1);
+    assert.deepEqual(history.map(({ at, ...change }) => change), [
+      { from_status: "found", to_status: "triaged", note: null, approved_by: null },
+      { from_status: "triaged", to_status: "prepping", note: null, approved_by: null },
+      { from_status: "prepping", to_status: "awaiting_approval", note: "needs your review: score 55", approved_by: null },
+      { from_status: "awaiting_approval", to_status: "approved", note: null, approved_by: "auto" },
+      { from_status: "approved", to_status: "filling", note: null, approved_by: null },
+      { from_status: "filling", to_status: "submitted", note: "confirmation page seen", approved_by: null },
+    ]);
+    for (const change of history) assert.match(change.at, /^\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d$/);
+    assert.deepEqual(store.statusHistory(2), []);
+  `);
+  });
+
+  it("sees moves made in bulk or straight in SQL, and rolls back with them", () => {
+    scenario(`
+    job(1, { status: "prepping" }); job(2, { status: "held", note: "set aside" }); job(3, { status: "found" });
+    store.requeueInterruptedPrep();
+    store.releaseHeldJobs();
+    db.run("UPDATE jobs SET status = 'skipped' WHERE id = 3");
+    assert.deepEqual(store.statusHistory(1).map(c => [c.from_status, c.to_status]), [["prepping", "triaged"]]);
+    assert.deepEqual(store.statusHistory(2).map(c => [c.from_status, c.to_status, c.note]), [["held", "found", null]]);
+    assert.deepEqual(store.statusHistory(3).map(c => [c.from_status, c.to_status]), [["found", "skipped"]]);
+
+    assert.throws(() => db.transaction(() => {
+      store.writeJob(3, { status: "triaged" });
+      throw new Error("undo");
+    })(), /undo/);
+    assert.equal(store.getJob(3).status, "skipped");
+    assert.equal(store.statusHistory(3).length, 1);
+  `);
+  });
+
+  it("goes with a job that is folded into its duplicate", () => {
+    scenario(`
+    const board = store.insertJob({ url: "https://www.linkedin.com/jobs/view/1", source: "linkedin", company: "Acme", title: "Data Engineer", location: null, description: null });
+    const own = store.insertJob({ url: "https://boards.greenhouse.io/acme/jobs/7", source: "greenhouse", company: "Acme", title: "Platform Analyst", location: null, description: null });
+    store.updateJob(board, { status: "locating" });
+    store.updateJob(own, { status: "triaged" });
+    assert.equal(store.relocateJob(store.getJob(board), "https://boards.greenhouse.io/acme/jobs/7", null), "merged");
+    assert.equal(store.getJob(board), null);
+    assert.equal(db.query("SELECT count(*) AS n FROM status_changes WHERE job_id = ?").get(board).n, 0);
+    assert.equal(store.statusHistory(own).length, 1);
+  `);
+  });
 });
 
 describe("postings, duplicates and sources", () => {
-  it("inserts a posting once and folds repeats and twins into it", () => { scenario(`
+  it("inserts a posting once and folds repeats and twins into it", () => {
+    scenario(`
     const posting = { url: "https://boards.example/acme/1?utm_source=x#apply", source: "greenhouse", company: "Acme, Inc.", title: "Senior Software Engineer", location: "Austin", description: null };
     const id = store.insertJob(posting);
     assert.equal(typeof id, "number");
@@ -284,26 +397,32 @@ describe("postings, duplicates and sources", () => {
     const junior = store.insertJob({ url: "https://boards.example/acme/3", source: "greenhouse", company: "Acme", title: "Junior Software Engineer", location: null, description: null }, "triaged");
     assert.equal(typeof junior, "number");
     assert.equal(store.getJob(junior).status, "triaged");
-  `); });
+  `);
+  });
 
-  it("moves a job first seen on an aggregator to the employer's own listing", () => { scenario(`
+  it("moves a job first seen on an aggregator to the employer's own listing", () => {
+    scenario(`
     const id = store.insertJob({ url: "https://www.linkedin.com/jobs/view/1", source: "linkedin", company: "Acme", title: "Data Engineer", location: "Houston", description: null });
     assert.equal(store.insertJob({ url: "https://boards.example/acme/de", source: "greenhouse", company: "Acme", title: "Data Engineer", location: "Houston", description: null }), null);
     const row = store.getJob(id);
     assert.deepEqual([row.url, row.source], ["https://boards.example/acme/de", "greenhouse"]);
     assert.deepEqual(store.jobSources(id), [{ url: "https://www.linkedin.com/jobs/view/1", source: "linkedin", location: "Houston" }]);
-  `); });
+  `);
+  });
 
-  it("relocates a job to an unknown employer posting", () => { scenario(`
+  it("relocates a job to an unknown employer posting", () => {
+    scenario(`
     job(1, { url: "https://www.linkedin.com/jobs/view/1", source: "linkedin", status: "locating", location: "Houston", note: "looking", description: "old" });
     assert.equal(store.relocateJob(store.getJob(1), "https://boards.example/acme/1?utm_source=li", ""), "moved");
     const row = store.getJob(1);
     assert.deepEqual([row.url, row.status, row.note, row.description], ["https://boards.example/acme/1", "triaged", null, "old"]);
     assert.deepEqual(store.jobSources(1), [{ url: "https://www.linkedin.com/jobs/view/1", source: "linkedin", location: "Houston" }]);
     assert.deepEqual(changes, [{ type: "job", jobId: 1 }]);
-  `); });
+  `);
+  });
 
-  it("merges a relocated job into the job that already has that posting", () => { scenario(`
+  it("merges a relocated job into the job that already has that posting", () => {
+    scenario(`
     job(1, { url: "https://boards.example/acme/1", source: "greenhouse", status: "triaged" });
     job(2, { url: "https://www.linkedin.com/jobs/view/2", source: "linkedin", status: "locating", location: "Houston" });
     db.query("INSERT INTO job_sources (job_id, url, source, location) VALUES (2, 'https://www.indeed.com/viewjob?jk=2', 'indeed', NULL)").run();
@@ -322,9 +441,11 @@ describe("postings, duplicates and sources", () => {
     assert.deepEqual(store.jobEvents(1).map(e => e.message), ["kept"]);
     assert.deepEqual(["feedback.2", "locate.tries.2", "auto.deferred.2", "feedback.1"].map(store.kvGet), [null, null, null, "keep"]);
     assert.deepEqual(changes, [{ type: "job", jobId: 1 }]);
-  `); });
+  `);
+  });
 
-  it("re-keys and folds duplicates saved under older rules, once per rules version", () => { scenario(`
+  it("re-keys and folds duplicates saved under older rules, once per rules version", () => {
+    scenario(`
     job(1, { company: "Acme, Inc.", title: "Software Engineer", status: "skipped" });
     job(2, { company: "Acme Inc", title: "Software Engineer (Remote)", status: "triaged", location: "Remote" });
     job(3, { company: "Acme", title: "Software Engineer", status: "submitted" });
@@ -363,7 +484,8 @@ describe("postings, duplicates and sources", () => {
     store.kvSet("dedupe.version", "1");
     store.dedupeExisting();
     assert.equal(store.getJob(3).company_key, "acme");
-  `); });
+  `);
+  });
 });
 
 describe("where SQL lives", () => {
@@ -371,7 +493,7 @@ describe("where SQL lives", () => {
   const files = [...new Bun.Glob("{src,scripts}/**/*.ts").scanSync(root)].sort();
   const read = (file: string) => Bun.file(join(root, file)).text();
   // The modules that own tables. Everything else calls their functions.
-  const owners = new Set(["src/db.ts", "src/schema.ts", "src/accounts.ts", "src/questions.ts", "src/digest.ts"]);
+  const owners = new Set(["src/db.ts", "src/schema.ts", "src/accounts.ts", "src/questions.ts", "src/fill-state.ts", "src/digest.ts"]);
   // Standalone tools that read a database by path rather than through the app's connection.
   const tools = new Set(["scripts/journal-stalls.ts", "scripts/journal-resumes.ts", "scripts/reassess-backlog.ts", "scripts/migrate.ts"]);
   it("keeps statements in the modules that own the tables", async () => {
@@ -405,15 +527,19 @@ describe("where SQL lives", () => {
     for (const file of files) for (const hole of holes(await read(file))) if (!allowed.has(`${file} ${hole}`)) spliced.push(`${file} ${hole}`);
     expect(spliced).toEqual([]);
     // The check sees the kind of statement it exists to stop, including one built in a variable.
-    expect(holes("const sql = `\n  SELECT id FROM jobs WHERE id IN (${ids.join(\",\")})`;\ndb.query(sql)")).toEqual(['${ids.join(",")}']);
-    expect(holes("db.query(`SELECT * FROM jobs ${stale ? \"\" : \"WHERE x\"}`)")).toHaveLength(1);
+    expect(holes('const sql = `\n  SELECT id FROM jobs WHERE id IN (${ids.join(",")})`;\ndb.query(sql)')).toEqual(['${ids.join(",")}']);
+    expect(holes('db.query(`SELECT * FROM jobs ${stale ? "" : "WHERE x"}`)')).toHaveLength(1);
     expect(holes("throw new Error(`Job ${id} does not exist`)")).toEqual([]);
   });
 
   it("refuses the live data directory from a test process that has not been pointed elsewhere", async () => {
     const { refuseLiveDataUnderTest } = await import("../src/db");
-    expect(() => { refuseLiveDataUnderTest({ NODE_ENV: "test" }); }).toThrow("Refusing to open the live database from a test run");
-    expect(() => { refuseLiveDataUnderTest({ NODE_ENV: "test", AUTO_APPLY_DATA: "" }); }).toThrow("Refusing to open the live database");
+    expect(() => {
+      refuseLiveDataUnderTest({ NODE_ENV: "test" });
+    }).toThrow("Refusing to open the live database from a test run");
+    expect(() => {
+      refuseLiveDataUnderTest({ NODE_ENV: "test", AUTO_APPLY_DATA: "" });
+    }).toThrow("Refusing to open the live database");
     refuseLiveDataUnderTest({ NODE_ENV: "test", AUTO_APPLY_DATA: "/tmp/somewhere" });
     refuseLiveDataUnderTest({ NODE_ENV: "production" });
     refuseLiveDataUnderTest({});

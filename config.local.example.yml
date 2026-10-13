@@ -1,0 +1,14 @@
+# Copy to config.local.yml. Whatever is set here is laid over config.yml, key by key; anything
+# config.yml knows may be set. The file is not tracked, so it is the place for what identifies
+# you or this machine.
+
+# Where you reach the app and the live browser view; the Gmail OAuth redirect is built from publicUrl.
+publicUrl: https://your-machine.your-tailnet.ts.net:8787
+vncUrl: https://your-machine.your-tailnet.ts.net:6080
+
+# The mailbox applications are sent from and confirmations arrive in.
+mailbox: you@example.com
+
+resume:
+  # The name every compiled resume is given, and so the name employers see on the upload.
+  pdfName: firstname_lastname_resume.pdf

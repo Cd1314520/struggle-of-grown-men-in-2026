@@ -1,0 +1,14 @@
+[Unit]
+Description=auto-apply job pipeline
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/auto-apply
+ExecStart=/usr/bin/bun src/server.ts
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+KillMode=process
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

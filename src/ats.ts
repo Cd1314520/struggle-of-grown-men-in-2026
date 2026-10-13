@@ -45,7 +45,11 @@ export function addCompany(c: Company): boolean {
 
 export const htmlToText = (html: string) =>
   html
-    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
     .replace(/<\/(p|div|li|h[1-6]|ul|ol)>|<br\s*\/?>/gi, "\n")
     .replace(/<li[^>]*>/gi, "- ")
     .replace(/<[^>]+>/g, "")
@@ -91,18 +95,87 @@ function workday(c: Company) {
 }
 
 // The fields read from each board's answer.
-interface GreenhouseBoard { jobs?: { absolute_url: string; title: string; location?: { name?: string } | null; content?: string; first_published?: string }[] }
-type LeverBoard = { hostedUrl: string; text: string; categories?: { location?: string }; descriptionPlain?: string; additionalPlain?: string; lists?: { text: string; content?: string }[]; createdAt?: number }[] | null;
-interface AshbyBoard { jobs?: { jobUrl: string; title: string; isListed?: boolean; location?: string | null; descriptionPlain?: string | null; descriptionHtml?: string; publishedAt?: string }[] }
-interface WorkableBoard { jobs?: { url?: string; application_url: string; title: string; city?: string; state?: string; country?: string; telecommuting?: boolean; description?: string; published_on?: string; created_at?: string }[] }
-interface RecruiteeBoard { offers?: { careers_url: string; title: string; status?: string; location?: string | null; city?: string; country?: string; remote?: boolean; description?: string; requirements?: string; published_at?: string }[] }
-interface SmartRecruitersPage { totalFound?: number; content?: { id: string; name: string; releasedDate?: string; location?: { city?: string; region?: string; country?: string; remote?: boolean } }[] }
-interface SmartRecruitersPosting { jobAd?: { sections?: Record<string, { title?: string; text?: string } | undefined> } }
-interface WorkdayPage { total?: number; jobPostings?: { externalPath?: string; title: string; locationsText?: string | null; postedOn?: string }[] }
-interface WorkdayPosting { jobPostingInfo?: { jobDescription?: string } }
-interface RemotiveFeed { jobs?: { url: string; title: string; company_name?: string | null; candidate_required_location?: string; description?: string; publication_date?: string }[] }
-interface JobicyFeed { jobs?: { url: string; jobTitle: string; companyName: string; jobGeo?: string; jobDescription?: string; pubDate?: string }[] }
-interface RemoteOkJob { url?: string; position?: string; company: string; location?: string; description?: string; date?: string }
+interface GreenhouseBoard {
+  jobs?: { absolute_url: string; title: string; location?: { name?: string } | null; content?: string; first_published?: string }[];
+}
+type LeverBoard =
+  | {
+      hostedUrl: string;
+      text: string;
+      categories?: { location?: string };
+      descriptionPlain?: string;
+      additionalPlain?: string;
+      lists?: { text: string; content?: string }[];
+      createdAt?: number;
+    }[]
+  | null;
+interface AshbyBoard {
+  jobs?: {
+    jobUrl: string;
+    title: string;
+    isListed?: boolean;
+    location?: string | null;
+    descriptionPlain?: string | null;
+    descriptionHtml?: string;
+    publishedAt?: string;
+  }[];
+}
+interface WorkableBoard {
+  jobs?: {
+    url?: string;
+    application_url: string;
+    title: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    telecommuting?: boolean;
+    description?: string;
+    published_on?: string;
+    created_at?: string;
+  }[];
+}
+interface RecruiteeBoard {
+  offers?: {
+    careers_url: string;
+    title: string;
+    status?: string;
+    location?: string | null;
+    city?: string;
+    country?: string;
+    remote?: boolean;
+    description?: string;
+    requirements?: string;
+    published_at?: string;
+  }[];
+}
+interface SmartRecruitersPage {
+  totalFound?: number;
+  content?: { id: string; name: string; releasedDate?: string; location?: { city?: string; region?: string; country?: string; remote?: boolean } }[];
+}
+interface SmartRecruitersPosting {
+  jobAd?: { sections?: Record<string, { title?: string; text?: string } | undefined> };
+}
+interface WorkdayPage {
+  total?: number;
+  jobPostings?: { externalPath?: string; title: string; locationsText?: string | null; postedOn?: string }[];
+}
+interface WorkdayPosting {
+  jobPostingInfo?: { jobDescription?: string };
+}
+interface RemotiveFeed {
+  jobs?: { url: string; title: string; company_name?: string | null; candidate_required_location?: string; description?: string; publication_date?: string }[];
+}
+interface JobicyFeed {
+  jobs?: { url: string; jobTitle: string; companyName: string; jobGeo?: string; jobDescription?: string; pubDate?: string }[];
+}
+interface RemoteOkJob {
+  url?: string;
+  position?: string;
+  company: string;
+  location?: string;
+  description?: string;
+  date?: string;
+}
 
 const fetchers: Record<Ats, (c: Company) => Promise<Posting[]>> = {
   async greenhouse(c) {
@@ -195,7 +268,16 @@ const fetchers: Record<Ats, (c: Company) => Promise<Posting[]>> = {
     for (let offset = 0; offset < WORKDAY_MAX; offset += 20) {
       const data = (await getJson(`${api}/jobs`, { appliedFacets: {}, limit: 20, offset, searchText: c.search ?? "" })) as WorkdayPage;
       for (const j of data.jobPostings ?? [])
-        if (j.externalPath) out.push({ url: page + j.externalPath, source: "workday", company: c.name, title: j.title, location: j.locationsText ?? null, description: null, posted: workdayPosted(j.postedOn) });
+        if (j.externalPath)
+          out.push({
+            url: page + j.externalPath,
+            source: "workday",
+            company: c.name,
+            title: j.title,
+            location: j.locationsText ?? null,
+            description: null,
+            posted: workdayPosted(j.postedOn),
+          });
       if (offset + 20 >= (data.total ?? 0) || !(data.jobPostings ?? []).length) break;
     }
     return out;
@@ -212,8 +294,13 @@ export async function fetchDescription(url: string): Promise<string | null> {
     }
     const sr = /^https:\/\/jobs\.smartrecruiters\.com\/([^/]+)\/(\d+)/.exec(url);
     if (sr) {
-      const sections = ((await getJson(`https://api.smartrecruiters.com/v1/companies/${sr[1]}/postings/${sr[2]}`)) as SmartRecruitersPosting).jobAd?.sections ?? {};
-      const text = ["jobDescription", "qualifications", "additionalInformation"].map(k => sections[k]).map(s => (s?.text ? `${s.title ?? ""}\n${htmlToText(s.text)}` : "")).filter(Boolean).join("\n\n");
+      const sections =
+        ((await getJson(`https://api.smartrecruiters.com/v1/companies/${sr[1]}/postings/${sr[2]}`)) as SmartRecruitersPosting).jobAd?.sections ?? {};
+      const text = ["jobDescription", "qualifications", "additionalInformation"]
+        .map(k => sections[k])
+        .map(s => (s?.text ? `${s.title ?? ""}\n${htmlToText(s.text)}` : ""))
+        .filter(Boolean)
+        .join("\n\n");
       return text || null;
     }
   } catch {
@@ -241,7 +328,15 @@ const feeds: Record<string, (f: Feed) => Promise<Posting[]>> = {
       for (const j of data.jobs ?? []) {
         const where = j.candidate_required_location ?? "";
         if (!where || US.test(where))
-          out.push({ url: j.url, source: "remotive", company: String(j.company_name).trim(), title: j.title, location: `Remote (${where || "anywhere"})`, description: htmlToText(j.description ?? "") || null, posted: posted(j.publication_date && !/[Z+]/.test(j.publication_date) ? j.publication_date + "Z" : j.publication_date) });
+          out.push({
+            url: j.url,
+            source: "remotive",
+            company: String(j.company_name).trim(),
+            title: j.title,
+            location: `Remote (${where || "anywhere"})`,
+            description: htmlToText(j.description ?? "") || null,
+            posted: posted(j.publication_date && !/[Z+]/.test(j.publication_date) ? j.publication_date + "Z" : j.publication_date),
+          });
       }
     }
     return out;
@@ -250,9 +345,19 @@ const feeds: Record<string, (f: Feed) => Promise<Posting[]>> = {
     const out: Posting[] = [];
     const geo = typeof f["geo"] === "string" || typeof f["geo"] === "number" ? String(f["geo"]) : "usa";
     for (const industry of list(f["industries"])) {
-      const data = (await getJson(`https://jobicy.com/api/v2/remote-jobs?count=${Number(f["count"] ?? 50)}&geo=${encodeURIComponent(geo)}&industry=${encodeURIComponent(industry)}`)) as JobicyFeed;
+      const data = (await getJson(
+        `https://jobicy.com/api/v2/remote-jobs?count=${Number(f["count"] ?? 50)}&geo=${encodeURIComponent(geo)}&industry=${encodeURIComponent(industry)}`,
+      )) as JobicyFeed;
       for (const j of data.jobs ?? [])
-        out.push({ url: j.url, source: "jobicy", company: j.companyName, title: j.jobTitle, location: `Remote (${(j.jobGeo ?? "").replace(/\s+/g, " ")})`, description: htmlToText(j.jobDescription ?? "") || null, posted: posted(j.pubDate) });
+        out.push({
+          url: j.url,
+          source: "jobicy",
+          company: j.companyName,
+          title: j.jobTitle,
+          location: `Remote (${(j.jobGeo ?? "").replace(/\s+/g, " ")})`,
+          description: htmlToText(j.jobDescription ?? "") || null,
+          posted: posted(j.pubDate),
+        });
     }
     return out;
   },
@@ -263,7 +368,15 @@ const feeds: Record<string, (f: Feed) => Promise<Posting[]>> = {
       for (const j of (Array.isArray(data) ? data : []) as RemoteOkJob[]) {
         const where = j.location ?? "";
         if (j.position && j.url && (!where || US.test(where)))
-          out.push({ url: j.url, source: "remoteok", company: j.company, title: j.position, location: `Remote (${where || "anywhere"})`, description: htmlToText(j.description ?? "") || null, posted: posted(j.date) });
+          out.push({
+            url: j.url,
+            source: "remoteok",
+            company: j.company,
+            title: j.position,
+            location: `Remote (${where || "anywhere"})`,
+            description: htmlToText(j.description ?? "") || null,
+            posted: posted(j.date),
+          });
       }
     }
     return out;
@@ -275,7 +388,8 @@ export const feedNames = () => {
   return Object.keys(all).filter(n => n in feeds && Number(all[n]?.minutes) > 0);
 };
 export const fetchFeed = (name: string) => {
-  const read = feeds[name], feed = config.feeds?.[name];
+  const read = feeds[name],
+    feed = config.feeds?.[name];
   if (!read || !feed) throw new Error(`feed "${name}" is not configured`);
   return read(feed);
 };

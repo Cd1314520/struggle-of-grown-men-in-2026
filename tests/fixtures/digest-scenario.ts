@@ -23,7 +23,17 @@ kvSet("gmail.refresh", "TEST-REFRESH-NOT-A-CREDENTIAL");
 kvSet("gmail.access", JSON.stringify({ token: tokenA, exp: Date.parse("2100-01-01T00:00:00Z") }));
 kvSet("gmail.address", mailbox);
 
-interface SentMessage { id: string; owner: string; messageId: string; deliveryReference: string | null; from: string; to: string; text: string; internalDate: string; labels: string[] }
+interface SentMessage {
+  id: string;
+  owner: string;
+  messageId: string;
+  deliveryReference: string | null;
+  from: string;
+  to: string;
+  text: string;
+  internalDate: string;
+  labels: string[];
+}
 const sent: SentMessage[] = [];
 const attempts: string[] = [];
 let authenticatedMailbox = mailbox;
@@ -37,8 +47,12 @@ let profilePause: { reached: () => void; release: Promise<void> } | null = null;
 function pauseNextProfile() {
   let reached!: () => void;
   let release!: () => void;
-  const waiting = new Promise<void>(resolve => { reached = resolve; });
-  const released = new Promise<void>(resolve => { release = resolve; });
+  const waiting = new Promise<void>(resolve => {
+    reached = resolve;
+  });
+  const released = new Promise<void>(resolve => {
+    release = resolve;
+  });
   profilePause = { reached, release: released };
   return { waiting, release };
 }
@@ -49,85 +63,118 @@ function must<T>(value: T | null | undefined, what: string): T {
   return value;
 }
 
-globalThis.fetch = Object.assign(async (input: string | URL | Request, init?: RequestInit) => {
-  const url = new URL(input instanceof Request ? input.url : String(input));
-  assert.equal(url.origin, "https://gmail.googleapis.com");
-  const path = url.pathname.replace("/gmail/v1/users/me", "");
-  const authorization = new Headers(init?.headers).get("authorization");
-  assert.ok(authorization === `Bearer ${tokenA}` || authorization === `Bearer ${tokenB}`);
-  const requestMailbox = authorization === `Bearer ${tokenB}` ? otherMailbox : authenticatedMailbox;
-  if (path === "/profile") {
-    const pause = profilePause;
-    profilePause = null;
-    if (pause) {
-      pause.reached();
-      await pause.release;
+globalThis.fetch = Object.assign(
+  async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    assert.equal(url.origin, "https://gmail.googleapis.com");
+    const path = url.pathname.replace("/gmail/v1/users/me", "");
+    const authorization = new Headers(init?.headers).get("authorization");
+    assert.ok(authorization === `Bearer ${tokenA}` || authorization === `Bearer ${tokenB}`);
+    const requestMailbox = authorization === `Bearer ${tokenB}` ? otherMailbox : authenticatedMailbox;
+    if (path === "/profile") {
+      const pause = profilePause;
+      profilePause = null;
+      if (pause) {
+        pause.reached();
+        await pause.release;
+      }
+      return Response.json({ emailAddress: requestMailbox });
     }
-    return Response.json({ emailAddress: requestMailbox });
-  }
-  if (path === "/messages/send") {
-    const body = init?.body;
-    assert.ok(typeof body === "string");
-    const raw = Buffer.from((JSON.parse(body) as { raw: string }).raw, "base64url").toString("utf8");
-    const split = raw.indexOf("\r\n\r\n");
-    const headers = Object.fromEntries(raw.slice(0, split).split("\r\n").map(line => {
-      const colon = line.indexOf(":");
-      return [line.slice(0, colon).toLowerCase(), line.slice(colon + 1).trim()];
-    }));
-    const text = Buffer.from(raw.slice(split + 4).replace(/\s/g, ""), "base64").toString("utf8");
-    attempts.push(must(headers["message-id"], "Message-ID header"));
-    assert.equal(headers["from"], mailbox);
-    assert.equal(headers["to"], mailbox);
-    if (outcome === "reject") return Response.json({ error: { message: "Denied" } }, { status: 403 });
-    const message: SentMessage = {
-      id: `gmail-${sent.length + 1}`, owner: requestMailbox,
-      // Provider replaces the RFC identity but preserves our custom header and body.
-      messageId: `<CANEwGNQfixture${sent.length + 1}=accepted@mail.gmail.com>`,
-      deliveryReference: headers["x-auto-apply-delivery-id"] ?? null, from: headers["from"], to: headers["to"],
-      text, internalDate: String(now.getTime()), labels: ["SENT", "INBOX", "UNREAD"],
-    };
-    sent.push(message);
-    if (process.argv[2] === "restart-before") {
-      writeFileSync(sentFile, JSON.stringify(message));
-      // Simulate process death after Gmail acceptance, before any result or ledger update.
-      process.exit(0);
+    if (path === "/messages/send") {
+      const body = init?.body;
+      assert.ok(typeof body === "string");
+      const raw = Buffer.from((JSON.parse(body) as { raw: string }).raw, "base64url").toString("utf8");
+      const split = raw.indexOf("\r\n\r\n");
+      const headers = Object.fromEntries(
+        raw
+          .slice(0, split)
+          .split("\r\n")
+          .map(line => {
+            const colon = line.indexOf(":");
+            return [line.slice(0, colon).toLowerCase(), line.slice(colon + 1).trim()];
+          }),
+      );
+      const text = Buffer.from(raw.slice(split + 4).replace(/\s/g, ""), "base64").toString("utf8");
+      attempts.push(must(headers["message-id"], "Message-ID header"));
+      assert.equal(headers["from"], mailbox);
+      assert.equal(headers["to"], mailbox);
+      if (outcome === "reject") return Response.json({ error: { message: "Denied" } }, { status: 403 });
+      const message: SentMessage = {
+        id: `gmail-${sent.length + 1}`,
+        owner: requestMailbox,
+        // Provider replaces the RFC identity but preserves our custom header and body.
+        messageId: `<CANEwGNQfixture${sent.length + 1}=accepted@mail.gmail.com>`,
+        deliveryReference: headers["x-auto-apply-delivery-id"] ?? null,
+        from: headers["from"],
+        to: headers["to"],
+        text,
+        internalDate: String(now.getTime()),
+        labels: ["SENT", "INBOX", "UNREAD"],
+      };
+      sent.push(message);
+      if (process.argv[2] === "restart-before") {
+        writeFileSync(sentFile, JSON.stringify(message));
+        // Simulate process death after Gmail acceptance, before any result or ledger update.
+        process.exit(0);
+      }
+      if (outcome === "ambiguous") throw new TypeError("Connection closed after acceptance");
+      if (outcome === "server_error") return Response.json({ error: { message: "Unavailable" } }, { status: 503 });
+      return Response.json({ id: message.id });
     }
-    if (outcome === "ambiguous") throw new TypeError("Connection closed after acceptance");
-    if (outcome === "server_error") return Response.json({ error: { message: "Unavailable" } }, { status: 503 });
-    return Response.json({ id: message.id });
-  }
-  if (path === "/messages") {
-    const query = url.searchParams.get("q") ?? "";
-    const match = /^in:sent "([^"]+)"$/.exec(query);
-    assert.ok(match, "Reconciliation must search the quoted body reference, never RFC Message-ID");
-    const reference = must(match[1], "delivery reference");
-    return Response.json({ messages: visible ? sent.filter(message => message.owner === requestMailbox && message.text.includes(reference)).map(message => ({ id: message.id })) : [] });
-  }
-  if (path.startsWith("/messages/")) {
-    const message = sent.find(item => item.owner === requestMailbox && item.id === decodeURIComponent(path.slice("/messages/".length)));
-    assert.ok(message);
-    return Response.json({
-      id: message.id, labelIds: message.labels, internalDate: message.internalDate,
-      payload: { headers: [
-        { name: "Message-ID", value: message.messageId }, { name: "From", value: message.from }, { name: "To", value: message.to },
-        ...(message.deliveryReference === null ? [] : [{ name: "X-Auto-Apply-Delivery-ID", value: message.deliveryReference }]),
-      ].filter(item => item.value) },
-    });
-  }
-  throw new Error(`Unexpected Gmail request: ${url.href}`);
-}, { preconnect: globalThis.fetch.preconnect });
+    if (path === "/messages") {
+      const query = url.searchParams.get("q") ?? "";
+      const match = /^in:sent "([^"]+)"$/.exec(query);
+      assert.ok(match, "Reconciliation must search the quoted body reference, never RFC Message-ID");
+      const reference = must(match[1], "delivery reference");
+      return Response.json({
+        messages: visible
+          ? sent.filter(message => message.owner === requestMailbox && message.text.includes(reference)).map(message => ({ id: message.id }))
+          : [],
+      });
+    }
+    if (path.startsWith("/messages/")) {
+      const message = sent.find(item => item.owner === requestMailbox && item.id === decodeURIComponent(path.slice("/messages/".length)));
+      assert.ok(message);
+      return Response.json({
+        id: message.id,
+        labelIds: message.labels,
+        internalDate: message.internalDate,
+        payload: {
+          headers: [
+            { name: "Message-ID", value: message.messageId },
+            { name: "From", value: message.from },
+            { name: "To", value: message.to },
+            ...(message.deliveryReference === null ? [] : [{ name: "X-Auto-Apply-Delivery-ID", value: message.deliveryReference }]),
+          ].filter(item => item.value),
+        },
+      });
+    }
+    throw new Error(`Unexpected Gmail request: ${url.href}`);
+  },
+  { preconnect: globalThis.fetch.preconnect },
+);
 
-function gate(text: string, context = "Acme employment eligibility", options = ["Yes", "No"], kind: "question" | "confirm_submit" | "cover_letter" = "question") {
+function gate(
+  text: string,
+  context = "Acme employment eligibility",
+  options = ["Yes", "No"],
+  kind: "question" | "confirm_submit" | "cover_letter" = "question",
+) {
   const id = nextJob++;
-  db.query("INSERT INTO jobs (id, url, source, company, company_key, title) VALUES (?, ?, 'test', 'Acme', ?, 'Engineer')")
-    .run(id, `https://jobs.example.com/${id}`, companyKey("Acme"));
+  db.query("INSERT INTO jobs (id, url, source, company, company_key, title) VALUES (?, ?, 'test', 'Acme', ?, 'Engineer')").run(
+    id,
+    `https://jobs.example.com/${id}`,
+    companyKey("Acme"),
+  );
   return parkGate(id, { kind, text, context, options }, null);
 }
 
 function delivery() {
-  const row = db.query<{ id: string; state: string; body: string; sent_at: string | null; gmail_id: string | null }, []>(
-    "SELECT id, state, body, sent_at, gmail_id FROM question_digest_deliveries ORDER BY rowid DESC LIMIT 1",
-  ).get();
+  const row = db
+    .query<{ id: string; state: string; body: string; sent_at: string | null; gmail_id: string | null }, []>(
+      "SELECT id, state, body, sent_at, gmail_id FROM question_digest_deliveries ORDER BY rowid DESC LIMIT 1",
+    )
+    .get();
   assert.ok(row);
   return row;
 }
@@ -149,7 +196,12 @@ switch (process.argv[2]) {
     break;
   }
   case "dst": {
-    for (const [date, utcHour] of [["2026-03-07", 15], ["2026-03-08", 14], ["2026-10-31", 14], ["2026-11-01", 15]] as const) {
+    for (const [date, utcHour] of [
+      ["2026-03-07", 15],
+      ["2026-03-08", 14],
+      ["2026-10-31", 14],
+      ["2026-11-01", 15],
+    ] as const) {
       gate(`Availability on ${date}?`);
       now = new Date(`${date}T${utcHour}:00:00Z`);
       const before = new Date(now.getTime() - 1_000);
@@ -336,9 +388,7 @@ switch (process.argv[2]) {
   }
   case "concurrent": {
     gate("Are you authorized to work?");
-    const [first, second] = await Promise.all([
-      sendQuestionDigest({ force: true, now }), sendQuestionDigest({ force: true, now }),
-    ]);
+    const [first, second] = await Promise.all([sendQuestionDigest({ force: true, now }), sendQuestionDigest({ force: true, now })]);
     assert.equal(first.sent, true);
     assert.equal(second.reason, "busy");
     assert.equal(attempts.length, 1);
@@ -363,10 +413,19 @@ switch (process.argv[2]) {
     assert.ok(text.includes("3 new question groups across 3 applications"));
     assert.ok(text.includes("https://auto-apply.example.com/#questions"));
     assert.ok(text.includes("https://auto-apply.example.com/#progress/2"));
-    for (const secret of ["PRIVATE-APPLICATION-ANSWER", "PRIVATE-CONTEXT", "PRIVATE-SUBMISSION", "PRIVATE-COVER", "PRIVATE-PASSWORD", "TEST-REFRESH", "TEST-ACCESS"])
+    for (const secret of [
+      "PRIVATE-APPLICATION-ANSWER",
+      "PRIVATE-CONTEXT",
+      "PRIVATE-SUBMISSION",
+      "PRIVATE-COVER",
+      "PRIVATE-PASSWORD",
+      "TEST-REFRESH",
+      "TEST-ACCESS",
+    ])
       assert.equal(text.includes(secret), false);
     break;
   }
-  default: throw new Error(`Unknown scenario: ${process.argv[2]}`);
+  default:
+    throw new Error(`Unknown scenario: ${process.argv[2]}`);
 }
 db.close();

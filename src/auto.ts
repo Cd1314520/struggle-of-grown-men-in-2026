@@ -67,10 +67,7 @@ export interface ReconsiderResult {
  * Fails closed on malformed checklist, stale qualifications, non-qualifying practice evidence,
  * or manual / frozen / submitted job state.
  */
-export function reconsiderAutoApproval(
-  job: ReconsiderJob,
-  facts: ReconsiderFacts
-): ReconsiderResult {
+export function reconsiderAutoApproval(job: ReconsiderJob, facts: ReconsiderFacts): ReconsiderResult {
   const deny = (reason: string, approvalNote?: string | null): ReconsiderResult => ({
     approved: false,
     verdict: null,

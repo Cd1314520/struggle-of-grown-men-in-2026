@@ -1,7 +1,28 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
 exports[`schema migrations produces exactly the recorded schema 1`] = `
-"version 1
+"version 3
+
+CREATE TRIGGER jobs_fill_state_forgotten AFTER DELETE ON jobs
+BEGIN
+DELETE FROM fill_state WHERE job_id = OLD.id;
+END;
+
+CREATE TRIGGER jobs_status_changed AFTER UPDATE OF status ON jobs
+WHEN OLD.status IS NOT NEW.status
+BEGIN
+INSERT INTO status_changes (job_id, from_status, to_status, note, approved_by)
+VALUES (
+NEW.id, OLD.status, NEW.status,
+CASE WHEN NEW.note IS NOT OLD.note THEN NEW.note END,
+CASE WHEN NEW.status = 'approved' THEN NEW.approved_by END
+);
+END;
+
+CREATE TRIGGER jobs_status_forgotten AFTER DELETE ON jobs
+BEGIN
+DELETE FROM status_changes WHERE job_id = OLD.id;
+END;
 
 CREATE TABLE accounts (
 domain TEXT PRIMARY KEY,
@@ -29,6 +50,16 @@ worker TEXT,
 kind TEXT NOT NULL,
 message TEXT NOT NULL,
 at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE fill_state (
+job_id INTEGER PRIMARY KEY,
+submitting INTEGER NOT NULL DEFAULT 0 CHECK (submitting IN (0, 1)),
+verifying INTEGER NOT NULL DEFAULT 0 CHECK (verifying IN (0, 1)),
+recovering INTEGER NOT NULL DEFAULT 0 CHECK (recovering IN (0, 1)),
+slot INTEGER CHECK (slot >= 0),   -- the browser that last held this job's draft
+manual_gate TEXT,                 -- the open gate under which a person reserved that browser
+CHECK (verifying = 0 OR submitting = 1)
 );
 
 CREATE TABLE job_sources (
@@ -113,6 +144,16 @@ source_gate_id TEXT NOT NULL,
 answered_at TEXT NOT NULL
 );
 
+CREATE TABLE status_changes (
+id INTEGER PRIMARY KEY,
+job_id INTEGER NOT NULL,
+from_status TEXT NOT NULL,
+to_status TEXT NOT NULL,
+note TEXT,          -- the note written with the change; NULL when the change left the note alone
+approved_by TEXT,   -- who gave gate 1, on a move to 'approved'
+at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE submit_approvals (
 job_id INTEGER PRIMARY KEY,
 gate_id TEXT NOT NULL,
@@ -139,5 +180,7 @@ CREATE INDEX question_gates_group ON question_gates(group_key, state);
 CREATE INDEX question_gates_job ON question_gates(job_id, created_at);
 
 CREATE UNIQUE INDEX question_gates_open_job ON question_gates(job_id) WHERE state = 'open';
+
+CREATE INDEX status_changes_job ON status_changes(job_id, id);
 "
 `;

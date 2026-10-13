@@ -21,19 +21,27 @@ describe("Backlog Reassessment Script - Migration Invariants & Edge Cases", () =
     const dbPath = join(dir, "test.db");
     const db = createLegacyDatabase(dbPath);
     try {
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75)`).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75)`,
+      ).run();
 
       for (const apply of [false, true]) {
         expect(() => runReassessment({ dbPath, apply, silent: true })).toThrow(`schema is version 0, but this code needs version ${SCHEMA_VERSION}`);
       }
       // Neither mode upgraded or touched it.
       expect(schemaVersion(db)).toBe(0);
-      expect(db.query<{ status: string; score: number | null }, []>("SELECT status, score FROM jobs WHERE id = 1").get()).toEqual({ status: "awaiting_approval", score: 75 });
+      expect(db.query<{ status: string; score: number | null }, []>("SELECT status, score FROM jobs WHERE id = 1").get()).toEqual({
+        status: "awaiting_approval",
+        score: 75,
+      });
 
       migrate(db);
       expect(runReassessment({ dbPath, apply: false, silent: true }).eligibleCount).toBe(1);
       expect(runReassessment({ dbPath, apply: true, silent: true }).eligibleCount).toBe(1);
-      expect(db.query<{ status: string; score: number | null }, []>("SELECT status, score FROM jobs WHERE id = 1").get()).toEqual({ status: "triaged", score: null });
+      expect(db.query<{ status: string; score: number | null }, []>("SELECT status, score FROM jobs WHERE id = 1").get()).toEqual({
+        status: "triaged",
+        score: null,
+      });
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });
@@ -56,10 +64,14 @@ describe("Backlog Reassessment Script - Migration Invariants & Edge Cases", () =
       });
 
       // Job 1: Old scored job needing reassessment (practice_assessment is NULL)
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist, practice_assessment) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75, '[{}]', NULL)`).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist, practice_assessment) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75, '[{}]', NULL)`,
+      ).run();
 
       // Job 2: Freshly prepped job with valid practice assessment (must be protected/skipped)
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist, practice_assessment) VALUES (2, 'http://2', 'board', 'Co B', 'Eng 2', 'awaiting_approval', 75, '[{}]', ?)`).run(validPracticeJson);
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist, practice_assessment) VALUES (2, 'http://2', 'board', 'Co B', 'Eng 2', 'awaiting_approval', 75, '[{}]', ?)`,
+      ).run(validPracticeJson);
 
       const result = runReassessment({ dbPath, apply: false, silent: true });
       expect(result.eligibleCount).toBe(1);
@@ -83,7 +95,9 @@ describe("Backlog Reassessment Script - Migration Invariants & Edge Cases", () =
   it("resets approved_by to NULL on requeue", () => {
     const { dir, dbPath, db } = setupTestDb();
     try {
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist, approved_by) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75, '[{}]', 'auto')`).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist, approved_by) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75, '[{}]', 'auto')`,
+      ).run();
 
       runReassessment({ dbPath, apply: true, silent: true });
 
@@ -100,28 +114,48 @@ describe("Backlog Reassessment Script - Migration Invariants & Edge Cases", () =
     const { dir, dbPath, db } = setupTestDb();
     try {
       // 1. Eligible awaiting_approval
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75, '[{}]')`).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75, '[{}]')`,
+      ).run();
       // 2. Eligible held
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (2, 'http://2', 'board', 'Co B', 'Eng 2', 'held', 70, '[{}]')`).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (2, 'http://2', 'board', 'Co B', 'Eng 2', 'held', 70, '[{}]')`,
+      ).run();
       // 3. Eligible skipped
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (3, 'http://3', 'board', 'Co C', 'Eng 3', 'skipped', 50, '[{}]')`).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (3, 'http://3', 'board', 'Co C', 'Eng 3', 'skipped', 50, '[{}]')`,
+      ).run();
 
       // Protected categories:
       // 4. Frozen resume (resume_sha present)
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist, resume_sha) VALUES (4, 'http://4', 'board', 'Co D', 'Eng 4', 'awaiting_approval', 80, '[{}]', 'sha123')`).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist, resume_sha) VALUES (4, 'http://4', 'board', 'Co D', 'Eng 4', 'awaiting_approval', 80, '[{}]', 'sha123')`,
+      ).run();
       // 5. User feedback in kv
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (5, 'http://5', 'board', 'Co E', 'Eng 5', 'awaiting_approval', 60, '[{}]')`).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (5, 'http://5', 'board', 'Co E', 'Eng 5', 'awaiting_approval', 60, '[{}]')`,
+      ).run();
       db.query(`INSERT INTO kv (key, value) VALUES ('feedback.5', 'user asked for this')`).run();
       // 6. Manual approval (approved_by = user)
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist, approved_by) VALUES (6, 'http://6', 'board', 'Co F', 'Eng 6', 'awaiting_approval', 70, '[{}]', 'user')`).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist, approved_by) VALUES (6, 'http://6', 'board', 'Co F', 'Eng 6', 'awaiting_approval', 70, '[{}]', 'user')`,
+      ).run();
       // 7. Submitted
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist, submitted_at) VALUES (7, 'http://7', 'board', 'Co G', 'Eng 7', 'submitted', 85, '[{}]', '2026-10-09')`).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist, submitted_at) VALUES (7, 'http://7', 'board', 'Co G', 'Eng 7', 'submitted', 85, '[{}]', '2026-10-09')`,
+      ).run();
       // 8. Rejected
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (8, 'http://8', 'board', 'Co H', 'Eng 8', 'rejected', 40, '[{}]')`).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (8, 'http://8', 'board', 'Co H', 'Eng 8', 'rejected', 40, '[{}]')`,
+      ).run();
       // 9. Active needs_manual (like Centric 7829)
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (9, 'http://9', 'board', 'Co I', 'Eng 9', 'needs_manual', 90, '[{}]')`).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (9, 'http://9', 'board', 'Co I', 'Eng 9', 'needs_manual', 90, '[{}]')`,
+      ).run();
       // 10. Unassessed triage drop (score null, checklist null)
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (10, 'http://10', 'board', 'Co J', 'Eng 10', 'skipped', NULL, NULL)`).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (10, 'http://10', 'board', 'Co J', 'Eng 10', 'skipped', NULL, NULL)`,
+      ).run();
 
       const dryRunResult = runReassessment({ dbPath, apply: false, silent: true });
       expect(dryRunResult.totalJobs).toBe(10);
@@ -145,17 +179,25 @@ describe("Backlog Reassessment Script - Migration Invariants & Edge Cases", () =
   it("requeues eligible rows atomically, preserves freeze invariants, and is idempotent", () => {
     const { dir, dbPath, db } = setupTestDb();
     try {
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist, rationale, concerns) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75, '[{}]', 'good', 'none')`).run();
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist, resume_sha) VALUES (2, 'http://2', 'board', 'Co B', 'Eng 2', 'awaiting_approval', 80, '[{}]', 'sha-freeze')`).run();
-      db.query(`INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (3, 'http://3', 'board', 'Co C', 'Eng 3', 'awaiting_approval', 60, '[{}]')`).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist, rationale, concerns) VALUES (1, 'http://1', 'board', 'Co A', 'Eng 1', 'awaiting_approval', 75, '[{}]', 'good', 'none')`,
+      ).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist, resume_sha) VALUES (2, 'http://2', 'board', 'Co B', 'Eng 2', 'awaiting_approval', 80, '[{}]', 'sha-freeze')`,
+      ).run();
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (3, 'http://3', 'board', 'Co C', 'Eng 3', 'awaiting_approval', 60, '[{}]')`,
+      ).run();
       db.query(`INSERT INTO kv (key, value) VALUES ('feedback.3', 'keep this')`).run();
 
       const appliedResult = runReassessment({ dbPath, apply: true, silent: true });
       expect(appliedResult.eligibleCount).toBe(1);
 
-      const row1 = db.query<{ status: string; score: number | null; checklist: string | null; rationale: string | null; concerns: string | null }, [number]>(
-        "SELECT status, score, checklist, rationale, concerns FROM jobs WHERE id = ?"
-      ).get(1);
+      const row1 = db
+        .query<{ status: string; score: number | null; checklist: string | null; rationale: string | null; concerns: string | null }, [number]>(
+          "SELECT status, score, checklist, rationale, concerns FROM jobs WHERE id = ?",
+        )
+        .get(1);
       expect(row1?.status).toBe("triaged");
       expect(row1?.score).toBeNull();
       expect(row1?.checklist).toBeNull();

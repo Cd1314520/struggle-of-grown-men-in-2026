@@ -10,18 +10,41 @@ const SCOPE = "https://www.googleapis.com/auth/gmail.modify";
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 export const redirectUri = () => `${publicUrl()}/oauth/callback`;
 
-interface OAuthClient { client_id: string; client_secret: string }
-interface TokenResponse { access_token: string; expires_in: number; refresh_token?: string; error?: string; error_description?: string }
-interface Part { mimeType?: string; body?: { data?: string }; parts?: Part[]; headers?: { name: string; value: string }[] }
-interface Message { id: string; threadId: string; labelIds?: string[]; snippet?: string; internalDate?: string; payload?: Part }
-interface MessageList { messages?: { id: string }[] }
+interface OAuthClient {
+  client_id: string;
+  client_secret: string;
+}
+interface TokenResponse {
+  access_token: string;
+  expires_in: number;
+  refresh_token?: string;
+  error?: string;
+  error_description?: string;
+}
+interface Part {
+  mimeType?: string;
+  body?: { data?: string };
+  parts?: Part[];
+  headers?: { name: string; value: string }[];
+}
+interface Message {
+  id: string;
+  threadId: string;
+  labelIds?: string[];
+  snippet?: string;
+  internalDate?: string;
+  payload?: Part;
+}
+interface MessageList {
+  messages?: { id: string }[];
+}
 
 function client() {
   let raw: OAuthClient & { installed?: OAuthClient; web?: OAuthClient };
   try {
     raw = JSON.parse(readFileSync(join(PROFILE, "gmail-client.json"), "utf8")) as typeof raw;
   } catch {
-    throw new Error("profile/gmail-client.json is missing; see README (Gmail setup)");
+    throw new Error("profile/gmail-client.json is missing; see docs/setup.md (Gmail)");
   }
   const c = raw.installed ?? raw.web ?? raw;
   return { id: c.client_id, secret: c.client_secret };
@@ -78,7 +101,7 @@ async function accessToken() {
 async function call(path: string, init?: RequestInit, token?: string): Promise<unknown> {
   const res = await fetch(API + path, {
     ...init,
-    headers: { authorization: `Bearer ${token ?? await accessToken()}`, "content-type": "application/json" },
+    headers: { authorization: `Bearer ${token ?? (await accessToken())}`, "content-type": "application/json" },
   });
   const body = (await res.json()) as { error?: { message?: string } };
   if (!res.ok) throw new Error(`Gmail API ${res.status}: ${body.error?.message ?? "unknown error"}`);
@@ -111,7 +134,8 @@ function bodyText(payload: Part | undefined): string {
     .replace(/<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, "$2 [$1]")
     .replace(/<\/(p|div|tr|li|h[1-6])>|<br\s*\/?>/gi, "\n")
     .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
     .replace(/\n\s*\n\s*\n+/g, "\n\n")
     .trim();
 }
@@ -153,15 +177,17 @@ export async function markRead(id: string) {
 
 // Digest-only sending: recipient is resolved from the OAuth identity, never from worker input.
 export class GmailSendError extends Error {
-  constructor(message: string, readonly ambiguous: boolean) {
+  constructor(
+    message: string,
+    readonly ambiguous: boolean,
+  ) {
     super(message);
   }
 }
 
 const mailboxAddress = (value: string) => {
   const address = value.trim().toLowerCase();
-  if (!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(address))
-    throw new Error("Invalid Gmail mailbox identity");
+  if (!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(address)) throw new Error("Invalid Gmail mailbox identity");
   return address;
 };
 
@@ -181,40 +207,42 @@ async function verifiedSelfIdentity(): Promise<{ recipient: string; token: strin
 }
 
 export function digestDeliveryReference(messageId: string): string {
-  if (!/^<[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+>$/.test(messageId))
-    throw new Error("Invalid digest delivery identifier");
+  if (!/^<[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+>$/.test(messageId)) throw new Error("Invalid digest delivery identifier");
   return messageId.slice(1, -1);
 }
 
-export async function sendSelfMessage(message: {
-  messageId: string; subject: string; text: string; expectedMailbox: string; date: string;
-}): Promise<string> {
+export async function sendSelfMessage(message: { messageId: string; subject: string; text: string; expectedMailbox: string; date: string }): Promise<string> {
   let recipient: string;
   let token: string;
   let raw: string;
   try {
     const reference = digestDeliveryReference(message.messageId);
-    if (!message.text.endsWith(`Auto-Apply delivery reference: ${reference}`))
-      throw new Error("Digest body is missing its persisted delivery reference");
+    if (!message.text.endsWith(`Auto-Apply delivery reference: ${reference}`)) throw new Error("Digest body is missing its persisted delivery reference");
     if (/[\r\n]/.test(message.subject)) throw new Error("Invalid digest subject");
     const date = new Date(message.date);
     if (!Number.isFinite(date.getTime())) throw new Error("Invalid digest message date");
     ({ recipient, token } = await verifiedSelfIdentity());
     if (recipient !== mailboxAddress(message.expectedMailbox)) throw new Error("Digest mailbox changed before delivery");
-    raw = Buffer.from([
-      `From: ${recipient}`,
-      `To: ${recipient}`,
-      `Date: ${date.toUTCString()}`,
-      `Message-ID: ${message.messageId}`,
-      `X-Auto-Apply-Delivery-ID: ${reference}`,
-      `Subject: =?UTF-8?B?${Buffer.from(message.subject, "utf8").toString("base64")}?=`,
-      "MIME-Version: 1.0",
-      "Content-Type: text/plain; charset=UTF-8",
-      "Content-Transfer-Encoding: base64",
-      "",
-      Buffer.from(message.text, "utf8").toString("base64").match(/.{1,76}/g)?.join("\r\n") ?? "",
-      "",
-    ].join("\r\n"), "utf8").toString("base64url");
+    raw = Buffer.from(
+      [
+        `From: ${recipient}`,
+        `To: ${recipient}`,
+        `Date: ${date.toUTCString()}`,
+        `Message-ID: ${message.messageId}`,
+        `X-Auto-Apply-Delivery-ID: ${reference}`,
+        `Subject: =?UTF-8?B?${Buffer.from(message.subject, "utf8").toString("base64")}?=`,
+        "MIME-Version: 1.0",
+        "Content-Type: text/plain; charset=UTF-8",
+        "Content-Transfer-Encoding: base64",
+        "",
+        Buffer.from(message.text, "utf8")
+          .toString("base64")
+          .match(/.{1,76}/g)
+          ?.join("\r\n") ?? "",
+        "",
+      ].join("\r\n"),
+      "utf8",
+    ).toString("base64url");
   } catch (error) {
     throw new GmailSendError(error instanceof Error ? error.message : "Gmail send preflight failed", false);
   }
@@ -227,7 +255,7 @@ export async function sendSelfMessage(message: {
     });
     // A definite rejection is safe to retry. A timeout/server error may follow acceptance.
     if (!res.ok) throw new GmailSendError(`Gmail send rejected (${res.status})`, res.status >= 500 || res.status === 408);
-    const body = await res.json() as { id?: string };
+    const body = (await res.json()) as { id?: string };
     if (!body.id) throw new GmailSendError("Gmail send returned no message identifier", true);
     return body.id;
   } catch (error) {
@@ -243,11 +271,22 @@ export async function findSentSelfMessage(messageId: string, expectedMailbox: st
   // Gmail may replace RFC Message-ID. Search the persisted body reference, then require the
   // exact custom identity header; search indexing alone is never delivery proof.
   const q = `in:sent "${reference}"`;
-  const list = (await call(`/messages?${new URLSearchParams({ q, maxResults: "100" }).toString()}`, { signal: AbortSignal.timeout(30_000) }, token)) as MessageList;
+  const list = (await call(
+    `/messages?${new URLSearchParams({ q, maxResults: "100" }).toString()}`,
+    { signal: AbortSignal.timeout(30_000) },
+    token,
+  )) as MessageList;
   for (const item of list.messages ?? []) {
-    const msg = (await call(`/messages/${encodeURIComponent(item.id)}?format=metadata&metadataHeaders=X-Auto-Apply-Delivery-ID&metadataHeaders=From&metadataHeaders=To`, { signal: AbortSignal.timeout(30_000) }, token)) as Message;
-    if ((msg.labelIds ?? []).includes("SENT") && header(msg, "X-Auto-Apply-Delivery-ID").trim() === reference
-      && [header(msg, "From"), header(msg, "To")].every(value => ((/<([^<>]+)>/.exec(value))?.[1] ?? value).trim().toLowerCase() === recipient)) {
+    const msg = (await call(
+      `/messages/${encodeURIComponent(item.id)}?format=metadata&metadataHeaders=X-Auto-Apply-Delivery-ID&metadataHeaders=From&metadataHeaders=To`,
+      { signal: AbortSignal.timeout(30_000) },
+      token,
+    )) as Message;
+    if (
+      (msg.labelIds ?? []).includes("SENT") &&
+      header(msg, "X-Auto-Apply-Delivery-ID").trim() === reference &&
+      [header(msg, "From"), header(msg, "To")].every(value => (/<([^<>]+)>/.exec(value)?.[1] ?? value).trim().toLowerCase() === recipient)
+    ) {
       const date = new Date(Number(msg.internalDate));
       if (!Number.isFinite(date.getTime())) throw new Error("Sent digest has no valid delivery timestamp");
       return { id: msg.id, sentAt: date.toISOString() };

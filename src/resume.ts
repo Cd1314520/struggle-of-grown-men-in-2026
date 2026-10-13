@@ -51,7 +51,9 @@ export function freezeResume(jobId: number) {
     const sources: Record<string, string> = {};
     for (const name of readdirSync(jobDir(jobId)).filter(name => name.endsWith(".typ"))) {
       copyFileSync(join(jobDir(jobId), name), join(staged, name));
-      sources[name] = createHash("sha256").update(readFileSync(join(staged, name))).digest("hex");
+      sources[name] = createHash("sha256")
+        .update(readFileSync(join(staged, name)))
+        .digest("hex");
       chmodSync(join(staged, name), 0o444);
     }
     if (!sources[MAIN]) throw new Error("frozen resume main source missing");
@@ -69,19 +71,32 @@ export function frozenResume(jobId: number, sha: string) {
   if (!/^[a-f0-9]{64}$/.test(sha)) throw new Error("invalid frozen resume SHA");
   const dir = frozenDir(jobId, sha);
   const pdf = join(dir, PDF_NAME);
-  if (createHash("sha256").update(readFileSync(pdf)).digest("hex") !== sha)
-    throw new Error("frozen resume PDF SHA mismatch");
-  if (!existsSync(join(dir, "manifest.json")))
-    throw new Error("legacy frozen source has no SHA manifest; inspect/seal original sources before resuming");
+  if (createHash("sha256").update(readFileSync(pdf)).digest("hex") !== sha) throw new Error("frozen resume PDF SHA mismatch");
+  if (!existsSync(join(dir, "manifest.json"))) throw new Error("legacy frozen source has no SHA manifest; inspect/seal original sources before resuming");
   const manifest: unknown = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
-  if (!manifest || typeof manifest !== "object" || !("version" in manifest) || manifest.version !== 1 ||
-      !("resumeSha" in manifest) || manifest.resumeSha !== sha ||
-      !("sources" in manifest) || !manifest.sources || typeof manifest.sources !== "object" || Array.isArray(manifest.sources) ||
-      !(MAIN in manifest.sources))
+  if (
+    !manifest ||
+    typeof manifest !== "object" ||
+    !("version" in manifest) ||
+    manifest.version !== 1 ||
+    !("resumeSha" in manifest) ||
+    manifest.resumeSha !== sha ||
+    !("sources" in manifest) ||
+    !manifest.sources ||
+    typeof manifest.sources !== "object" ||
+    Array.isArray(manifest.sources) ||
+    !(MAIN in manifest.sources)
+  )
     throw new Error("invalid frozen source manifest");
   for (const [name, hash] of Object.entries(manifest.sources)) {
-    if (!/^[^/\\]+\.typ$/.test(name) || typeof hash !== "string" || !/^[a-f0-9]{64}$/.test(hash) ||
-        createHash("sha256").update(readFileSync(join(dir, name))).digest("hex") !== hash)
+    if (
+      !/^[^/\\]+\.typ$/.test(name) ||
+      typeof hash !== "string" ||
+      !/^[a-f0-9]{64}$/.test(hash) ||
+      createHash("sha256")
+        .update(readFileSync(join(dir, name)))
+        .digest("hex") !== hash
+    )
       throw new Error(`frozen resume source SHA mismatch: ${name}`);
   }
   return { sha, pdf };

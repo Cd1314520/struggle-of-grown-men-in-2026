@@ -175,24 +175,20 @@ export function buildJobExcerptMaps(inputs: ResumeReviewInput[]): Map<number, Jo
 
 export function formatExcerptsForPrompt(segments: SourceExcerpt[]): string {
   if (segments.length === 0) return "(Empty)";
-  return segments.map((s) => `[${s.id}] ${s.text}`).join("\n");
+  return segments.map(s => `[${s.id}] ${s.text}`).join("\n");
 }
 
 /**
  * Builds the user prompt payload sent to the model via stdin.
  * Numbered excerpts (P1, R1, N1) are clearly separated and identify untrusted text.
  */
-export function buildUserPrompt(
-  inputs: ResumeReviewInput[],
-  knownThemes: string[],
-  excerptMaps?: Map<number, JobExcerptMaps>
-): string {
+export function buildUserPrompt(inputs: ResumeReviewInput[], knownThemes: string[], excerptMaps?: Map<number, JobExcerptMaps>): string {
   const maps = excerptMaps ?? buildJobExcerptMaps(inputs);
   const sections: string[] = [];
 
   sections.push("# Known Themes");
   if (knownThemes.length > 0) {
-    sections.push(knownThemes.map((t) => `- ${t}`).join("\n"));
+    sections.push(knownThemes.map(t => `- ${t}`).join("\n"));
   } else {
     sections.push("(None yet)");
   }
@@ -223,16 +219,14 @@ export function buildUserPrompt(
 
   sections.push("");
   sections.push(
-    "Produce the JSON array analyzing all applications above. Reference exact excerpt IDs (e.g. postingEvidenceId: 'P1', notesEvidenceId: 'N2', resumeEvidenceId: null). Output ONLY the JSON array matching the schema."
+    "Produce the JSON array analyzing all applications above. Reference exact excerpt IDs (e.g. postingEvidenceId: 'P1', notesEvidenceId: 'N2', resumeEvidenceId: null). Output ONLY the JSON array matching the schema.",
   );
   return sections.join("\n");
 }
 
 function extractEvidenceIds(single: unknown, multiple: unknown): string[] {
   if (Array.isArray(multiple)) {
-    return multiple
-      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-      .map((item) => item.trim());
+    return multiple.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map(item => item.trim());
   }
   if (typeof single === "string" && single.trim().length > 0) {
     return [single.trim()];
@@ -240,14 +234,7 @@ function extractEvidenceIds(single: unknown, multiple: unknown): string[] {
   return [];
 }
 
-function resolveExcerptQuote(
-  ids: string[],
-  map: Map<string, SourceExcerpt>,
-  sourceText: string,
-  jobId: number,
-  gapIdx: number,
-  field: string
-): string {
+function resolveExcerptQuote(ids: string[], map: Map<string, SourceExcerpt>, sourceText: string, jobId: number, gapIdx: number, field: string): string {
   if (ids.length === 0) {
     throw new Error(`JobId ${jobId} gap #${gapIdx}: missing ${field}Id`);
   }
@@ -299,10 +286,7 @@ function resolveExcerptQuote(
  * Resolves wire format reviews (which reference excerpt IDs) to full ApplicationResumeReview objects.
  * Falls back to direct quote strings if provided.
  */
-export function resolveModelWireReviews(
-  raw: unknown,
-  excerptMaps: Map<number, JobExcerptMaps>
-): ApplicationResumeReview[] {
+export function resolveModelWireReviews(raw: unknown, excerptMaps: Map<number, JobExcerptMaps>): ApplicationResumeReview[] {
   if (!Array.isArray(raw)) {
     throw new Error("Model output must be a JSON array");
   }
@@ -342,14 +326,7 @@ export function resolveModelWireReviews(
       let postingQuote: string;
       const postingIds = extractEvidenceIds(gap["postingEvidenceId"], gap["postingEvidenceIds"]);
       if (postingIds.length > 0) {
-        postingQuote = resolveExcerptQuote(
-          postingIds,
-          jobMaps.posting,
-          jobMaps.postingText,
-          jobId,
-          gIdx,
-          "postingEvidence"
-        );
+        postingQuote = resolveExcerptQuote(postingIds, jobMaps.posting, jobMaps.postingText, jobId, gIdx, "postingEvidence");
       } else if (typeof gap["postingQuote"] === "string" && gap["postingQuote"].trim().length > 0) {
         postingQuote = gap["postingQuote"].trim();
       } else {
@@ -360,14 +337,7 @@ export function resolveModelWireReviews(
       let resumeEvidence: string | null = null;
       const resumeIds = extractEvidenceIds(gap["resumeEvidenceId"], gap["resumeEvidenceIds"]);
       if (resumeIds.length > 0) {
-        resumeEvidence = resolveExcerptQuote(
-          resumeIds,
-          jobMaps.resume,
-          jobMaps.resumeText,
-          jobId,
-          gIdx,
-          "resumeEvidence"
-        );
+        resumeEvidence = resolveExcerptQuote(resumeIds, jobMaps.resume, jobMaps.resumeText, jobId, gIdx, "resumeEvidence");
       } else if (typeof gap["resumeEvidence"] === "string" && gap["resumeEvidence"].trim().length > 0) {
         resumeEvidence = gap["resumeEvidence"].trim();
       }
@@ -376,14 +346,7 @@ export function resolveModelWireReviews(
       let notesEvidence: string | null = null;
       const notesIds = extractEvidenceIds(gap["notesEvidenceId"], gap["notesEvidenceIds"]);
       if (notesIds.length > 0) {
-        notesEvidence = resolveExcerptQuote(
-          notesIds,
-          jobMaps.notes,
-          jobMaps.notesText,
-          jobId,
-          gIdx,
-          "notesEvidence"
-        );
+        notesEvidence = resolveExcerptQuote(notesIds, jobMaps.notes, jobMaps.notesText, jobId, gIdx, "notesEvidence");
       } else if (typeof gap["notesEvidence"] === "string" && gap["notesEvidence"].trim().length > 0) {
         notesEvidence = gap["notesEvidence"].trim();
       }
@@ -460,9 +423,7 @@ export function extractAssistantResponseText(stdout: string): string {
           throw new Error(`Assistant stopped with incomplete stopReason: ${errorDetail}`);
         }
         if (Array.isArray(msg["content"])) {
-          const textParts = msg["content"]
-            .filter(isTextContent)
-            .map((c) => c.text);
+          const textParts = msg["content"].filter(isTextContent).map(c => c.text);
           if (textParts.length > 0) {
             lastAssistantText = textParts.join("\n");
           }
@@ -483,9 +444,7 @@ export function extractAssistantResponseText(stdout: string): string {
             throw new Error(`Assistant stopped with incomplete stopReason: ${errorDetail}`);
           }
           if (Array.isArray(msg["content"])) {
-            const textParts = msg["content"]
-              .filter(isTextContent)
-              .map((c) => c.text);
+            const textParts = msg["content"].filter(isTextContent).map(c => c.text);
             if (textParts.length > 0) {
               lastAssistantText = textParts.join("\n");
             }
@@ -643,8 +602,8 @@ export function validateResumeReviews(raw: unknown, inputs: ResumeReviewInput[])
         }
       }
 
-      const resumeEvidence = (g["resumeEvidence"] ?? null);
-      const notesEvidence = (g["notesEvidence"] ?? null);
+      const resumeEvidence = g["resumeEvidence"] ?? null;
+      const notesEvidence = g["notesEvidence"] ?? null;
 
       // Status invariants
       switch (g["status"]) {
@@ -721,10 +680,7 @@ export function validateResumeReviews(raw: unknown, inputs: ResumeReviewInput[])
  * Executes review of submitted applications with GPT-6 Luna via bounded /usr/bin/omp CLI.
  * All input supplied; tool-free, session-free, strictly validated structured result.
  */
-export async function reviewResumes(
-  inputs: ResumeReviewInput[],
-  knownThemes: string[]
-): Promise<ApplicationResumeReview[]> {
+export async function reviewResumes(inputs: ResumeReviewInput[], knownThemes: string[]): Promise<ApplicationResumeReview[]> {
   if (inputs.length === 0) {
     return [];
   }
@@ -735,7 +691,8 @@ export async function reviewResumes(
   const args = [
     "/usr/bin/omp",
     "-p",
-    "--mode", "json",
+    "--mode",
+    "json",
     "--no-tools",
     "--no-session",
     "--no-extensions",
@@ -743,11 +700,16 @@ export async function reviewResumes(
     "--no-skills",
     "--no-lsp",
     "--no-title",
-    "--config", overlayPath,
-    "--system-prompt", promptFilePath,
-    "--model", REVIEW_MODEL,
-    "--thinking", "medium",
-    "--max-time", "4m",
+    "--config",
+    overlayPath,
+    "--system-prompt",
+    promptFilePath,
+    "--model",
+    REVIEW_MODEL,
+    "--thinking",
+    "medium",
+    "--max-time",
+    "4m",
   ];
   const proc = Bun.spawn(args, {
     stdin: "pipe",
@@ -792,10 +754,7 @@ export async function reviewResumes(
 
   const runPromise = (async () => {
     try {
-      const [stdoutText, stderrText] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ]);
+      const [stdoutText, stderrText] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
 
       const exitCode = await proc.exited;
 

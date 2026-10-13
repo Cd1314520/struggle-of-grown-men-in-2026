@@ -1,0 +1,9 @@
+[Unit]
+Description=Trigger auto-apply observation journal check every 3 hours
+
+[Timer]
+OnCalendar=*-*-* 01/3:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

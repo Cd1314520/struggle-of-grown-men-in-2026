@@ -55,7 +55,10 @@ export const arg = {
 };
 
 type WorkerStatus = "completed" | "aborted" | "error";
-interface WorkerResult { status: WorkerStatus; error?: string }
+interface WorkerResult {
+  status: WorkerStatus;
+  error?: string;
+}
 
 // The subset of omp's RPC frames this client reads.
 interface Frame {
@@ -122,12 +125,25 @@ export function runWorker(opts: WorkerOptions): WorkerHandle {
   const sessionDir = join(DATA, "sessions", opts.name);
   mkdirSync(sessionDir, { recursive: true });
   const args = [
-    "omp", "--mode", "rpc", "--no-ui", "--no-extensions", "--no-rules", "--no-skills", "--no-lsp", "--no-title",
-    "--config", overlayPath(!!opts.browser, opts.cdpPort),
-    "--session-dir", sessionDir,
-    "--cwd", opts.cwd,
-    "--append-system-prompt", join(PROMPTS, "system.md"),
-    "--tools", opts.builtins.join(","),
+    "omp",
+    "--mode",
+    "rpc",
+    "--no-ui",
+    "--no-extensions",
+    "--no-rules",
+    "--no-skills",
+    "--no-lsp",
+    "--no-title",
+    "--config",
+    overlayPath(!!opts.browser, opts.cdpPort),
+    "--session-dir",
+    sessionDir,
+    "--cwd",
+    opts.cwd,
+    "--append-system-prompt",
+    join(PROMPTS, "system.md"),
+    "--tools",
+    opts.builtins.join(","),
   ];
   if (opts.model) args.push("--model", opts.model);
   if (opts.maxTime) args.push("--max-time", opts.maxTime);
@@ -147,7 +163,9 @@ export function runWorker(opts: WorkerOptions): WorkerHandle {
       // process already gone; the exit path reports it
     }
   };
-  const log = (kind: string, message: string) => { logEvent(kind, message, opts.jobId, opts.name); };
+  const log = (kind: string, message: string) => {
+    logEvent(kind, message, opts.jobId, opts.name);
+  };
 
   let lastText = "";
   // Assigned from callbacks, which control-flow narrowing cannot see.
@@ -191,7 +209,9 @@ export function runWorker(opts: WorkerOptions): WorkerHandle {
             return tool.handler(f.arguments ?? {});
           })
           .catch((err: unknown) => `ERROR: ${errorMessage(err)}`)
-          .then(text => { send({ type: "host_tool_result", id: f.id, result: { content: [{ type: "text", text }] } }); });
+          .then(text => {
+            send({ type: "host_tool_result", id: f.id, result: { content: [{ type: "text", text }] } });
+          });
         break;
       }
       case "tool_execution_start":
@@ -199,7 +219,11 @@ export function runWorker(opts: WorkerOptions): WorkerHandle {
         break;
       case "message_end":
         if (f.message?.role === "assistant") {
-          const text = (f.message.content ?? []).filter(c => c.type === "text").map(c => c.text).join("\n").trim();
+          const text = (f.message.content ?? [])
+            .filter(c => c.type === "text")
+            .map(c => c.text)
+            .join("\n")
+            .trim();
           if (text) {
             lastText = text;
             log("agent", text);
@@ -207,7 +231,10 @@ export function runWorker(opts: WorkerOptions): WorkerHandle {
         }
         break;
       case "prompt_result":
-        result = { status: isStatus(f.status) ? f.status : "error", ...(f.error instanceof Object && "message" in f.error ? { error: String(f.error.message) } : {}) };
+        result = {
+          status: isStatus(f.status) ? f.status : "error",
+          ...(f.error instanceof Object && "message" in f.error ? { error: String(f.error.message) } : {}),
+        };
         if (f.sessionSettled) closeInput();
         break;
       case "session_settled":
@@ -244,7 +271,8 @@ export function runWorker(opts: WorkerOptions): WorkerHandle {
       const tail = (await stderr).trim().split("\n").slice(-5).join("\n");
       result = { status: "error", error: `omp exited with code ${code} before finishing. ${tail}` };
     }
-    if (result.status !== "completed") log(result.status === "aborted" && abortRequested ? "system" : "error", `${opts.name} worker ${result.status}: ${result.error ?? ""}`);
+    if (result.status !== "completed")
+      log(result.status === "aborted" && abortRequested ? "system" : "error", `${opts.name} worker ${result.status}: ${result.error ?? ""}`);
     return { ...result, lastText };
   })();
 
@@ -254,7 +282,9 @@ export function runWorker(opts: WorkerOptions): WorkerHandle {
       abortRequested = true;
       result ??= { status: "aborted" };
       send({ type: "abort" });
-      setTimeout(() => { proc.kill(); }, 3000);
+      setTimeout(() => {
+        proc.kill();
+      }, 3000);
     },
   };
 }
@@ -267,3 +297,4 @@ export const schema = (properties: Record<string, unknown>, required: string[] =
   additionalProperties: false,
 });
 export const S = { str, int: (description: string) => ({ type: "integer", description }) };
+export type RunWorker = typeof runWorker;

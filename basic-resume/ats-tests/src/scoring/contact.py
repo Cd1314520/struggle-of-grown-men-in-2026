@@ -7,7 +7,7 @@ from ..util import DimensionResult, contains_normalized, normalize
 
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
-# Loose: matches +1 555-010-0100, 555-010-0100, etc.
+# Loose: matches +1 (555) 010-0100, 555-010-0100, etc.
 PHONE_RE = re.compile(r"(?:\+?\d{1,2}[\s\-.])?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}")
 LINKEDIN_RE = re.compile(r"linkedin\.com/in/[A-Za-z0-9\-_/]+", re.I)
 

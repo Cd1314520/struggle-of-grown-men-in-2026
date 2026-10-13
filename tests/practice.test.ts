@@ -27,12 +27,24 @@ describe("practice assessment boundaries", () => {
     ["<= 80k inclusive qualifies", { annualBaseMaxUsd: 80000, salaryEvidence: "$80k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }, true],
     ["> 80k crossing does not qualify", { annualBaseMaxUsd: 80001, salaryEvidence: "$80,001", mandatoryNonlocalOnsite: "no", locationEvidence: "" }, false],
     ["unknown salary + local does not qualify", { annualBaseMaxUsd: null, salaryEvidence: "", mandatoryNonlocalOnsite: "no", locationEvidence: "" }, false],
-    ["valid nonlocal onsite qualifies independently", { annualBaseMaxUsd: null, salaryEvidence: "", mandatoryNonlocalOnsite: "yes", locationEvidence: "Seattle" }, true],
-    ["nonlocal unclear does not qualify", { annualBaseMaxUsd: null, salaryEvidence: "", mandatoryNonlocalOnsite: "unclear", locationEvidence: "Hybrid" }, false],
+    [
+      "valid nonlocal onsite qualifies independently",
+      { annualBaseMaxUsd: null, salaryEvidence: "", mandatoryNonlocalOnsite: "yes", locationEvidence: "Seattle" },
+      true,
+    ],
+    [
+      "nonlocal unclear does not qualify",
+      { annualBaseMaxUsd: null, salaryEvidence: "", mandatoryNonlocalOnsite: "unclear", locationEvidence: "Hybrid" },
+      false,
+    ],
     ["zero salary fails closed", { annualBaseMaxUsd: 0, salaryEvidence: "$0", mandatoryNonlocalOnsite: "no", locationEvidence: "" }, false],
     ["negative salary fails closed", { annualBaseMaxUsd: -1000, salaryEvidence: "-1k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }, false],
     ["missing salary evidence fails closed", { annualBaseMaxUsd: 50000, salaryEvidence: "   ", mandatoryNonlocalOnsite: "no", locationEvidence: "" }, false],
-    ["nonlocal yes with empty evidence fails closed", { annualBaseMaxUsd: null, salaryEvidence: "", mandatoryNonlocalOnsite: "yes", locationEvidence: "   " }, false],
+    [
+      "nonlocal yes with empty evidence fails closed",
+      { annualBaseMaxUsd: null, salaryEvidence: "", mandatoryNonlocalOnsite: "yes", locationEvidence: "   " },
+      false,
+    ],
     ["non-object fails closed", "malformed", false],
   ];
 
@@ -47,10 +59,26 @@ describe("practice assessment boundaries", () => {
 
 describe("parsePracticeAssessment version gate", () => {
   const PARSE_CASES: [string, string | null | undefined, boolean][] = [
-    ["valid version 1 parses", JSON.stringify({ version: 1, annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }), true],
-    ["missing version fails closed", JSON.stringify({ annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }), false],
-    ["old version 0 fails closed", JSON.stringify({ version: 0, annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }), false],
-    ["future version 2 fails closed", JSON.stringify({ version: 2, annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }), false],
+    [
+      "valid version 1 parses",
+      JSON.stringify({ version: 1, annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }),
+      true,
+    ],
+    [
+      "missing version fails closed",
+      JSON.stringify({ annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }),
+      false,
+    ],
+    [
+      "old version 0 fails closed",
+      JSON.stringify({ version: 0, annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }),
+      false,
+    ],
+    [
+      "future version 2 fails closed",
+      JSON.stringify({ version: 2, annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }),
+      false,
+    ],
     ["malformed json fails closed", "{ bad json", false],
     ["null input fails closed", null, false],
   ];
@@ -65,10 +93,30 @@ describe("parsePracticeAssessment version gate", () => {
 
 function answersList(overrides: Record<string, "yes" | "no" | "unclear"> = {}) {
   const keys = [
-    "practice.us_employer", "practice.legit_paid", "practice.no_clearance", "practice.engineering_work", "practice.not_senior", "practice.not_internship",
-    "practice.experience_fits", "practice.skills_overlap", "practice.coding_is_core", "practice.python", "practice.degree_fits", "practice.low_priority_setting",
-    "real.location_ok", "real.no_clearance", "real.pay_floor", "real.travel_ok", "real.not_senior", "real.not_internship",
-    "real.ai_core", "real.experience_fits", "real.skills_overlap", "real.llm_explicit", "real.python", "real.pay_target",
+    "practice.us_employer",
+    "practice.legit_paid",
+    "practice.no_clearance",
+    "practice.engineering_work",
+    "practice.not_senior",
+    "practice.not_internship",
+    "practice.experience_fits",
+    "practice.skills_overlap",
+    "practice.coding_is_core",
+    "practice.python",
+    "practice.degree_fits",
+    "practice.low_priority_setting",
+    "real.location_ok",
+    "real.no_clearance",
+    "real.pay_floor",
+    "real.travel_ok",
+    "real.not_senior",
+    "real.not_internship",
+    "real.ai_core",
+    "real.experience_fits",
+    "real.skills_overlap",
+    "real.llm_explicit",
+    "real.python",
+    "real.pay_target",
   ];
   return keys.map(id => ({ id, answer: overrides[id] ?? "yes", evidence: "quote" }));
 }
@@ -90,8 +138,12 @@ describe("rubric evaluate", () => {
     config.phase = "practice";
     // Zero out real weighted criteria so real score is 0
     const answers = answersList({
-      "real.ai_core": "no", "real.experience_fits": "no", "real.skills_overlap": "no",
-      "real.llm_explicit": "no", "real.python": "no", "real.pay_target": "no",
+      "real.ai_core": "no",
+      "real.experience_fits": "no",
+      "real.skills_overlap": "no",
+      "real.llm_explicit": "no",
+      "real.python": "no",
+      "real.pay_target": "no",
     });
     const res = evaluate(answers, {
       annualBaseMaxUsd: 150000,
@@ -133,7 +185,12 @@ describe("autoApproval and submission safety", () => {
     config.autoApply = { enabled: true, phases: ["practice"], minScore: 60, perDay: 5 };
 
     const baseVerdict: Verdict = {
-      decision: "apply", score: 80, threshold: 60, reason: "passed", items: [], practice: null,
+      decision: "apply",
+      score: 80,
+      threshold: 60,
+      reason: "passed",
+      items: [],
+      practice: null,
     };
     // Missing practice facts -> denied
     expect(autoApproval(baseVerdict, { concerns: null, handPicked: false, approvedToday: 0 }).approve).toBe(false);
@@ -171,7 +228,18 @@ describe("autoApproval and submission safety", () => {
     // Missing or invalid evidence -> fails closed (true)
     expect(confirmsSubmit({ approved_by: "auto", practice_assessment: null })).toBe(true);
     expect(confirmsSubmit({ approved_by: "auto", practice_assessment: JSON.stringify({ version: 0 }) })).toBe(true);
-    expect(confirmsSubmit({ approved_by: "auto", practice_assessment: JSON.stringify({ version: 1, annualBaseMaxUsd: 120000, salaryEvidence: "$120k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }) })).toBe(true);
+    expect(
+      confirmsSubmit({
+        approved_by: "auto",
+        practice_assessment: JSON.stringify({
+          version: 1,
+          annualBaseMaxUsd: 120000,
+          salaryEvidence: "$120k",
+          mandatoryNonlocalOnsite: "no",
+          locationEvidence: "",
+        }),
+      }),
+    ).toBe(true);
 
     // Phase mismatch with confirmBeforeSubmit=false -> fails closed (true) even with valid evidence
     config.phase = "real";
@@ -206,15 +274,31 @@ describe("autoApproval and submission safety", () => {
 
     // Auto job requires valid assessment
     expect(checkAutoApprovedPractice({ approved_by: "auto", practice_assessment: null }).ok).toBe(false);
-    expect(checkAutoApprovedPractice({
-      approved_by: "auto",
-      practice_assessment: JSON.stringify({ version: 1, annualBaseMaxUsd: 120000, salaryEvidence: "$120k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }),
-    }).ok).toBe(false);
+    expect(
+      checkAutoApprovedPractice({
+        approved_by: "auto",
+        practice_assessment: JSON.stringify({
+          version: 1,
+          annualBaseMaxUsd: 120000,
+          salaryEvidence: "$120k",
+          mandatoryNonlocalOnsite: "no",
+          locationEvidence: "",
+        }),
+      }).ok,
+    ).toBe(false);
 
-    expect(checkAutoApprovedPractice({
-      approved_by: "auto",
-      practice_assessment: JSON.stringify({ version: 1, annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }),
-    }).ok).toBe(true);
+    expect(
+      checkAutoApprovedPractice({
+        approved_by: "auto",
+        practice_assessment: JSON.stringify({
+          version: 1,
+          annualBaseMaxUsd: 70000,
+          salaryEvidence: "$70k",
+          mandatoryNonlocalOnsite: "no",
+          locationEvidence: "",
+        }),
+      }).ok,
+    ).toBe(true);
   });
 });
 
@@ -266,17 +350,19 @@ describe("autoApproval deferred 'daily_cap' contract", () => {
     // Prior gate failure: unclear required item does NOT get deferred
     const unclearVerdict: Verdict = {
       ...validVerdict,
-      items: [{
-        key: "practice.us_employer",
-        phase: "practice",
-        label: "US Employer",
-        statement: "Must be US employer",
-        required: true,
-        weight: 0,
-        answer: "unclear",
-        evidence: "",
-        points: 0,
-      }],
+      items: [
+        {
+          key: "practice.us_employer",
+          phase: "practice",
+          label: "US Employer",
+          statement: "Must be US employer",
+          required: true,
+          weight: 0,
+          answer: "unclear",
+          evidence: "",
+          points: 0,
+        },
+      ],
     };
     const unclearRes = autoApproval(unclearVerdict, { concerns: null, handPicked: false, approvedToday: 5 });
     expect(unclearRes.approve).toBe(false);
@@ -379,29 +465,35 @@ describe("reconsiderAutoApproval pure helper", () => {
     config.autoApply = { enabled: true, phases: ["practice"], minScore: 80, perDay: 10 };
 
     // 1. Array with item.key
-    const resKey = reconsiderAutoApproval({
-      status: "awaiting_approval",
-      approved_by: null,
-      resume_sha: null,
-      resume_frozen_at: null,
-      submitted_at: null,
-      concerns: null,
-      checklist: JSON.stringify(validStoredChecklistArray()),
-      practice_assessment: validPracticeJson,
-    }, { handPicked: false, approvedToday: 0 });
+    const resKey = reconsiderAutoApproval(
+      {
+        status: "awaiting_approval",
+        approved_by: null,
+        resume_sha: null,
+        resume_frozen_at: null,
+        submitted_at: null,
+        concerns: null,
+        checklist: JSON.stringify(validStoredChecklistArray()),
+        practice_assessment: validPracticeJson,
+      },
+      { handPicked: false, approvedToday: 0 },
+    );
     expect(resKey.approved).toBe(true);
 
     // 2. Missing key (only id provided) fails closed
-    const resId = reconsiderAutoApproval({
-      status: "awaiting_approval",
-      approved_by: null,
-      resume_sha: null,
-      resume_frozen_at: null,
-      submitted_at: null,
-      concerns: null,
-      checklist: JSON.stringify(answersList()),
-      practice_assessment: validPracticeJson,
-    }, { handPicked: false, approvedToday: 0 });
+    const resId = reconsiderAutoApproval(
+      {
+        status: "awaiting_approval",
+        approved_by: null,
+        resume_sha: null,
+        resume_frozen_at: null,
+        submitted_at: null,
+        concerns: null,
+        checklist: JSON.stringify(answersList()),
+        practice_assessment: validPracticeJson,
+      },
+      { handPicked: false, approvedToday: 0 },
+    );
     expect(resId.approved).toBe(false);
   });
 
@@ -426,7 +518,9 @@ describe("reconsiderAutoApproval pure helper", () => {
     // Empty array
     expect(reconsiderAutoApproval({ ...base, checklist: "[]" }, { handPicked: false, approvedToday: 0 }).approved).toBe(false);
     // Items without answer
-    expect(reconsiderAutoApproval({ ...base, checklist: JSON.stringify([{ id: "practice.us_employer" }]) }, { handPicked: false, approvedToday: 0 }).approved).toBe(false);
+    expect(
+      reconsiderAutoApproval({ ...base, checklist: JSON.stringify([{ id: "practice.us_employer" }]) }, { handPicked: false, approvedToday: 0 }).approved,
+    ).toBe(false);
   });
 
   it("fails closed on stale qualifications (missing current rubric items)", () => {
@@ -434,16 +528,19 @@ describe("reconsiderAutoApproval pure helper", () => {
     config.autoApply = { enabled: true, phases: ["practice"], minScore: 80, perDay: 10 };
 
     const partial = validStoredChecklistArray().slice(0, 5);
-    const res = reconsiderAutoApproval({
-      status: "awaiting_approval",
-      approved_by: null,
-      resume_sha: null,
-      resume_frozen_at: null,
-      submitted_at: null,
-      concerns: null,
-      checklist: JSON.stringify(partial),
-      practice_assessment: validPracticeJson,
-    }, { handPicked: false, approvedToday: 0 });
+    const res = reconsiderAutoApproval(
+      {
+        status: "awaiting_approval",
+        approved_by: null,
+        resume_sha: null,
+        resume_frozen_at: null,
+        submitted_at: null,
+        concerns: null,
+        checklist: JSON.stringify(partial),
+        practice_assessment: validPracticeJson,
+      },
+      { handPicked: false, approvedToday: 0 },
+    );
     expect(res.approved).toBe(false);
   });
 
@@ -452,16 +549,19 @@ describe("reconsiderAutoApproval pure helper", () => {
     config.autoApply = { enabled: true, phases: ["practice"], minScore: 80, perDay: 10 };
 
     const unclearAnswers = validStoredChecklistArray({ "practice.us_employer": "unclear" });
-    const res = reconsiderAutoApproval({
-      status: "awaiting_approval",
-      approved_by: null,
-      resume_sha: null,
-      resume_frozen_at: null,
-      submitted_at: null,
-      concerns: null,
-      checklist: JSON.stringify(unclearAnswers),
-      practice_assessment: validPracticeJson,
-    }, { handPicked: false, approvedToday: 0 });
+    const res = reconsiderAutoApproval(
+      {
+        status: "awaiting_approval",
+        approved_by: null,
+        resume_sha: null,
+        resume_frozen_at: null,
+        submitted_at: null,
+        concerns: null,
+        checklist: JSON.stringify(unclearAnswers),
+        practice_assessment: validPracticeJson,
+      },
+      { handPicked: false, approvedToday: 0 },
+    );
     expect(res.approved).toBe(false);
   });
 
@@ -513,38 +613,27 @@ describe("reconsiderAutoApproval pure helper", () => {
 
     // 1. Array answer coercion attempt (['yes'])
     const badAnswerList = validStoredChecklistArray();
-    const arrayAnswerChecklist = JSON.stringify(badAnswerList.map((item, idx) =>
-      idx === 0 ? { ...item, answer: ["yes"] } : item
-    ));
+    const arrayAnswerChecklist = JSON.stringify(badAnswerList.map((item, idx) => (idx === 0 ? { ...item, answer: ["yes"] } : item)));
     const resArrayAnswer = reconsiderAutoApproval({ ...base, checklist: arrayAnswerChecklist }, { handPicked: false, approvedToday: 0 });
     expect(resArrayAnswer.approved).toBe(false);
 
     // 2. Key array coercion attempt (['practice.us_employer'])
-    const arrayKeyChecklist = JSON.stringify(badAnswerList.map((item, idx) =>
-      idx === 0 ? { ...item, key: ["practice.us_employer"] } : item
-    ));
+    const arrayKeyChecklist = JSON.stringify(badAnswerList.map((item, idx) => (idx === 0 ? { ...item, key: ["practice.us_employer"] } : item)));
     const resArrayKey = reconsiderAutoApproval({ ...base, checklist: arrayKeyChecklist }, { handPicked: false, approvedToday: 0 });
     expect(resArrayKey.approved).toBe(false);
 
     // 3. Object evidence coercion attempt ({ quote: "evidence text" })
-    const objectEvidenceChecklist = JSON.stringify(badAnswerList.map((item, idx) =>
-      idx === 0 ? { ...item, evidence: { quote: "evidence text" } } : item
-    ));
+    const objectEvidenceChecklist = JSON.stringify(badAnswerList.map((item, idx) => (idx === 0 ? { ...item, evidence: { quote: "evidence text" } } : item)));
     const resObjectEvidence = reconsiderAutoApproval({ ...base, checklist: objectEvidenceChecklist }, { handPicked: false, approvedToday: 0 });
     expect(resObjectEvidence.approved).toBe(false);
 
     // 4. Missing or non-string evidence (e.g. evidence: 123)
-    const numberEvidenceChecklist = JSON.stringify(badAnswerList.map((item, idx) =>
-      idx === 0 ? { ...item, evidence: 123 } : item
-    ));
+    const numberEvidenceChecklist = JSON.stringify(badAnswerList.map((item, idx) => (idx === 0 ? { ...item, evidence: 123 } : item)));
     const resNumberEvidence = reconsiderAutoApproval({ ...base, checklist: numberEvidenceChecklist }, { handPicked: false, approvedToday: 0 });
     expect(resNumberEvidence.approved).toBe(false);
 
     // 5. Duplicate keys
-    const duplicateKeyChecklist = JSON.stringify([
-      ...badAnswerList,
-      { key: "practice.us_employer", answer: "yes", evidence: "duplicate item" },
-    ]);
+    const duplicateKeyChecklist = JSON.stringify([...badAnswerList, { key: "practice.us_employer", answer: "yes", evidence: "duplicate item" }]);
     const resDuplicateKey = reconsiderAutoApproval({ ...base, checklist: duplicateKeyChecklist }, { handPicked: false, approvedToday: 0 });
     expect(resDuplicateKey.approved).toBe(false);
   });

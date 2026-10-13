@@ -76,7 +76,17 @@ function scorePhase(r: Rubric, phase: Phase, answers: Map<string, { answer: Answ
     if (!a) throw new Error(`no answer for ${key}`);
     const weight = c.required ? 0 : (c.weight ?? 0);
     const points = a.answer === "yes" ? weight : a.answer === "unclear" && weight > 0 ? weight * r.unclear : 0;
-    return { key, phase, label: c.label ?? c.id.replace(/_/g, " "), statement: c.statement, required: !!c.required, weight, answer: a.answer, evidence: a.evidence, points };
+    return {
+      key,
+      phase,
+      label: c.label ?? c.id.replace(/_/g, " "),
+      statement: c.statement,
+      required: !!c.required,
+      weight,
+      answer: a.answer,
+      evidence: a.evidence,
+      points,
+    };
   });
   const possible = items.reduce((sum, i) => sum + Math.max(0, i.weight), 0);
   const earned = items.reduce((sum, i) => sum + i.points, 0);
@@ -106,17 +116,66 @@ export function evaluate(raw: unknown, practiceEvidence?: unknown): Verdict | st
     items.push(...real.items);
     const practice = assessPractice(practiceEvidence);
     if (current.failed.length)
-      return { decision: "skip", score: current.score, threshold: current.threshold, items, practice, reason: `failed requirement: ${current.failed.map(i => i.key.split(".")[1]).join(", ")}` };
+      return {
+        decision: "skip",
+        score: current.score,
+        threshold: current.threshold,
+        items,
+        practice,
+        reason: `failed requirement: ${current.failed.map(i => i.key.split(".")[1]).join(", ")}`,
+      };
     if (current.score < current.threshold)
-      return { decision: "skip", score: current.score, threshold: current.threshold, items, practice, reason: `score ${current.score} below threshold ${current.threshold}` };
+      return {
+        decision: "skip",
+        score: current.score,
+        threshold: current.threshold,
+        items,
+        practice,
+        reason: `score ${current.score} below threshold ${current.threshold}`,
+      };
     const reason = practiceReason(practice);
     if (!reason)
-      return { decision: "hold", score: current.score, threshold: current.threshold, items, practice, reason: "practice: no qualifying practice evidence (salary <= $80k or mandatory nonlocal)" };
-    return { decision: "apply", score: current.score, threshold: current.threshold, items, practice, reason: `${reason}; score ${current.score} (threshold ${current.threshold})` };
+      return {
+        decision: "hold",
+        score: current.score,
+        threshold: current.threshold,
+        items,
+        practice,
+        reason: "practice: no qualifying practice evidence (salary <= $80k or mandatory nonlocal)",
+      };
+    return {
+      decision: "apply",
+      score: current.score,
+      threshold: current.threshold,
+      items,
+      practice,
+      reason: `${reason}; score ${current.score} (threshold ${current.threshold})`,
+    };
   }
   if (current.failed.length)
-    return { decision: "skip", score: current.score, threshold: current.threshold, items, practice: null, reason: `failed requirement: ${current.failed.map(i => i.key.split(".")[1]).join(", ")}` };
+    return {
+      decision: "skip",
+      score: current.score,
+      threshold: current.threshold,
+      items,
+      practice: null,
+      reason: `failed requirement: ${current.failed.map(i => i.key.split(".")[1]).join(", ")}`,
+    };
   if (current.score < current.threshold)
-    return { decision: "skip", score: current.score, threshold: current.threshold, items, practice: null, reason: `score ${current.score} below threshold ${current.threshold}` };
-  return { decision: "apply", score: current.score, threshold: current.threshold, items, practice: null, reason: `score ${current.score} (threshold ${current.threshold})` };
+    return {
+      decision: "skip",
+      score: current.score,
+      threshold: current.threshold,
+      items,
+      practice: null,
+      reason: `score ${current.score} below threshold ${current.threshold}`,
+    };
+  return {
+    decision: "apply",
+    score: current.score,
+    threshold: current.threshold,
+    items,
+    practice: null,
+    reason: `score ${current.score} (threshold ${current.threshold})`,
+  };
 }

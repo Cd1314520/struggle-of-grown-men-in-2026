@@ -3,11 +3,7 @@ import { openDatabase } from "../src/schema";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
-import {
-  runMonitor,
-  loadState,
-  observeAutoApplyActivity,
-} from "../scripts/journal-stalls";
+import { runMonitor, loadState, observeAutoApplyActivity } from "../scripts/journal-stalls";
 
 /** Resolves with the Error a promise rejects with; fails the test if it settles any other way. */
 async function rejectionOf(promise: Promise<unknown>): Promise<Error> {
@@ -47,9 +43,7 @@ describe("Auto-Apply Journal & Stalls Monitor - Consumer Regression Tests", () =
 
   it("2. Ignores discovery, triage, and prep-only activity, creating no journal churn", async () => {
     const { dbPath, journalPath, statePath, db } = setupTestEnv();
-    db.run(
-      `INSERT INTO jobs (id, url, source, company, title, status) VALUES (1, 'https://test/1', 'linkedin', 'Acme', 'Dev', 'triaged')`
-    );
+    db.run(`INSERT INTO jobs (id, url, source, company, title, status) VALUES (1, 'https://test/1', 'linkedin', 'Acme', 'Dev', 'triaged')`);
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (1, 1, 'discover', 'step', 'Found job')`);
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (2, 1, 'triage', 'step', 'Scoring job')`);
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (3, 1, 'prep', 'step', 'Preparing resume')`);
@@ -74,9 +68,7 @@ describe("Auto-Apply Journal & Stalls Monitor - Consumer Regression Tests", () =
     `);
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (101, 10, 'prep', 'user', 'approve')`);
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (102, 10, 'fill', 'step', 'Opening form')`);
-    db.run(
-      `INSERT INTO events (id, job_id, worker, kind, message) VALUES (103, 10, 'fill', 'gate', 'question: Are you local? Options: Yes / No')`
-    );
+    db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (103, 10, 'fill', 'gate', 'question: Are you local? Options: Yes / No')`);
 
     const res = await runMonitor({
       dbPath,
@@ -98,13 +90,11 @@ describe("Auto-Apply Journal & Stalls Monitor - Consumer Regression Tests", () =
               '{"kind":"question","text":"By selecting YES, I consent to receive recruiting SMS messages...","shot":1728531653000}')
     `);
     db.run(
-      `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (11747, 8805, 'prep', 'auto', 'Approved by auto apply: practice: qualified', '2026-10-10 03:40:20')`
+      `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (11747, 8805, 'prep', 'auto', 'Approved by auto apply: practice: qualified', '2026-10-10 03:40:20')`,
     );
+    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (11762, 8805, 'fill', 'step', 'Opening job application', '2026-10-10 03:40:35')`);
     db.run(
-      `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (11762, 8805, 'fill', 'step', 'Opening job application', '2026-10-10 03:40:35')`
-    );
-    db.run(
-      `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (11788, 8805, 'fill', 'gate', 'question: By selecting YES, I consent to receive recruiting SMS messages from Alten Technology USA at the phone number provided on my job application. Options: Yes / No.', '2026-10-10 03:40:53')`
+      `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (11788, 8805, 'fill', 'gate', 'question: By selecting YES, I consent to receive recruiting SMS messages from Alten Technology USA at the phone number provided on my job application. Options: Yes / No.', '2026-10-10 03:40:53')`,
     );
 
     const res = await runMonitor({
@@ -309,16 +299,12 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
     const { dbPath, journalPath, statePath } = setupTestEnv();
     writeFileSync(statePath, "{ corrupted json syntax --", "utf8");
 
-    const corruptErr = await rejectionOf(
-      runMonitor({ dbPath, journalPath, statePath, silent: true, help: false })
-    );
+    const corruptErr = await rejectionOf(runMonitor({ dbPath, journalPath, statePath, silent: true, help: false }));
     expect(corruptErr.message).toContain("State file corrupted");
 
     // Invalid schema
     writeFileSync(statePath, JSON.stringify({ version: 999 }), "utf8");
-    const schemaErr = await rejectionOf(
-      runMonitor({ dbPath, journalPath, statePath, silent: true, help: false })
-    );
+    const schemaErr = await rejectionOf(runMonitor({ dbPath, journalPath, statePath, silent: true, help: false }));
     expect(schemaErr.message).toContain("Invalid schema");
   });
 
@@ -331,14 +317,14 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (1, 600, 'prep', 'auto', 'Approved by auto apply: test')`);
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (2, 600, 'fill', 'step', 'Filling')`);
     db.run(
-      `INSERT INTO events (id, job_id, worker, kind, message) VALUES (3, 600, 'fill', 'gate', 'manual: Tab job-600: Workday returned persistent error, token: secret123, email: test@example.com')`
+      `INSERT INTO events (id, job_id, worker, kind, message) VALUES (3, 600, 'fill', 'gate', 'manual: Tab job-600: Workday returned persistent error, token: secret123, email: test@example.com')`,
     );
     db.run(
-      `INSERT INTO events (id, job_id, worker, kind, message) VALUES (4, 600, 'fill', 'gate', 'confirm_submit: Review page: Alex Rivera, phone 1234567890, address 123 Main St')`
+      `INSERT INTO events (id, job_id, worker, kind, message) VALUES (4, 600, 'fill', 'gate', 'confirm_submit: Review page: Alex Rivera, phone 1234567890, address 123 Main St')`,
     );
     const { snapshot } = observeAutoApplyActivity(db, null, "");
     expect(snapshot).not.toBeNull();
-    const event4Blocker = snapshot?.otherBlockers.find((b) => b.eventId === 4);
+    const event4Blocker = snapshot?.otherBlockers.find(b => b.eventId === 4);
     expect(event4Blocker?.kind).toBe("confirm_submit_gate");
 
     await runMonitor({ dbPath, journalPath, statePath, silent: true, help: false });
@@ -376,25 +362,35 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
       INSERT INTO jobs (id, url, source, company, title, status, approved_by, pending)
       VALUES (801, 'https://test/801', 'board', 'Reconsidered Input Corp', 'SWE', 'needs_input', 'auto', '{"text":"Consent to receive SMS messages?","shot":1760000000000}')
     `);
-    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (50, 801, 'prep', 'auto', 'Approved by reconsidered auto apply: daily_cap released', '2026-10-10 05:00:00')`);
+    db.run(
+      `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (50, 801, 'prep', 'auto', 'Approved by reconsidered auto apply: daily_cap released', '2026-10-10 05:00:00')`,
+    );
     db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (51, 801, 'fill', 'step', 'Opening application form', '2026-10-10 05:01:00')`);
-    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (52, 801, 'fill', 'gate', 'question: Consent to receive SMS messages?', '2026-10-10 05:02:00')`);
+    db.run(
+      `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (52, 801, 'fill', 'gate', 'question: Consent to receive SMS messages?', '2026-10-10 05:02:00')`,
+    );
 
     // Job 802: Reconsidered auto-approval entering fill with manual stall (needs_manual)
     db.run(`
       INSERT INTO jobs (id, url, source, company, title, status, approved_by)
       VALUES (802, 'https://test/802', 'board', 'Reconsidered Manual Corp', 'SRE', 'needs_manual', 'auto')
     `);
-    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (60, 802, 'prep', 'auto', 'Approved by reconsidered auto apply: practice qualified', '2026-10-10 06:00:00')`);
+    db.run(
+      `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (60, 802, 'prep', 'auto', 'Approved by reconsidered auto apply: practice qualified', '2026-10-10 06:00:00')`,
+    );
     db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (61, 802, 'fill', 'step', 'Starting fill', '2026-10-10 06:01:00')`);
-    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (62, 802, 'fill', 'gate', 'manual: Cloudflare captcha challenge detected on form', '2026-10-10 06:02:00')`);
+    db.run(
+      `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (62, 802, 'fill', 'gate', 'manual: Cloudflare captcha challenge detected on form', '2026-10-10 06:02:00')`,
+    );
 
     // Job 803: Reconsidered auto-approval that is PREP-ONLY (never reached fill worker) -> MUST be excluded
     db.run(`
       INSERT INTO jobs (id, url, source, company, title, status, approved_by)
       VALUES (803, 'https://test/803', 'board', 'Prep Only Corp', 'QA', 'approved', 'auto')
     `);
-    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (70, 803, 'prep', 'auto', 'Approved by reconsidered auto apply: qualified', '2026-10-10 07:00:00')`);
+    db.run(
+      `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (70, 803, 'prep', 'auto', 'Approved by reconsidered auto apply: qualified', '2026-10-10 07:00:00')`,
+    );
     db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (71, 803, 'prep', 'step', 'Tailoring resume in prep', '2026-10-10 07:01:00')`);
 
     // Job 804: Reconsidered auto-approval superseded by later manual approval cutoff
@@ -402,12 +398,18 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
       INSERT INTO jobs (id, url, source, company, title, status, approved_by)
       VALUES (804, 'https://test/804', 'board', 'Manual Cutoff Corp', 'DevOps', 'needs_input', 'user')
     `);
-    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (80, 804, 'prep', 'auto', 'Approved by reconsidered auto apply: test', '2026-10-10 08:00:00')`);
+    db.run(
+      `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (80, 804, 'prep', 'auto', 'Approved by reconsidered auto apply: test', '2026-10-10 08:00:00')`,
+    );
     // User manually approves at event 85 before fill starts
     db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (85, 804, 'user', 'user', 'approve', '2026-10-10 08:30:00')`);
     // Fill starts after user approval at event 90
-    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (90, 804, 'fill', 'step', 'Fill started under manual approval', '2026-10-10 09:00:00')`);
-    db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (91, 804, 'fill', 'gate', 'question: Travel percentage?', '2026-10-10 09:01:00')`);
+    db.run(
+      `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (90, 804, 'fill', 'step', 'Fill started under manual approval', '2026-10-10 09:00:00')`,
+    );
+    db.run(
+      `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (91, 804, 'fill', 'gate', 'question: Travel percentage?', '2026-10-10 09:01:00')`,
+    );
 
     // Seed an existing state file with a high watermark past all above events (e.g., watermark = 500)
     // to test that previously omitted historical eligible attempts are discovered
@@ -422,9 +424,9 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
           reportedJobStatuses: { "99": "submitted" },
         },
         null,
-        2
+        2,
       ),
-      "utf8"
+      "utf8",
     );
 
     // Initial run with existing state

@@ -19,9 +19,7 @@ async function scenario(name: string, phases = [name]) {
         stdout: "pipe",
         stderr: "pipe",
       });
-      const [exitCode, stdout, stderr] = await Promise.all([
-        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
-      ]);
+      const [exitCode, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
       expect({ exitCode, stdout, stderr }).toEqual({ exitCode: 0, stdout: "", stderr: "" });
     }
   } finally {

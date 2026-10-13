@@ -18,8 +18,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     title: "Senior Backend Engineer",
     postingText:
       "Must have 5+ years of experience with PostgreSQL schema design and query optimization.\nCore responsibility: build high-throughput APIs. Experience with Redis caching is a plus.",
-    resumeText:
-      "Built high-throughput REST APIs handling 10k RPS.\nMaintained backend microservices in production.",
+    resumeText: "Built high-throughput REST APIs handling 10k RPS.\nMaintained backend microservices in production.",
     notesText:
       "Deep PostgreSQL indexing, partitioned tables, and query optimization on production workloads.\nBuilt high-throughput distributed APIs across multiple regions.\nExplicitly no experience with C++ systems programming.",
   };
@@ -30,8 +29,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     title: "Platform Engineer",
     postingText:
       "Mandatory requirements: Kubernetes cluster management, Docker containerization.\nCore: CI/CD automation with GitHub Actions.\nNice to have: experience with Terraform.",
-    resumeText:
-      "Maintained Docker containers and basic CI/CD scripts.",
+    resumeText: "Maintained Docker containers and basic CI/CD scripts.",
     notesText:
       "Managed Kubernetes production clusters with 50+ nodes and Helm charts.\nConfigured GitHub Actions CI/CD pipelines.\nNo experience with Terraform.",
   };
@@ -117,9 +115,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       },
     ];
 
-    expect(() => validateResumeReviews(invalidReviews, [sampleJob101])).toThrow(
-      "postingQuote not found in job posting text"
-    );
+    expect(() => validateResumeReviews(invalidReviews, [sampleJob101])).toThrow("postingQuote not found in job posting text");
   });
 
   it("rejects fabricated notesEvidence not present in candidate notes", () => {
@@ -141,9 +137,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       },
     ];
 
-    expect(() => validateResumeReviews(invalidReviews, [sampleJob101])).toThrow(
-      "notesEvidence not found in candidate notes text"
-    );
+    expect(() => validateResumeReviews(invalidReviews, [sampleJob101])).toThrow("notesEvidence not found in candidate notes text");
   });
 
   it("rejects fabricated resumeEvidence not present in tailored resume", () => {
@@ -165,9 +159,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       },
     ];
 
-    expect(() => validateResumeReviews(invalidReviews, [sampleJob101])).toThrow(
-      "resumeEvidence not found in resume text"
-    );
+    expect(() => validateResumeReviews(invalidReviews, [sampleJob101])).toThrow("resumeEvidence not found in resume text");
   });
 
   it("rejects cross-app contamination where evidence from job 102 is used in job 101", () => {
@@ -195,7 +187,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     ];
 
     expect(() => validateResumeReviews(contaminatedReviews, [sampleJob101, sampleJob102])).toThrow(
-      "JobId 101 gap #0: notesEvidence not found in candidate notes text"
+      "JobId 101 gap #0: notesEvidence not found in candidate notes text",
     );
   });
 
@@ -283,9 +275,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       },
     ];
 
-    expect(() => validateResumeReviews(invalidMismatchWithResumeEvidence, [postingWithCpp])).toThrow(
-      "confirmed_mismatch requires null resumeEvidence"
-    );
+    expect(() => validateResumeReviews(invalidMismatchWithResumeEvidence, [postingWithCpp])).toThrow("confirmed_mismatch requires null resumeEvidence");
 
     // Negative invariant: confirmed_mismatch with null notesEvidence must throw
     const invalidMismatchWithNullNotes = [
@@ -306,9 +296,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       },
     ];
 
-    expect(() => validateResumeReviews(invalidMismatchWithNullNotes, [postingWithCpp])).toThrow(
-      "confirmed_mismatch requires notesEvidence"
-    );
+    expect(() => validateResumeReviews(invalidMismatchWithNullNotes, [postingWithCpp])).toThrow("confirmed_mismatch requires notesEvidence");
   });
 
   it("enforces status-evidence invariants strictly across all statuses", () => {
@@ -330,9 +318,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
         ],
       },
     ];
-    expect(() => validateResumeReviews(badSupportedOmission, [sampleJob101])).toThrow(
-      "supported_omission requires null resumeEvidence"
-    );
+    expect(() => validateResumeReviews(badSupportedOmission, [sampleJob101])).toThrow("supported_omission requires null resumeEvidence");
 
     // underemphasized requires non-null resumeEvidence
     const badUnderemphasized = [
@@ -352,9 +338,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
         ],
       },
     ];
-    expect(() => validateResumeReviews(badUnderemphasized, [sampleJob101])).toThrow(
-      "underemphasized requires resumeEvidence"
-    );
+    expect(() => validateResumeReviews(badUnderemphasized, [sampleJob101])).toThrow("underemphasized requires resumeEvidence");
     // underemphasized allows notesEvidence to be null when grounded solely in existing resume bullet
     const validUnderemphasizedWithoutNotes = [
       {
@@ -393,9 +377,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
         ],
       },
     ];
-    expect(() => validateResumeReviews(badUnconfirmed, [sampleJob101])).toThrow(
-      "unconfirmed requires null notesEvidence"
-    );
+    expect(() => validateResumeReviews(badUnconfirmed, [sampleJob101])).toThrow("unconfirmed requires null notesEvidence");
   });
 
   it("rejects coverage violations (missing job, unknown job, duplicate job)", () => {
@@ -406,9 +388,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
         gaps: [],
       },
     ];
-    expect(() => validateResumeReviews(missingJob, [sampleJob101, sampleJob102])).toThrow(
-      "Review missing for jobId 102"
-    );
+    expect(() => validateResumeReviews(missingJob, [sampleJob101, sampleJob102])).toThrow("Review missing for jobId 102");
 
     // Unknown job 999
     const unknownJob = [
@@ -416,18 +396,14 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       { jobId: 102, gaps: [] },
       { jobId: 999, gaps: [] },
     ];
-    expect(() => validateResumeReviews(unknownJob, [sampleJob101, sampleJob102])).toThrow(
-      "Unexpected jobId 999 not found in review inputs"
-    );
+    expect(() => validateResumeReviews(unknownJob, [sampleJob101, sampleJob102])).toThrow("Unexpected jobId 999 not found in review inputs");
 
     // Duplicate job 101
     const duplicateJob = [
       { jobId: 101, gaps: [] },
       { jobId: 101, gaps: [] },
     ];
-    expect(() => validateResumeReviews(duplicateJob, [sampleJob101])).toThrow(
-      "Duplicate review for jobId 101"
-    );
+    expect(() => validateResumeReviews(duplicateJob, [sampleJob101])).toThrow("Duplicate review for jobId 101");
   });
 
   it("rejects invalid importance and status enums, and bounds findings to 6 gaps", () => {
@@ -449,9 +425,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
         ],
       },
     ];
-    expect(() => validateResumeReviews(invalidImportance, [sampleJob101])).toThrow(
-      'invalid importance "critical"'
-    );
+    expect(() => validateResumeReviews(invalidImportance, [sampleJob101])).toThrow('invalid importance "critical"');
 
     // Invalid status
     const invalidStatus = [
@@ -471,9 +445,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
         ],
       },
     ];
-    expect(() => validateResumeReviews(invalidStatus, [sampleJob101])).toThrow(
-      'invalid status "missing_skill"'
-    );
+    expect(() => validateResumeReviews(invalidStatus, [sampleJob101])).toThrow('invalid status "missing_skill"');
 
     // Object prototype keys as importance enum
     const protoImportance = [
@@ -493,9 +465,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
         ],
       },
     ];
-    expect(() => validateResumeReviews(protoImportance, [sampleJob101])).toThrow(
-      'invalid importance "toString"'
-    );
+    expect(() => validateResumeReviews(protoImportance, [sampleJob101])).toThrow('invalid importance "toString"');
 
     // Object prototype keys as status enum
     const protoStatus = [
@@ -515,9 +485,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
         ],
       },
     ];
-    expect(() => validateResumeReviews(protoStatus, [sampleJob101])).toThrow(
-      'invalid status "constructor"'
-    );
+    expect(() => validateResumeReviews(protoStatus, [sampleJob101])).toThrow('invalid status "constructor"');
 
     // More than 6 gaps
     const sevenGaps = [
@@ -535,9 +503,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
         })),
       },
     ];
-    expect(() => validateResumeReviews(sevenGaps, [sampleJob101])).toThrow(
-      "exceeded maximum allowed gaps"
-    );
+    expect(() => validateResumeReviews(sevenGaps, [sampleJob101])).toThrow("exceeded maximum allowed gaps");
   });
 
   it("returns empty array immediately for empty inputs without model execution", async () => {
@@ -549,11 +515,11 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
   });
 
   it("parses model JSON responses from raw markdown blocks or wrapped prose", () => {
-    const rawMarkdown = "```json\n[{\"jobId\": 101, \"gaps\": []}]\n```";
+    const rawMarkdown = '```json\n[{"jobId": 101, "gaps": []}]\n```';
     const parsed1 = parseJsonPayload(rawMarkdown);
     expect(Array.isArray(parsed1)).toBe(true);
 
-    const wrappedProse = "Here is the requested analysis:\n[{\"jobId\": 101, \"gaps\": []}]\nHope this helps!";
+    const wrappedProse = 'Here is the requested analysis:\n[{"jobId": 101, "gaps": []}]\nHope this helps!';
     const parsed2 = parseJsonPayload(wrappedProse);
     expect(Array.isArray(parsed2)).toBe(true);
   });
@@ -606,9 +572,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       }),
     ].join("\n");
 
-    expect(() => extractAssistantResponseText(lengthEvent)).toThrow(
-      "Assistant stopped with incomplete stopReason: length"
-    );
+    expect(() => extractAssistantResponseText(lengthEvent)).toThrow("Assistant stopped with incomplete stopReason: length");
 
     const abortedEvent = [
       JSON.stringify({
@@ -623,9 +587,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       }),
     ].join("\n");
 
-    expect(() => extractAssistantResponseText(abortedEvent)).toThrow(
-      "Assistant stopped with incomplete stopReason: aborted"
-    );
+    expect(() => extractAssistantResponseText(abortedEvent)).toThrow("Assistant stopped with incomplete stopReason: aborted");
   });
 
   it("detects and rejects model substitution and silent fallback", () => {
@@ -638,9 +600,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       }),
     ].join("\n");
 
-    expect(() => extractAssistantResponseText(fallbackEvent)).toThrow(
-      "Model fallback detected"
-    );
+    expect(() => extractAssistantResponseText(fallbackEvent)).toThrow("Model fallback detected");
 
     // model substitution to another model
     const substitutedModelEvent = [
@@ -656,9 +616,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       }),
     ].join("\n");
 
-    expect(() => extractAssistantResponseText(substitutedModelEvent)).toThrow(
-      "Provider substitution detected"
-    );
+    expect(() => extractAssistantResponseText(substitutedModelEvent)).toThrow("Provider substitution detected");
   });
 
   it("rejects invalid earlier event even if a later valid assistant event exists", () => {
@@ -681,9 +639,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       }),
     ].join("\n");
 
-    expect(() => extractAssistantResponseText(earlyFallbackThenValid)).toThrow(
-      "Model fallback detected"
-    );
+    expect(() => extractAssistantResponseText(earlyFallbackThenValid)).toThrow("Model fallback detected");
 
     // Earlier assistant event was truncated with length, followed by valid message
     const earlyLengthThenValid = [
@@ -709,9 +665,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       }),
     ].join("\n");
 
-    expect(() => extractAssistantResponseText(earlyLengthThenValid)).toThrow(
-      "Assistant stopped with incomplete stopReason: length"
-    );
+    expect(() => extractAssistantResponseText(earlyLengthThenValid)).toThrow("Assistant stopped with incomplete stopReason: length");
 
     // Earlier assistant event had provider mismatch, followed by valid message
     const earlyProviderMismatchThenValid = [
@@ -737,9 +691,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       }),
     ].join("\n");
 
-    expect(() => extractAssistantResponseText(earlyProviderMismatchThenValid)).toThrow(
-      "Provider substitution detected"
-    );
+    expect(() => extractAssistantResponseText(earlyProviderMismatchThenValid)).toThrow("Provider substitution detected");
   });
 
   it("segments text into exact substrings without dropping characters and computes offsets", () => {
@@ -838,9 +790,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       },
     ];
 
-    expect(() => resolveModelWireReviews(invalidIdWireOutput, excerptMaps)).toThrow(
-      'invalid postingEvidenceId "P999"'
-    );
+    expect(() => resolveModelWireReviews(invalidIdWireOutput, excerptMaps)).toThrow('invalid postingEvidenceId "P999"');
   });
 
   it("rejects cross-source excerpt IDs (e.g. resume ID used as notesEvidenceId)", () => {
@@ -864,9 +814,7 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       },
     ];
 
-    expect(() => resolveModelWireReviews(crossSourceWireOutput, excerptMaps)).toThrow(
-      'invalid notesEvidenceId "R1"'
-    );
+    expect(() => resolveModelWireReviews(crossSourceWireOutput, excerptMaps)).toThrow('invalid notesEvidenceId "R1"');
   });
 
   it("resolves contiguous multi-ID excerpts by preserving exact source slice", () => {

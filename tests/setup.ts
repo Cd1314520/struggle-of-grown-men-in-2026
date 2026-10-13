@@ -9,4 +9,6 @@ import { join } from "node:path";
 
 const dir = mkdtempSync(join(tmpdir(), "auto-apply-test-run-"));
 process.env["AUTO_APPLY_DATA"] = dir;
-afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
+afterAll(() => {
+  rmSync(dir, { recursive: true, force: true });
+});

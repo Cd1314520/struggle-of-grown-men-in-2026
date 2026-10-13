@@ -2,9 +2,15 @@ node_modules/
 data/
 profile/gmail-client.json
 
-# Personal details and answers used to fill forms
+# Personal details and answers used to fill forms, and the resume itself
 profile/personal.yml
 profile/answers.md
+profile/resume-notes.md
+basic-resume/main.typ
+basic-resume/*.pdf
+
+# Settings for this machine and its owner
+config.local.yml
 
 # Generated output
 artifacts/

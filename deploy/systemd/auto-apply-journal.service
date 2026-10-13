@@ -1,0 +1,11 @@
+[Unit]
+Description=auto-apply 3-hour observation and journal check
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/auto-apply
+ExecStart=/usr/bin/bun %h/auto-apply/scripts/journal-stalls.ts
+ExecStartPost=/usr/bin/bun %h/auto-apply/scripts/journal-resumes.ts
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+TimeoutSec=30min

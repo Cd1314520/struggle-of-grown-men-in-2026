@@ -1,0 +1,20 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      # The resume journal's tests extract text from a PDF with pdftotext.
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      - run: bun install --frozen-lockfile
+      # The same command the pre-commit hook runs: typecheck, lint, tests.
+      - run: bun run check

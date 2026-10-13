@@ -88,11 +88,7 @@ function normalizeTenantDomain(urlOrDomain: string): string {
  * - Missing and allowCreate=false: returns JSON { existing: false, error: "no_account_found", message: "..." }.
  * - Missing and allowCreate=true: generates a strong password, persists it, and returns JSON { email, password, existing: false }.
  */
-export function resolveAccount(
-  domain: string,
-  mailbox: string,
-  allowCreate: boolean
-): string {
+export function resolveAccount(domain: string, mailbox: string, allowCreate: boolean): string {
   let key: string;
   try {
     key = normalizeTenantDomain(domain);
@@ -106,9 +102,7 @@ export function resolveAccount(
   }
 
   // 1. Look up existing stored credentials
-  const existingRow = db.query<{ email: string; password: string }, [string]>(
-    "SELECT email, password FROM accounts WHERE domain = ?"
-  ).get(key);
+  const existingRow = db.query<{ email: string; password: string }, [string]>("SELECT email, password FROM accounts WHERE domain = ?").get(key);
 
   if (existingRow) {
     return JSON.stringify({

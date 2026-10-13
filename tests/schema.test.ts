@@ -4,12 +4,33 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runMigrate } from "../scripts/migrate";
-import { MIGRATIONS, SCHEMA_VERSION, assertSchemaCurrent, connectDatabase, migrate, openDatabase, schemaVersion, type Migration } from "../src/schema";
+import {
+  MIGRATIONS,
+  SCHEMA_VERSION,
+  assertSchemaCurrent,
+  backupPath,
+  connectDatabase,
+  migrate,
+  openDatabase,
+  schemaVersion,
+  type Migration,
+} from "../src/schema";
 import { BEFORE_COMPANY_KEYS_SCHEMA, FIRST_VERSION_SCHEMA, createLegacyDatabase } from "./fixtures/legacy-db";
 
 const TABLES = [
-  "accounts", "application_answers", "events", "job_sources", "jobs", "kv", "question_digest_deliveries",
-  "question_digest_notified", "question_gates", "standing_answers", "submit_approvals",
+  "accounts",
+  "application_answers",
+  "events",
+  "fill_state",
+  "job_sources",
+  "jobs",
+  "kv",
+  "question_digest_deliveries",
+  "question_digest_notified",
+  "question_gates",
+  "standing_answers",
+  "status_changes",
+  "submit_approvals",
 ];
 
 const dirs: string[] = [];
@@ -30,7 +51,10 @@ afterEach(() => {
 });
 
 const tableNames = (db: Database) =>
-  db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(r => r.name);
+  db
+    .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .all()
+    .map(r => r.name);
 
 // SQLite stores a definition exactly as it was typed; indentation is not part of the schema.
 const flat = (sql: string | null | undefined) => sql?.replace(/\s+/g, " ").trim() ?? null;
@@ -38,13 +62,20 @@ const flat = (sql: string | null | undefined) => sql?.replace(/\s+/g, " ").trim(
 // Everything that defines how the database behaves, in a form two databases can be compared by.
 // jobs is compared by column rather than by its CREATE text: ADD COLUMN leaves different text behind.
 function shape(db: Database) {
-  const tables = Object.fromEntries(tableNames(db).map(name => [name, {
-    columns: db
-      .query<{ name: string; type: string; notnull: number; dflt_value: string | null; pk: number }, [string]>(
-        "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info(?) ORDER BY name")
-      .all(name),
-    sql: name === "jobs" ? null : flat(db.query<{ sql: string }, [string]>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)?.sql),
-  }]));
+  const tables = Object.fromEntries(
+    tableNames(db).map(name => [
+      name,
+      {
+        columns: db
+          .query<{ name: string; type: string; notnull: number; dflt_value: string | null; pk: number }, [string]>(
+            'SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info(?) ORDER BY name',
+          )
+          .all(name),
+        sql:
+          name === "jobs" ? null : flat(db.query<{ sql: string }, [string]>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)?.sql),
+      },
+    ]),
+  );
   const indexes = db
     .query<{ name: string; tbl_name: string; sql: string | null }, []>("SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' ORDER BY name")
     .all()
@@ -82,7 +113,12 @@ describe("schema migrations", () => {
     const definitions = db
       .query<{ sql: string }, []>("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type DESC, name")
       .all()
-      .map(row => row.sql.split("\n").map(line => line.trim()).join("\n"));
+      .map(row =>
+        row.sql
+          .split("\n")
+          .map(line => line.trim())
+          .join("\n"),
+      );
     expect(`version ${schemaVersion(db)}\n\n${definitions.join(";\n\n")};\n`).toMatchSnapshot();
   });
 
@@ -102,14 +138,22 @@ describe("schema migrations", () => {
     expect(db.query<{ status: string }, []>("SELECT status FROM jobs WHERE id = 1").get()?.status).toBe("found");
     expect(() => db.run("INSERT INTO jobs (url, source, company, title) VALUES ('https://a.example/1', 'test', 'Acme', 'Engineer')")).toThrow(/UNIQUE/);
     const gate = (id: string, state: string, kind = "question") =>
-      db.query("INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, created_at) VALUES (?, 1, ?, 'g', 'm', 'Acme', 't', 'c', '[]', ?, 'now')").run(id, kind, state);
+      db
+        .query(
+          "INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, created_at) VALUES (?, 1, ?, 'g', 'm', 'Acme', 't', 'c', '[]', ?, 'now')",
+        )
+        .run(id, kind, state);
     gate("a", "open");
     expect(() => gate("b", "open")).toThrow(/UNIQUE/); // one open gate per job
     gate("c", "closed");
     expect(() => gate("d", "parked")).toThrow(/CHECK/);
     expect(() => gate("e", "closed", "survey")).toThrow(/CHECK/);
     const delivery = (id: string, state: string) =>
-      db.query("INSERT INTO question_digest_deliveries (id, recipient, fingerprints, group_count, subject, body, state, created_at, attempt_at) VALUES (?, 'me@example.com', '[]', 1, 's', 'b', ?, 'now', 'now')").run(id, state);
+      db
+        .query(
+          "INSERT INTO question_digest_deliveries (id, recipient, fingerprints, group_count, subject, body, state, created_at, attempt_at) VALUES (?, 'me@example.com', '[]', 1, 's', 'b', ?, 'now', 'now')",
+        )
+        .run(id, state);
     delivery("one", "sending");
     expect(() => delivery("two", "failed")).toThrow(/UNIQUE/); // one unsent delivery at a time
     delivery("three", "sent");
@@ -139,24 +183,139 @@ describe("schema migrations", () => {
         expect(db.query("SELECT id, url, status, score, note, fill_checkpoint, company_key FROM jobs").all()).toEqual([
           { id: 7, url: "https://a.example/7", status: "submitted", score: 81, note: "sent", fill_checkpoint: null, company_key: null },
         ]);
-        expect(db.query("SELECT id, job_id, worker, kind, message FROM events").all()).toEqual([{ id: 3, job_id: 7, worker: "fill", kind: "step", message: "clicked" }]);
+        expect(db.query("SELECT id, job_id, worker, kind, message FROM events").all()).toEqual([
+          { id: 3, job_id: 7, worker: "fill", kind: "step", message: "clicked" },
+        ]);
         expect(db.query("SELECT key, value FROM kv").all()).toEqual([{ key: "last.scan", value: "2026-10-01T00:00:00.000Z" }]);
         expect(db.query("SELECT domain, email, password FROM accounts").all()).toEqual([{ domain: "a.example", email: "me@example.com", password: "secret" }]);
       });
     }
 
     it("leaves a database that already has everything untouched apart from the version", () => {
+      // Only the baseline adopts what it finds; every later migration runs on a known version.
+      const baseline = MIGRATIONS.slice(0, 1);
       const db = memory();
-      migrate(db);
+      migrate(db, baseline);
       db.run("INSERT INTO jobs (id, url, source, company, title, fill_checkpoint) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'Engineer', '{}')");
       db.run("PRAGMA user_version = 0"); // as the live database was the day versioning arrived
       const before = shape(db);
 
-      expect(migrate(db).map(m => m.name)).toEqual(MIGRATIONS.map(m => m.name));
+      expect(migrate(db, baseline).map(m => m.name)).toEqual(["baseline"]);
 
       expect(shape(db)).toEqual(before);
-      expect(schemaVersion(db)).toBe(SCHEMA_VERSION);
+      expect(schemaVersion(db)).toBe(1);
       expect(db.query<{ n: number }, []>("SELECT count(*) AS n FROM jobs WHERE fill_checkpoint = '{}'").get()?.n).toBe(1);
+    });
+  });
+
+  describe("fill state (version 3)", () => {
+    // A database as version 2 left it, with the flags still in kv.
+    const beforeFillState = () => {
+      const db = memory();
+      migrate(db, MIGRATIONS.slice(0, 2));
+      db.run(`
+        INSERT INTO jobs (id, url, source, company, title, status) VALUES
+          (1, 'https://a.example/1', 'test', 'Acme', 'One', 'needs_manual'),
+          (2, 'https://a.example/2', 'test', 'Acme', 'Two', 'needs_manual'),
+          (3, 'https://a.example/3', 'test', 'Acme', 'Three', 'approved'),
+          (4, 'https://a.example/4', 'test', 'Acme', 'Four', 'found'),
+          (12, 'https://a.example/12', 'test', 'Acme', 'Twelve', 'submitted');
+        INSERT INTO kv (key, value) VALUES
+          ('fill.submitting.1', '1'), ('fill.verify.1', '0'), ('fill.recovery.1', '0'), ('fill.slot.1', '2'), ('fill.manual.1', 'gate-a'),
+          ('fill.submitting.2', '1'), ('fill.verify.2', '1'), ('fill.recovery.2', '1'),
+          ('fill.recovery.3', '1'), ('fill.slot.3', '0'),
+          ('fill.submitting.12', '0'), ('fill.slot.12', '4'),
+          ('fill.submitting.99', '1'),
+          ('fill.nextAt', '1791854250442'), ('fill.rest.0', '1791854829181.0046'), ('feedback.1', 'keep me'), ('count.fill.2026-10-12', '7');
+      `);
+      return db;
+    };
+
+    it("moves the flags out of kv without losing or inventing one", () => {
+      const db = beforeFillState();
+      expect(migrate(db, MIGRATIONS.slice(0, 3)).map(m => m.name)).toEqual(["fill state"]);
+      expect(db.query("SELECT * FROM fill_state ORDER BY job_id").all()).toEqual([
+        { job_id: 1, submitting: 1, verifying: 0, recovering: 0, slot: 2, manual_gate: "gate-a" },
+        { job_id: 2, submitting: 1, verifying: 1, recovering: 1, slot: null, manual_gate: null },
+        { job_id: 3, submitting: 0, verifying: 0, recovering: 1, slot: 0, manual_gate: null },
+        { job_id: 12, submitting: 0, verifying: 0, recovering: 0, slot: 4, manual_gate: null },
+      ]);
+      // What belonged to jobs is gone from kv (job 99 no longer exists); everything else stays.
+      expect(db.query("SELECT key, value FROM kv ORDER BY key").all()).toEqual([
+        { key: "count.fill.2026-10-12", value: "7" },
+        { key: "feedback.1", value: "keep me" },
+        { key: "fill.nextAt", value: "1791854250442" },
+        { key: "fill.rest.0", value: "1791854829181.0046" },
+      ]);
+    });
+
+    it("stops, changing nothing, on a state the app could never have meant", () => {
+      const db = beforeFillState();
+      db.run("UPDATE kv SET value = '0' WHERE key = 'fill.submitting.2'"); // verifying without submitting
+      expect(() => migrate(db, MIGRATIONS.slice(0, 3))).toThrow(/Migration 3 \(fill state\) failed and was rolled back: CHECK constraint failed/);
+      expect(schemaVersion(db)).toBe(2);
+      expect(tableNames(db)).not.toContain("fill_state");
+      expect(db.query<{ n: number }, []>("SELECT count(*) AS n FROM kv WHERE key GLOB 'fill.*'").get()?.n).toBe(15);
+    });
+
+    it("holds the state to its rules and forgets it with the job", () => {
+      const db = memory();
+      migrate(db);
+      db.run("INSERT INTO jobs (id, url, source, company, title) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'One')");
+      db.run("INSERT INTO fill_state (job_id, submitting, verifying) VALUES (1, 1, 1)");
+      expect(() => db.run("UPDATE fill_state SET submitting = 0 WHERE job_id = 1")).toThrow(/CHECK/);
+      expect(() => db.run("UPDATE fill_state SET recovering = 2 WHERE job_id = 1")).toThrow(/CHECK/);
+      expect(() => db.run("UPDATE fill_state SET slot = -1 WHERE job_id = 1")).toThrow(/CHECK/);
+      expect(() => db.run("INSERT INTO fill_state (job_id) VALUES (1)")).toThrow(/UNIQUE/);
+      db.run("DELETE FROM jobs WHERE id = 1");
+      expect(db.query("SELECT * FROM fill_state").all()).toEqual([]);
+    });
+  });
+
+  describe("the copy taken before an upgrade", () => {
+    it("holds the database exactly as it was, and is taken once", () => {
+      const path = tempPath();
+      const old = track(connectDatabase(path, "create"));
+      migrate(old, MIGRATIONS.slice(0, 1));
+      old.run("INSERT INTO kv (key, value) VALUES ('fill.submitting.7', '1')");
+      old.run("INSERT INTO jobs (id, url, source, company, title) VALUES (7, 'https://a.example/7', 'test', 'Acme', 'Seven')");
+
+      migrate(old);
+
+      const copy = track(connectDatabase(backupPath(path, 1), "readonly"));
+      expect(schemaVersion(copy)).toBe(1);
+      expect(tableNames(copy)).not.toContain("fill_state");
+      expect(copy.query("SELECT key, value FROM kv").all()).toEqual([{ key: "fill.submitting.7", value: "1" }]);
+      expect(old.query("SELECT submitting FROM fill_state WHERE job_id = 7").all()).toEqual([{ submitting: 1 }]);
+      // One copy for the whole upgrade, not one per migration.
+      for (let version = 2; version < SCHEMA_VERSION; version++) expect(existsSync(backupPath(path, version))).toBe(false);
+    });
+
+    it("is not taken for a new database, or when there is nothing to upgrade", () => {
+      const path = tempPath();
+      const db = track(connectDatabase(path, "create"));
+      migrate(db);
+      migrate(db);
+      for (let version = 0; version <= SCHEMA_VERSION; version++) expect(existsSync(backupPath(path, version))).toBe(false);
+    });
+
+    it("keeps the first copy when a failed upgrade is tried again", () => {
+      const path = tempPath();
+      const db = track(connectDatabase(path, "create"));
+      migrate(db);
+      db.run("INSERT INTO kv (key, value) VALUES ('before', 'first attempt')");
+      const failing: Migration = {
+        version: SCHEMA_VERSION + 1,
+        name: "failing",
+        up: d => {
+          d.run("INSERT INTO no_such_table VALUES (1)");
+        },
+      };
+      expect(() => migrate(db, [...MIGRATIONS, failing])).toThrow(/rolled back/);
+      db.run("UPDATE kv SET value = 'changed since' WHERE key = 'before'");
+      expect(() => migrate(db, [...MIGRATIONS, failing])).toThrow(/rolled back/);
+      const copy = track(connectDatabase(backupPath(path, SCHEMA_VERSION), "readonly"));
+      expect(copy.query("SELECT value FROM kv WHERE key = 'before'").all()).toEqual([{ value: "first attempt" }]);
     });
   });
 
@@ -181,7 +340,9 @@ describe("schema migrations", () => {
     const seeded = () => {
       const db = memory();
       migrate(db);
-      db.run("INSERT INTO jobs (id, url, source, company, title, status, note) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'Engineer', 'approved', 'kept'), (2, 'https://a.example/2', 'test', 'Acme', 'Analyst', 'found', 'kept')");
+      db.run(
+        "INSERT INTO jobs (id, url, source, company, title, status, note) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'Engineer', 'approved', 'kept'), (2, 'https://a.example/2', 'test', 'Acme', 'Analyst', 'found', 'kept')",
+      );
       return db;
     };
 
@@ -189,17 +350,25 @@ describe("schema migrations", () => {
       const db = seeded();
       expect(migrate(db, [...MIGRATIONS, addPriority]).map(m => m.name)).toEqual(["job priority"]);
       expect(schemaVersion(db)).toBe(SCHEMA_VERSION + 1);
-      expect(db.query("SELECT id, priority FROM jobs ORDER BY id").all()).toEqual([{ id: 1, priority: 1 }, { id: 2, priority: 0 }]);
+      expect(db.query("SELECT id, priority FROM jobs ORDER BY id").all()).toEqual([
+        { id: 1, priority: 1 },
+        { id: 2, priority: 0 },
+      ]);
       // Run again: a second ADD COLUMN would fail, so passing proves it was skipped.
       expect(migrate(db, [...MIGRATIONS, addPriority])).toEqual([]);
     });
 
     it("rolls a failing migration back completely and keeps the ones before it", () => {
       const db = seeded();
-      expect(() => migrate(db, [...MIGRATIONS, addPriority, broken])).toThrow(`Migration ${SCHEMA_VERSION + 2} (broken) failed and was rolled back: no such table: no_such_table`);
+      expect(() => migrate(db, [...MIGRATIONS, addPriority, broken])).toThrow(
+        `Migration ${SCHEMA_VERSION + 2} (broken) failed and was rolled back: no such table: no_such_table`,
+      );
       expect(schemaVersion(db)).toBe(SCHEMA_VERSION + 1);
       expect(tableNames(db)).toEqual(TABLES);
-      expect(db.query("SELECT id, note, priority FROM jobs ORDER BY id").all()).toEqual([{ id: 1, note: "kept", priority: 1 }, { id: 2, note: "kept", priority: 0 }]);
+      expect(db.query("SELECT id, note, priority FROM jobs ORDER BY id").all()).toEqual([
+        { id: 1, note: "kept", priority: 1 },
+        { id: 2, note: "kept", priority: 0 },
+      ]);
       expect(db.inTransaction).toBe(false);
     });
 
@@ -214,7 +383,9 @@ describe("schema migrations", () => {
 
     it("rejects a misnumbered list before touching the database", () => {
       const db = memory();
-      expect(() => migrate(db, [...MIGRATIONS, { ...addPriority, version: SCHEMA_VERSION + 2 }])).toThrow(`must be version ${SCHEMA_VERSION + 1}, not ${SCHEMA_VERSION + 2}`);
+      expect(() => migrate(db, [...MIGRATIONS, { ...addPriority, version: SCHEMA_VERSION + 2 }])).toThrow(
+        `must be version ${SCHEMA_VERSION + 1}, not ${SCHEMA_VERSION + 2}`,
+      );
       expect(() => migrate(db, [{ version: 0, name: "zero", up: () => undefined }])).toThrow("must be version 1, not 0");
       expect(schemaVersion(db)).toBe(0);
       expect(tableNames(db)).toEqual([]);
@@ -259,8 +430,7 @@ describe("opening a database", () => {
     const db = openDatabase(path, "migrate");
     db.run(`PRAGMA user_version = ${SCHEMA_VERSION + 1}`);
     db.close();
-    for (const mode of ["readonly", "readwrite"] as const)
-      expect(() => openDatabase(path, mode)).toThrow(`only knows up to version ${SCHEMA_VERSION}`);
+    for (const mode of ["readonly", "readwrite"] as const) expect(() => openDatabase(path, mode)).toThrow(`only knows up to version ${SCHEMA_VERSION}`);
     expect(() => openDatabase(path, "migrate")).toThrow(`only knows up to version ${SCHEMA_VERSION}`);
   });
 
@@ -276,7 +446,9 @@ describe("opening a database", () => {
 
   it("assertSchemaCurrent passes only at the exact version", () => {
     const db = memory();
-    expect(() => { assertSchemaCurrent(db); }).toThrow("Database schema is version 0");
+    expect(() => {
+      assertSchemaCurrent(db);
+    }).toThrow("Database schema is version 0");
     migrate(db);
     assertSchemaCurrent(db);
   });
@@ -323,11 +495,13 @@ describe("opening a database", () => {
       db.close();
     `;
     const children = Array.from({ length: 8 }, () => Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" }));
-    const results = await Promise.all(children.map(async child => ({
-      code: await child.exited,
-      out: (await new Response(child.stdout).text()).trim(),
-      err: await new Response(child.stderr).text(),
-    })));
+    const results = await Promise.all(
+      children.map(async child => ({
+        code: await child.exited,
+        out: (await new Response(child.stdout).text()).trim(),
+        err: await new Response(child.stderr).text(),
+      })),
+    );
     expect(results.map(r => r.err).join("")).toBe("");
     expect(results.map(r => r.code)).toEqual(children.map(() => 0));
     expect(results.map(r => r.out)).toEqual(children.map(() => String(SCHEMA_VERSION)));
@@ -379,7 +553,11 @@ describe("migrate command", () => {
       const child = Bun.spawnSync([process.execPath, join(import.meta.dir, "../scripts/migrate.ts"), ...args], { stdout: "pipe", stderr: "pipe" });
       return { code: child.exitCode, out: child.stdout.toString(), err: child.stderr.toString() };
     };
-    expect(cli("--status", "--db", path)).toEqual({ code: 0, out: `${path}: schema version 0 of ${SCHEMA_VERSION}; pending: ${MIGRATIONS.map(m => `${m.version} (${m.name})`).join(", ")}\n`, err: "" });
+    expect(cli("--status", "--db", path)).toEqual({
+      code: 0,
+      out: `${path}: schema version 0 of ${SCHEMA_VERSION}; pending: ${MIGRATIONS.map(m => `${m.version} (${m.name})`).join(", ")}\n`,
+      err: "",
+    });
     expect(cli("--db", path)).toMatchObject({ code: 0, err: "" });
     expect(cli("--db", path)).toEqual({ code: 0, out: `${path}: schema version ${SCHEMA_VERSION} of ${SCHEMA_VERSION}; up to date\n`, err: "" });
     expect(cli("--db", `${path}.missing`)).toEqual({ code: 1, out: "", err: `Database file not found: ${path}.missing\n` });

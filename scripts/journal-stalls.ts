@@ -268,14 +268,12 @@ const CATEGORY_RULES: {
   {
     category: "Target Compensation & Salary Expectations",
     pattern: /\b(salary|compensation|hourly\s*rate|expected\s*pay|target\s*rate|pay\s*range)\b/i,
-    suggestion:
-      "Review target compensation ranges and minimum salary guidance in profile answers for roles requiring numeric expectations.",
+    suggestion: "Review target compensation ranges and minimum salary guidance in profile answers for roles requiring numeric expectations.",
   },
   {
     category: "Legal, Criminal & Employment History Attestations",
     pattern: /\b(involuntarily\s*discharged|criminal|convicted|felony|bonding|discharge|asked\s*to\s*resign)\b/i,
-    suggestion:
-      "Review legal, bonding, and discharge attestations. Never infer candidate disciplinary or criminal background answers.",
+    suggestion: "Review legal, bonding, and discharge attestations. Never infer candidate disciplinary or criminal background answers.",
   },
 ];
 
@@ -287,8 +285,7 @@ export function categorizeQuestion(question: string): { category: string; sugges
   }
   return {
     category: "General Application Inquiries (Uncategorized)",
-    suggestion:
-      "Review the question prompt in application context to determine if standard guidance should be added to profile/answers.md.",
+    suggestion: "Review the question prompt in application context to determine if standard guidance should be added to profile/answers.md.",
   };
 }
 
@@ -353,7 +350,7 @@ interface AutoApprovalInterval {
 export function observeAutoApplyActivity(
   db: Database,
   state: JournalState | null,
-  _existingJournalContent: string
+  _existingJournalContent: string,
 ): {
   snapshot: JournalSnapshot | null;
   newState: JournalState | null;
@@ -366,43 +363,53 @@ export function observeAutoApplyActivity(
   // Execute snapshot within a consistent transaction
   const tx = db.transaction(() => {
     // 1. Retrieve all explicit auto-approval events (exact boundary required, never fallback to 0)
-    const autoApprovalEvents = db.query<EventRow, []>(`
+    const autoApprovalEvents = db
+      .query<EventRow, []>(
+        `
       SELECT id, job_id, worker, kind, message, at
       FROM events
       WHERE kind = 'auto' AND worker = 'prep' AND (message LIKE 'Approved by auto apply:%' OR message LIKE 'Approved by reconsidered auto apply:%')
       ORDER BY id ASC
-    `).all();
+    `,
+      )
+      .all();
 
     // 2. Retrieve user manual approval events to define cutoff boundaries
-    const userApprovalEvents = db.query<EventRow, []>(`
+    const userApprovalEvents = db
+      .query<EventRow, []>(
+        `
       SELECT id, job_id, worker, kind, message, at
       FROM events
       WHERE kind = 'user' AND message = 'approve'
       ORDER BY id ASC
-    `).all();
+    `,
+      )
+      .all();
 
     // 3. Build non-overlapping auto-approval intervals for each job
-    const allAutoJobIds = Array.from(
-      new Set(autoApprovalEvents.flatMap((e) => (e.job_id === null ? [] : [e.job_id])))
-    );
+    const allAutoJobIds = Array.from(new Set(autoApprovalEvents.flatMap(e => (e.job_id === null ? [] : [e.job_id]))));
     const intervals: AutoApprovalInterval[] = [];
 
     for (const jobId of allAutoJobIds) {
-      const jobAutos = autoApprovalEvents.filter((e) => e.job_id === jobId);
-      const jobUsers = userApprovalEvents.filter((e) => e.job_id === jobId);
+      const jobAutos = autoApprovalEvents.filter(e => e.job_id === jobId);
+      const jobUsers = userApprovalEvents.filter(e => e.job_id === jobId);
 
       for (const [i, autoEv] of jobAutos.entries()) {
         const nextAutoId = jobAutos[i + 1]?.id ?? Infinity;
-        const nextUser = jobUsers.find((u) => u.id > autoEv.id);
+        const nextUser = jobUsers.find(u => u.id > autoEv.id);
         const nextUserId = nextUser ? nextUser.id : Infinity;
         const endId = Math.min(nextAutoId, nextUserId);
 
         // Check for actual live fill worker evidence within this auto-apply interval
-        const fillEvent = db.query<EventRow, [number, number, number]>(`
+        const fillEvent = db
+          .query<EventRow, [number, number, number]>(
+            `
           SELECT id, at FROM events
           WHERE job_id = ? AND worker = 'fill' AND id >= ? AND id < ?
           ORDER BY id ASC LIMIT 1
-        `).get(jobId, autoEv.id, endId);
+        `,
+          )
+          .get(jobId, autoEv.id, endId);
 
         if (fillEvent) {
           intervals.push({
@@ -431,25 +438,35 @@ export function observeAutoApplyActivity(
       };
     }
 
-    const uniqueJobIds = Array.from(new Set(intervals.map((inv) => inv.jobId)));
+    const uniqueJobIds = Array.from(new Set(intervals.map(inv => inv.jobId)));
     // One bound JSON array stands in for the id list, so no value is ever spliced into the SQL.
     const jobIdList = JSON.stringify(uniqueJobIds);
-    const eligibleJobRows = db.query<JobRow, [string]>(`
+    const eligibleJobRows = db
+      .query<JobRow, [string]>(
+        `
       SELECT id, company, title, status, approved_by, submitted_at, pending, updated_at
       FROM jobs
       WHERE id IN (SELECT value FROM json_each(?))
-    `).all(jobIdList);
+    `,
+      )
+      .all(jobIdList);
 
     // 4. Retrieve candidate question gates strictly under worker = 'fill'
-    const allGates = db.query<EventRow, [string]>(`
+    const allGates = db
+      .query<EventRow, [string]>(
+        `
       SELECT id, job_id, worker, kind, message, at
       FROM events
       WHERE kind = 'gate' AND worker = 'fill' AND job_id IN (SELECT value FROM json_each(?))
       ORDER BY id ASC
-    `).all(jobIdList);
+    `,
+      )
+      .all(jobIdList);
 
     // 5. Retrieve non-KB blockers: manual stalls, confirm_submit gates, fill worker errors and report failures
-    const otherBlockerEvents = db.query<EventRow, [string]>(`
+    const otherBlockerEvents = db
+      .query<EventRow, [string]>(
+        `
       SELECT id, job_id, worker, kind, message, at
       FROM events
       WHERE worker = 'fill'
@@ -461,7 +478,9 @@ export function observeAutoApplyActivity(
           OR (kind = 'step' AND message LIKE '%failed%')
         )
       ORDER BY id ASC
-    `).all(jobIdList);
+    `,
+      )
+      .all(jobIdList);
 
     return {
       intervals,
@@ -478,7 +497,7 @@ export function observeAutoApplyActivity(
     return { snapshot: null, newState: null };
   }
 
-  const jobsMap = new Map<number, JobRow>(eligibleJobRows.map((j) => [j.id, j]));
+  const jobsMap = new Map<number, JobRow>(eligibleJobRows.map(j => [j.id, j]));
 
   // Build eligible attempts
   const eligibleAttempts: AutoApplyJobAttempt[] = [];
@@ -520,7 +539,7 @@ export function observeAutoApplyActivity(
   for (const g of allGates) {
     if (!g.job_id) continue;
     // Check if g falls within any auto interval for this job
-    const matchedInv = intervals.find((inv) => inv.jobId === g.job_id && g.id >= inv.startId && g.id < inv.endId);
+    const matchedInv = intervals.find(inv => inv.jobId === g.job_id && g.id >= inv.startId && g.id < inv.endId);
     if (!matchedInv) continue;
 
     const job = jobsMap.get(g.job_id);
@@ -568,7 +587,7 @@ export function observeAutoApplyActivity(
   const newBlockers: OtherBlockerEvidence[] = [];
   for (const b of otherBlockerEvents) {
     if (!b.job_id) continue;
-    const matchedInv = intervals.find((inv) => inv.jobId === b.job_id && b.id >= inv.startId && b.id < inv.endId);
+    const matchedInv = intervals.find(inv => inv.jobId === b.job_id && b.id >= inv.startId && b.id < inv.endId);
     if (!matchedInv) continue;
 
     const job = jobsMap.get(b.job_id);
@@ -621,11 +640,15 @@ export function observeAutoApplyActivity(
     if (!hasRealChanges) {
       // Check for any recent fill worker events in auto intervals
       for (const inv of intervals) {
-        const recentFill = db.query<EventRow, [number, number, number, number]>(`
+        const recentFill = db
+          .query<EventRow, [number, number, number, number]>(
+            `
           SELECT id FROM events
           WHERE job_id = ? AND worker = 'fill' AND id > ? AND id >= ? AND id < ?
           LIMIT 1
-        `).get(inv.jobId, sinceEventId, inv.startId, inv.endId);
+        `,
+          )
+          .get(inv.jobId, sinceEventId, inv.startId, inv.endId);
         if (recentFill) {
           hasRealChanges = true;
           break;
@@ -668,23 +691,17 @@ export function observeAutoApplyActivity(
   for (const att of eligibleAttempts) {
     if (att.status === "needs_input") {
       // Find latest gate event in that interval
-      const gateEv = allAttributedGates.filter((g) => g.jobId === att.jobId).pop();
-      const stalledSince = gateEv
-        ? gateEv.at
-        : att.pendingShot
-        ? new Date(att.pendingShot).toISOString()
-        : "Time unknown";
+      const gateEv = allAttributedGates.filter(g => g.jobId === att.jobId).pop();
+      const stalledSince = gateEv ? gateEv.at : att.pendingShot ? new Date(att.pendingShot).toISOString() : "Time unknown";
       currentlyStalled.push({
         jobId: att.jobId,
         company: att.company,
         title: att.title,
         stalledSince,
-        reason: gateEv
-          ? `Gate: ${gateEv.category} (Event #${gateEv.eventId})`
-          : "Awaiting candidate input",
+        reason: gateEv ? `Gate: ${gateEv.category} (Event #${gateEv.eventId})` : "Awaiting candidate input",
       });
     } else if (att.status === "needs_manual") {
-      const blockerEv = otherBlockerEvents.filter((b) => b.job_id === att.jobId).pop();
+      const blockerEv = otherBlockerEvents.filter(b => b.job_id === att.jobId).pop();
       currentlyStalled.push({
         jobId: att.jobId,
         company: att.company,
@@ -693,7 +710,7 @@ export function observeAutoApplyActivity(
         reason: "Requires manual browser intervention",
       });
     } else if (att.status === "failed") {
-      const failEv = otherBlockerEvents.filter((b) => b.job_id === att.jobId).pop();
+      const failEv = otherBlockerEvents.filter(b => b.job_id === att.jobId).pop();
       currentlyStalled.push({
         jobId: att.jobId,
         company: att.company,
@@ -706,13 +723,13 @@ export function observeAutoApplyActivity(
 
   // 11. Bounded progress table: active jobs or jobs touched in this scope
   const activeOrRecentJobs = eligibleAttempts.filter(
-    (att) =>
+    att =>
       att.status === "filling" ||
       att.status === "needs_input" ||
       att.status === "needs_manual" ||
       att.status === "awaiting_submit" ||
       att.firstFillEventId > sinceEventId ||
-      prevStatuses[att.jobId] !== att.status
+      prevStatuses[att.jobId] !== att.status,
   );
 
   const updatedReportedGates = new Set(reportedGates);
@@ -792,11 +809,11 @@ export function formatJournalEntry(snapshot: JournalSnapshot): string {
   // Section 1: Application Attempt & Progress Summary
   lines.push("#### 1. Application Attempts & Progress Summary");
   const totalEligible = snapshot.eligibleJobs.length;
-  const submitted = snapshot.eligibleJobs.filter((j) => j.status === "submitted" || j.submittedAt !== null);
-  const activeFilling = snapshot.eligibleJobs.filter((j) => j.status === "filling");
-  const awaitingSubmit = snapshot.eligibleJobs.filter((j) => j.status === "awaiting_submit");
-  const stalledInput = snapshot.eligibleJobs.filter((j) => j.status === "needs_input");
-  const failedOrManual = snapshot.eligibleJobs.filter((j) => j.status === "failed" || j.status === "needs_manual");
+  const submitted = snapshot.eligibleJobs.filter(j => j.status === "submitted" || j.submittedAt !== null);
+  const activeFilling = snapshot.eligibleJobs.filter(j => j.status === "filling");
+  const awaitingSubmit = snapshot.eligibleJobs.filter(j => j.status === "awaiting_submit");
+  const stalledInput = snapshot.eligibleJobs.filter(j => j.status === "needs_input");
+  const failedOrManual = snapshot.eligibleJobs.filter(j => j.status === "failed" || j.status === "needs_manual");
 
   lines.push(`- **Auto-Approved Applications in Scope**: ${totalEligible}`);
   lines.push(`- **Completed Submissions**: ${submitted.length}`);
@@ -813,9 +830,7 @@ export function formatJournalEntry(snapshot: JournalSnapshot): string {
     lines.push("| Job ID | Company | Role | Current Status | Fill Started | Submitted |");
     lines.push("| :--- | :--- | :--- | :--- | :--- | :--- |");
     for (const j of snapshot.activeOrRecentJobs) {
-      lines.push(
-        `| #${j.jobId} | ${j.company} | ${j.title} | \`${j.status}\` | ${j.firstFillAt} | ${j.submittedAt ?? "—"} |`
-      );
+      lines.push(`| #${j.jobId} | ${j.company} | ${j.title} | \`${j.status}\` | ${j.firstFillAt} | ${j.submittedAt ?? "—"} |`);
     }
     lines.push("");
   }
@@ -827,7 +842,7 @@ export function formatJournalEntry(snapshot: JournalSnapshot): string {
     lines.push("");
   } else {
     lines.push(
-      "The following form questions required candidate input that could not be answered automatically from `profile/personal.yml` or `profile/answers.md`:"
+      "The following form questions required candidate input that could not be answered automatically from `profile/personal.yml` or `profile/answers.md`:",
     );
     lines.push("");
 
@@ -858,9 +873,7 @@ export function formatJournalEntry(snapshot: JournalSnapshot): string {
     lines.push("No candidate input themes recorded in auto-apply history.");
     lines.push("");
   } else {
-    lines.push(
-      "Theme counts represent distinct applications requiring candidate input (cumulative across checks):"
-    );
+    lines.push("Theme counts represent distinct applications requiring candidate input (cumulative across checks):");
     lines.push("");
     for (const [category, { count, suggestion }] of themeEntries) {
       const label = count === 1 ? "(1 application affected)" : `(${count} applications affected — recurring)`;
@@ -883,9 +896,7 @@ export function formatJournalEntry(snapshot: JournalSnapshot): string {
   if (snapshot.currentlyStalled.length > 0) {
     lines.push("#### 5. Active Stalls Requiring Attention");
     for (const s of snapshot.currentlyStalled) {
-      lines.push(
-        `- **Job #${s.jobId}** (${s.company} - \`${s.title}\`): Waiting since ${s.stalledSince}. ${s.reason}`
-      );
+      lines.push(`- **Job #${s.jobId}** (${s.company} - \`${s.title}\`): Waiting since ${s.stalledSince}. ${s.reason}`);
     }
     lines.push("");
   }
@@ -918,7 +929,7 @@ export function updateJournalFile(journalPath: string, entryContent: string): vo
 
 export function runMonitor(options: CliOptions): Promise<MonitorResult> {
   // The work is synchronous; the promise keeps failures surfacing as rejections for callers.
-  return new Promise((resolveResult) => {
+  return new Promise(resolveResult => {
     resolveResult(monitorOnce(options));
   });
 }
@@ -931,9 +942,7 @@ function monitorOnce(options: CliOptions): MonitorResult {
   const db = openDatabase(options.dbPath, "readonly");
   try {
     const state = loadState(options.statePath, options.journalPath);
-    const existingContent = existsSync(options.journalPath)
-      ? readFileSync(options.journalPath, "utf8")
-      : "";
+    const existingContent = existsSync(options.journalPath) ? readFileSync(options.journalPath, "utf8") : "";
 
     const { snapshot, newState } = observeAutoApplyActivity(db, state, existingContent);
 

@@ -31,12 +31,9 @@ function parsePacket(text: string): Wire {
     throw new Error("Invalid packet");
   }
   const obj = val as Record<string, unknown>;
-  const params = typeof obj["params"] === "object" && obj["params"] !== null && !Array.isArray(obj["params"])
-    ? (obj["params"] as Record<string, unknown>)
-    : {};
-  const result = typeof obj["result"] === "object" && obj["result"] !== null && !Array.isArray(obj["result"])
-    ? (obj["result"] as Record<string, unknown>)
-    : undefined;
+  const params = typeof obj["params"] === "object" && obj["params"] !== null && !Array.isArray(obj["params"]) ? (obj["params"] as Record<string, unknown>) : {};
+  const result =
+    typeof obj["result"] === "object" && obj["result"] !== null && !Array.isArray(obj["result"]) ? (obj["result"] as Record<string, unknown>) : undefined;
   return {
     id: typeof obj["id"] === "number" ? obj["id"] : undefined,
     method: typeof obj["method"] === "string" ? obj["method"] : undefined,
@@ -53,9 +50,8 @@ interface TestHarnessOptions {
 }
 
 function createHarness(options: TestHarnessOptions = {}) {
-  const nativeUa = options.nativeUa === undefined
-    ? "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-    : options.nativeUa;
+  const nativeUa =
+    options.nativeUa === undefined ? "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36" : options.nativeUa;
 
   const upstreamMessages: Wire[] = [];
   const upstreamSockets = new Set<ServerWebSocket<UpstreamConnection>>();
@@ -66,9 +62,7 @@ function createHarness(options: TestHarnessOptions = {}) {
     fetch(req, server) {
       const url = new URL(req.url);
       if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
-        return server.upgrade(req, { data: { path: url.pathname } })
-          ? undefined
-          : new Response("upgrade failed", { status: 400 });
+        return server.upgrade(req, { data: { path: url.pathname } }) ? undefined : new Response("upgrade failed", { status: 400 });
       }
       if (url.pathname === "/json/version") {
         if (nativeUa === null) {
@@ -136,9 +130,7 @@ function createHarness(options: TestHarnessOptions = {}) {
   config.chrome.cdpPort = upstreamPort;
   config.chrome.proxyPort = 0;
 
-  const scope = options.scopeTargetId
-    ? { targetId: options.scopeTargetId, excludedTargets: new Set<string>() }
-    : undefined;
+  const scope = options.scopeTargetId ? { targetId: options.scopeTargetId, excludedTargets: new Set<string>() } : undefined;
 
   const proxy: CdpProxy = startCdpProxy(0, scope);
 
@@ -153,15 +145,19 @@ function createHarness(options: TestHarnessOptions = {}) {
   async function connectClient(path = `/devtools/page/${options.scopeTargetId ?? "target-1"}`) {
     const ws = new WebSocket(`ws://127.0.0.1:${proxy.port}${path}`);
     const ready: PromiseWithResolvers<void> = Promise.withResolvers();
-    ws.onopen = () => { ready.resolve(); };
-    ws.onerror = (e) => { ready.reject(new Error(`WebSocket error: ${e.type}`)); };
+    ws.onopen = () => {
+      ready.resolve();
+    };
+    ws.onerror = e => {
+      ready.reject(new Error(`WebSocket error: ${e.type}`));
+    };
 
     const pending = new Map<number, (reply: Wire) => void>();
     const eventWaiters = new Map<string, ((event: Wire) => void)[]>();
     const events: Wire[] = [];
     let nextId = 0;
 
-    ws.onmessage = (ev) => {
+    ws.onmessage = ev => {
       const msg = parsePacket(String(ev.data));
       if (msg.id !== undefined) {
         const handler = pending.get(msg.id);
@@ -186,7 +182,9 @@ function createHarness(options: TestHarnessOptions = {}) {
     async function send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<Wire> {
       const id = ++nextId;
       const { promise, resolve } = Promise.withResolvers<Wire>();
-      pending.set(id, (reply) => { resolve(reply); });
+      pending.set(id, reply => {
+        resolve(reply);
+      });
       ws.send(JSON.stringify({ id, method, params, sessionId }));
       return promise;
     }
@@ -197,7 +195,7 @@ function createHarness(options: TestHarnessOptions = {}) {
     assert.equal(handshake.error, undefined, "transport handshake roundtrip failed");
 
     function waitForEvent(method: string): Promise<Wire> {
-      const existingIdx = events.findIndex((e) => e.method === method);
+      const existingIdx = events.findIndex(e => e.method === method);
       if (existingIdx !== -1) {
         const [found] = events.splice(existingIdx, 1);
         if (!found) throw new Error(`Buffered ${method} event vanished`);
@@ -413,19 +411,27 @@ describe("CDP proxy scoped passive console capture", () => {
       const client = await harness.connectClient();
       const eventPromise = client.waitForEvent("Runtime.consoleAPICalled");
 
-      harness.broadcastUpstreamEvent("Runtime.consoleAPICalled", {
-        type: "log",
-        args: [{ type: "object", objectId: "obj-canary-42", className: "Object", description: "Object" }],
-      }, "sess-1");
+      harness.broadcastUpstreamEvent(
+        "Runtime.consoleAPICalled",
+        {
+          type: "log",
+          args: [{ type: "object", objectId: "obj-canary-42", className: "Object", description: "Object" }],
+        },
+        "sess-1",
+      );
 
       await eventPromise;
 
-      const reply = await client.send("Runtime.callFunctionOn", {
-        objectId: "obj-canary-42",
-        functionDeclaration: "function() { return this; }",
-        returnByValue: true,
-        silent: true,
-      }, "sess-1");
+      const reply = await client.send(
+        "Runtime.callFunctionOn",
+        {
+          objectId: "obj-canary-42",
+          functionDeclaration: "function() { return this; }",
+          returnByValue: true,
+          silent: true,
+        },
+        "sess-1",
+      );
 
       assert.equal(reply.error, undefined);
       const res = reply.result?.["result"] as RemoteObject | undefined;
@@ -450,19 +456,27 @@ describe("CDP proxy scoped passive console capture", () => {
       const client = await harness.connectClient();
       const eventPromise = client.waitForEvent("Runtime.consoleAPICalled");
 
-      harness.broadcastUpstreamEvent("Runtime.consoleAPICalled", {
-        type: "log",
-        args: [{ type: "object", objectId: "obj-single-inspect", className: "Object", description: "Object" }],
-      }, "sess-1");
+      harness.broadcastUpstreamEvent(
+        "Runtime.consoleAPICalled",
+        {
+          type: "log",
+          args: [{ type: "object", objectId: "obj-single-inspect", className: "Object", description: "Object" }],
+        },
+        "sess-1",
+      );
 
       await eventPromise;
 
-      await client.send("Runtime.callFunctionOn", {
-        objectId: "obj-single-inspect",
-        functionDeclaration: "function() { return this; }",
-        returnByValue: true,
-        silent: true,
-      }, "sess-1");
+      await client.send(
+        "Runtime.callFunctionOn",
+        {
+          objectId: "obj-single-inspect",
+          functionDeclaration: "function() { return this; }",
+          returnByValue: true,
+          silent: true,
+        },
+        "sess-1",
+      );
 
       const firstCall = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn" && m.params["objectId"] === "obj-single-inspect");
       assert.ok(firstCall);
@@ -470,12 +484,16 @@ describe("CDP proxy scoped passive console capture", () => {
       assert.equal(firstCall.params["generatePreview"], true);
 
       harness.upstreamMessages.length = 0;
-      await client.send("Runtime.callFunctionOn", {
-        objectId: "obj-single-inspect",
-        functionDeclaration: "function() { return this; }",
-        returnByValue: true,
-        silent: true,
-      }, "sess-1");
+      await client.send(
+        "Runtime.callFunctionOn",
+        {
+          objectId: "obj-single-inspect",
+          functionDeclaration: "function() { return this; }",
+          returnByValue: true,
+          silent: true,
+        },
+        "sess-1",
+      );
 
       const secondCall = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn" && m.params["objectId"] === "obj-single-inspect");
       assert.ok(secondCall);
@@ -493,19 +511,27 @@ describe("CDP proxy scoped passive console capture", () => {
       const client = await harness.connectClient();
       const eventPromise = client.waitForEvent("Runtime.consoleAPICalled");
 
-      harness.broadcastUpstreamEvent("Runtime.consoleAPICalled", {
-        type: "log",
-        args: [{ type: "object", objectId: "obj-session-a", className: "Object", description: "Object" }],
-      }, "session-A");
+      harness.broadcastUpstreamEvent(
+        "Runtime.consoleAPICalled",
+        {
+          type: "log",
+          args: [{ type: "object", objectId: "obj-session-a", className: "Object", description: "Object" }],
+        },
+        "session-A",
+      );
 
       await eventPromise;
 
-      await client.send("Runtime.callFunctionOn", {
-        objectId: "obj-session-a",
-        functionDeclaration: "function() { return this; }",
-        returnByValue: true,
-        silent: true,
-      }, "session-B");
+      await client.send(
+        "Runtime.callFunctionOn",
+        {
+          objectId: "obj-session-a",
+          functionDeclaration: "function() { return this; }",
+          returnByValue: true,
+          silent: true,
+        },
+        "session-B",
+      );
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded);
@@ -522,12 +548,16 @@ describe("CDP proxy scoped passive console capture", () => {
     const harness = createHarness();
     try {
       const client = await harness.connectClient();
-      await client.send("Runtime.callFunctionOn", {
-        objectId: "obj-eval-unlogged",
-        functionDeclaration: "function() { return this; }",
-        returnByValue: true,
-        silent: true,
-      }, "sess-1");
+      await client.send(
+        "Runtime.callFunctionOn",
+        {
+          objectId: "obj-eval-unlogged",
+          functionDeclaration: "function() { return this; }",
+          returnByValue: true,
+          silent: true,
+        },
+        "sess-1",
+      );
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded);
@@ -545,19 +575,27 @@ describe("CDP proxy scoped passive console capture", () => {
       const client = await harness.connectClient();
       const eventPromise = client.waitForEvent("Runtime.consoleAPICalled");
 
-      harness.broadcastUpstreamEvent("Runtime.consoleAPICalled", {
-        type: "log",
-        args: [{ type: "object", objectId: "obj-custom-fn", className: "Object", description: "Object" }],
-      }, "sess-1");
+      harness.broadcastUpstreamEvent(
+        "Runtime.consoleAPICalled",
+        {
+          type: "log",
+          args: [{ type: "object", objectId: "obj-custom-fn", className: "Object", description: "Object" }],
+        },
+        "sess-1",
+      );
 
       await eventPromise;
 
-      await client.send("Runtime.callFunctionOn", {
-        objectId: "obj-custom-fn",
-        functionDeclaration: "function() { return this.someProperty; }",
-        returnByValue: true,
-        silent: true,
-      }, "sess-1");
+      await client.send(
+        "Runtime.callFunctionOn",
+        {
+          objectId: "obj-custom-fn",
+          functionDeclaration: "function() { return this.someProperty; }",
+          returnByValue: true,
+          silent: true,
+        },
+        "sess-1",
+      );
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded);
@@ -575,20 +613,28 @@ describe("CDP proxy scoped passive console capture", () => {
       const client = await harness.connectClient();
       const eventPromise = client.waitForEvent("Runtime.consoleAPICalled");
 
-      harness.broadcastUpstreamEvent("Runtime.consoleAPICalled", {
-        type: "log",
-        args: [{ type: "object", objectId: "obj-with-args", className: "Object", description: "Object" }],
-      }, "sess-1");
+      harness.broadcastUpstreamEvent(
+        "Runtime.consoleAPICalled",
+        {
+          type: "log",
+          args: [{ type: "object", objectId: "obj-with-args", className: "Object", description: "Object" }],
+        },
+        "sess-1",
+      );
 
       await eventPromise;
 
-      await client.send("Runtime.callFunctionOn", {
-        objectId: "obj-with-args",
-        functionDeclaration: "function() { return this; }",
-        returnByValue: true,
-        silent: true,
-        arguments: [{ value: 1 }],
-      }, "sess-1");
+      await client.send(
+        "Runtime.callFunctionOn",
+        {
+          objectId: "obj-with-args",
+          functionDeclaration: "function() { return this; }",
+          returnByValue: true,
+          silent: true,
+          arguments: [{ value: 1 }],
+        },
+        "sess-1",
+      );
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded);
@@ -606,10 +652,14 @@ describe("CDP proxy scoped passive console capture", () => {
       const client = await harness.connectClient();
       const logEvent = client.waitForEvent("Runtime.consoleAPICalled");
 
-      harness.broadcastUpstreamEvent("Runtime.consoleAPICalled", {
-        type: "log",
-        args: [{ type: "object", objectId: "obj-to-clear", className: "Object", description: "Object" }],
-      }, "sess-1");
+      harness.broadcastUpstreamEvent(
+        "Runtime.consoleAPICalled",
+        {
+          type: "log",
+          args: [{ type: "object", objectId: "obj-to-clear", className: "Object", description: "Object" }],
+        },
+        "sess-1",
+      );
 
       await logEvent;
 
@@ -617,12 +667,16 @@ describe("CDP proxy scoped passive console capture", () => {
       harness.broadcastUpstreamEvent("Runtime.executionContextsCleared", {}, "sess-1");
       await clearEvent;
 
-      await client.send("Runtime.callFunctionOn", {
-        objectId: "obj-to-clear",
-        functionDeclaration: "function() { return this; }",
-        returnByValue: true,
-        silent: true,
-      }, "sess-1");
+      await client.send(
+        "Runtime.callFunctionOn",
+        {
+          objectId: "obj-to-clear",
+          functionDeclaration: "function() { return this; }",
+          returnByValue: true,
+          silent: true,
+        },
+        "sess-1",
+      );
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded);
@@ -640,21 +694,29 @@ describe("CDP proxy scoped passive console capture", () => {
       const client = await harness.connectClient();
       const eventPromise = client.waitForEvent("Runtime.consoleAPICalled");
 
-      harness.broadcastUpstreamEvent("Runtime.consoleAPICalled", {
-        type: "log",
-        args: [{ type: "object", objectId: "obj-to-release", className: "Object", description: "Object" }],
-      }, "sess-1");
+      harness.broadcastUpstreamEvent(
+        "Runtime.consoleAPICalled",
+        {
+          type: "log",
+          args: [{ type: "object", objectId: "obj-to-release", className: "Object", description: "Object" }],
+        },
+        "sess-1",
+      );
 
       await eventPromise;
 
       await client.send("Runtime.releaseObject", { objectId: "obj-to-release" }, "sess-1");
 
-      await client.send("Runtime.callFunctionOn", {
-        objectId: "obj-to-release",
-        functionDeclaration: "function() { return this; }",
-        returnByValue: true,
-        silent: true,
-      }, "sess-1");
+      await client.send(
+        "Runtime.callFunctionOn",
+        {
+          objectId: "obj-to-release",
+          functionDeclaration: "function() { return this; }",
+          returnByValue: true,
+          silent: true,
+        },
+        "sess-1",
+      );
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded);
@@ -672,10 +734,14 @@ describe("CDP proxy scoped passive console capture", () => {
       const client = await harness.connectClient();
       const logEvent = client.waitForEvent("Runtime.consoleAPICalled");
 
-      harness.broadcastUpstreamEvent("Runtime.consoleAPICalled", {
-        type: "log",
-        args: [{ type: "object", objectId: "obj-detached-sess", className: "Object", description: "Object" }],
-      }, "sess-1");
+      harness.broadcastUpstreamEvent(
+        "Runtime.consoleAPICalled",
+        {
+          type: "log",
+          args: [{ type: "object", objectId: "obj-detached-sess", className: "Object", description: "Object" }],
+        },
+        "sess-1",
+      );
 
       await logEvent;
 
@@ -683,12 +749,16 @@ describe("CDP proxy scoped passive console capture", () => {
       harness.broadcastUpstreamEvent("Target.detachedFromTarget", { sessionId: "sess-1" });
       await detachEvent;
 
-      await client.send("Runtime.callFunctionOn", {
-        objectId: "obj-detached-sess",
-        functionDeclaration: "function() { return this; }",
-        returnByValue: true,
-        silent: true,
-      }, "sess-1");
+      await client.send(
+        "Runtime.callFunctionOn",
+        {
+          objectId: "obj-detached-sess",
+          functionDeclaration: "function() { return this; }",
+          returnByValue: true,
+          silent: true,
+        },
+        "sess-1",
+      );
 
       const forwarded = harness.upstreamMessages.find(m => m.method === "Runtime.callFunctionOn");
       assert.ok(forwarded);

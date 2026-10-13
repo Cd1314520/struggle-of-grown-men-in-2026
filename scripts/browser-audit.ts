@@ -294,14 +294,18 @@ Options:
       opts.screenshotDir = resolve(process.cwd(), next);
       i++;
     } else if (arg.startsWith("--checkers=")) {
-      opts.checkers = inlineValue(arg).split(",").map(s => s.trim().toLowerCase());
+      opts.checkers = inlineValue(arg)
+        .split(",")
+        .map(s => s.trim().toLowerCase());
       checkersExplicit = true;
     } else if (arg === "--checkers" && next) {
       opts.checkers = next.split(",").map(s => s.trim().toLowerCase());
       i++;
       checkersExplicit = true;
     } else if (arg.startsWith("--routes=")) {
-      opts.routes = inlineValue(arg).split(",").map(s => s.trim().toLowerCase());
+      opts.routes = inlineValue(arg)
+        .split(",")
+        .map(s => s.trim().toLowerCase());
       routesExplicit = true;
     } else if (arg === "--routes" && next) {
       opts.routes = next.split(",").map(s => s.trim().toLowerCase());
@@ -340,7 +344,9 @@ function isPortInUse(port: number): Promise<boolean> {
     sock.destroy();
     resolve(true);
   });
-  sock.once("error", () => { resolve(false); });
+  sock.once("error", () => {
+    resolve(false);
+  });
   return promise;
 }
 
@@ -351,7 +357,9 @@ function isDisplayInUse(display: string): Promise<boolean> {
     sock.destroy();
     resolve(true);
   });
-  sock.once("error", () => { resolve(false); });
+  sock.once("error", () => {
+    resolve(false);
+  });
   return promise;
 }
 
@@ -436,21 +444,37 @@ async function setupSandbox(opts: AuditOptions): Promise<AuditSandbox> {
     const pids = await findAuditPids(opts.display, profileDir);
     if (pids.length > 0) {
       for (const pid of pids) {
-        try { process.kill(pid, "SIGTERM"); } catch { /* already exited */ }
+        try {
+          process.kill(pid, "SIGTERM");
+        } catch {
+          /* already exited */
+        }
       }
       await Bun.sleep(400);
       const remaining = await findAuditPids(opts.display, profileDir);
       for (const pid of remaining) {
-        try { process.kill(pid, "SIGKILL"); } catch { /* already exited */ }
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          /* already exited */
+        }
       }
     }
 
     // Only unlink socket and lock if this audit process actually created it
     if (createdSocket && existsSync(socketPath)) {
-      try { rmSync(socketPath, { force: true }); } catch { /* best-effort cleanup */ }
+      try {
+        rmSync(socketPath, { force: true });
+      } catch {
+        /* best-effort cleanup */
+      }
     }
     if (createdSocket && existsSync(lockPath)) {
-      try { rmSync(lockPath, { force: true }); } catch { /* best-effort cleanup */ }
+      try {
+        rmSync(lockPath, { force: true });
+      } catch {
+        /* best-effort cleanup */
+      }
     }
 
     // Remove temporary data dir
@@ -505,7 +529,9 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
   const events = new Map<string, ((params: Record<string, unknown>) => void)[]>();
 
   const { promise: connectPromise, resolve: resolveConnect, reject: rejectConnect } = Promise.withResolvers<undefined>();
-  const timer = setTimeout(() => { rejectConnect(new Error(`WebSocket connection timeout to ${wsUrl}`)); }, 6000);
+  const timer = setTimeout(() => {
+    rejectConnect(new Error(`WebSocket connection timeout to ${wsUrl}`));
+  }, 6000);
   ws.onopen = () => {
     clearTimeout(timer);
     resolveConnect(undefined);
@@ -526,7 +552,7 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
   };
   await connectPromise;
 
-  ws.onmessage = (ev) => {
+  ws.onmessage = ev => {
     try {
       const msg = JSON.parse(String(ev.data)) as {
         id?: number;
@@ -565,8 +591,14 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
     }, timeoutMs);
 
     pending.set(id, {
-      resolve: (val) => { clearTimeout(reqTimer); resolve(val); },
-      reject: (err) => { clearTimeout(reqTimer); reject(err); },
+      resolve: val => {
+        clearTimeout(reqTimer);
+        resolve(val);
+      },
+      reject: err => {
+        clearTimeout(reqTimer);
+        reject(err);
+      },
     });
     try {
       const payload: Record<string, unknown> = { id, method, params };
@@ -603,7 +635,9 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
 
     // Held in an object so the flag set by the event listener is visible to the wait loop below.
     const loadState = { fired: false };
-    const onLoad = () => { loadState.fired = true; };
+    const onLoad = () => {
+      loadState.fired = true;
+    };
     let loadListeners = events.get("Page.loadEventFired");
     if (!loadListeners) {
       loadListeners = [];
@@ -645,7 +679,11 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
   };
 
   const close = () => {
-    try { ws.close(); } catch { /* socket already closed */ }
+    try {
+      ws.close();
+    } catch {
+      /* socket already closed */
+    }
   };
 
   return {
@@ -653,7 +691,9 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
     evaluate,
     navigate,
     captureScreenshot,
-    setSessionId: (sid: string) => { currentSessionId = sid; },
+    setSessionId: (sid: string) => {
+      currentSessionId = sid;
+    },
     close,
     targetId,
   };
@@ -707,13 +747,13 @@ function computeWireDomCoherence(
   wireNav: CapturedHttpHeaders | null,
   wireApi: CapturedHttpHeaders | null,
   domUa: Record<string, unknown>,
-  domLang: Record<string, unknown>
+  domLang: Record<string, unknown>,
 ): WireDomCoherence {
   const primaryWire = wireApi ?? wireNav;
   const mismatches: string[] = [];
 
   const domUserAgent = typeof domUa["userAgent"] === "string" ? domUa["userAgent"] : "";
-  const domPlatform = typeof domUa["platformFromUad"] === "string" ? domUa["platformFromUad"] : (typeof domUa["platform"] === "string" ? domUa["platform"] : "");
+  const domPlatform = typeof domUa["platformFromUad"] === "string" ? domUa["platformFromUad"] : typeof domUa["platform"] === "string" ? domUa["platform"] : "";
   const domMobile = Boolean(domUa["mobile"]);
   const domBrands = Array.isArray(domUa["brands"]) ? (domUa["brands"] as { brand: string; version: string }[]) : [];
   const domLanguages = Array.isArray(domLang["languages"]) ? (domLang["languages"] as string[]) : [];
@@ -835,16 +875,15 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       }
 
       captured.navigation = headers;
-      return new Response(
-        "<!DOCTYPE html><html><head><title>Diagnostic</title></head><body>Diagnostic Secure Context</body></html>",
-        {
-          headers: {
-            "Content-Type": "text/html",
-            "Accept-CH": "Sec-CH-UA, Sec-CH-UA-Mobile, Sec-CH-UA-Platform, Sec-CH-UA-Arch, Sec-CH-UA-Bitness, Sec-CH-UA-Model, Sec-CH-UA-Platform-Version, Sec-CH-UA-Full-Version-List",
-            "Permissions-Policy": "ch-ua=*, ch-ua-mobile=*, ch-ua-platform=*, ch-ua-arch=*, ch-ua-bitness=*, ch-ua-model=*, ch-ua-platform-version=*, ch-ua-full-version-list=*",
-          },
-        }
-      );
+      return new Response("<!DOCTYPE html><html><head><title>Diagnostic</title></head><body>Diagnostic Secure Context</body></html>", {
+        headers: {
+          "Content-Type": "text/html",
+          "Accept-CH":
+            "Sec-CH-UA, Sec-CH-UA-Mobile, Sec-CH-UA-Platform, Sec-CH-UA-Arch, Sec-CH-UA-Bitness, Sec-CH-UA-Model, Sec-CH-UA-Platform-Version, Sec-CH-UA-Full-Version-List",
+          "Permissions-Policy":
+            "ch-ua=*, ch-ua-mobile=*, ch-ua-platform=*, ch-ua-arch=*, ch-ua-bitness=*, ch-ua-model=*, ch-ua-platform-version=*, ch-ua-full-version-list=*",
+        },
+      });
     },
   });
   const diagOrigin = `http://127.0.0.1:${diagServer.port}`;
@@ -1161,12 +1200,7 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       }
     })()`);
 
-    const wireDomCoherence = computeWireDomCoherence(
-      captured.navigation,
-      captured.api ?? apiHeadersProbe,
-      uaProbe,
-      langProbe
-    );
+    const wireDomCoherence = computeWireDomCoherence(captured.navigation, captured.api ?? apiHeadersProbe, uaProbe, langProbe);
 
     return {
       webdriver: webdriverProbe,
@@ -1340,7 +1374,7 @@ async function checkBotD(session: CdpSession, screenshotPath: string, _timeoutMs
     return {
       status: result.status === "success" ? "completed" : "error",
       clean: isClean,
-      verdict: isClean ? "clean" : (result.detection?.bot ? "bot_detected" : "error"),
+      verdict: isClean ? "clean" : result.detection?.bot ? "bot_detected" : "error",
       error: result.error,
       bot: result.detection?.bot ?? null,
       botKind: result.detection?.botKind ?? null,
@@ -1432,7 +1466,9 @@ async function checkCreepJS(session: CdpSession, screenshotPath: string, timeout
 
     if (!detectorReady) {
       const screenshot = await session.captureScreenshot(screenshotPath).catch(() => null);
-      const partialReport = await session.evaluate<Partial<CreepJsResult>>(`(() => {
+      const partialReport = await session
+        .evaluate<Partial<CreepJsResult>>(
+          `(() => {
         const w = window;
         const fp = (w).Fingerprint || (w).Creep;
         const scoreEl = document.getElementById('fp-score') || document.querySelector('.score-desc');
@@ -1444,7 +1480,9 @@ async function checkCreepJS(session: CdpSession, screenshotPath: string, timeout
           stealthRating: (fp?.headless && typeof fp.headless.stealthRating === 'number') ? fp.headless.stealthRating : null,
           isReady: false,
         };
-      })()`).catch((): Partial<CreepJsResult> => ({}));
+      })()`,
+        )
+        .catch((): Partial<CreepJsResult> => ({}));
 
       return {
         status: "timeout",
@@ -1984,17 +2022,9 @@ async function checkFingerprintDemo(session: CdpSession, screenshotPath: string,
 
     const screenshot = await session.captureScreenshot(screenshotPath);
     const hasGenuineVerdict = Boolean(data.bot || data.botVerdict);
-    const isClean =
-      hasGenuineVerdict &&
-      data.accessible &&
-      (data.bot === "not_detected" || data.botVerdict === "not_detected") &&
-      data.tampering === false;
+    const isClean = hasGenuineVerdict && data.accessible && (data.bot === "not_detected" || data.botVerdict === "not_detected") && data.tampering === false;
     data.clean = isClean;
-    data.verdict = isClean
-      ? "clean"
-      : (!hasGenuineVerdict
-        ? "unresolved"
-        : (data.bot === "not_detected" ? "flagged_tampering_or_signal" : "bot_detected"));
+    data.verdict = isClean ? "clean" : !hasGenuineVerdict ? "unresolved" : data.bot === "not_detected" ? "flagged_tampering_or_signal" : "bot_detected";
 
     return {
       status: hasGenuineVerdict ? "completed" : "unresolved",
@@ -2090,7 +2120,11 @@ export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
       try {
         const raw = readFileSync(`/proc/${pid}/cmdline`, "utf-8");
         const args = raw.split("\0").filter(Boolean);
-        if (args[0]?.includes("chrome") && !args.some(a => a.startsWith("--type=")) && args.some(a => a.includes(`--remote-debugging-port=${options.cdpPort}`))) {
+        if (
+          args[0]?.includes("chrome") &&
+          !args.some(a => a.startsWith("--type=")) &&
+          args.some(a => a.includes(`--remote-debugging-port=${options.cdpPort}`))
+        ) {
           cmdlineArgs = args;
           break;
         }
@@ -2131,7 +2165,7 @@ export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
         console.log(`[audit] Started scoped CDP proxy on port ${proxyInstance.port} for target ${proxyInstance.tabId}`);
         const listRes = await fetch(`http://127.0.0.1:${proxyInstance.port}/json/list`);
         const list = (await listRes.json()) as CdpTabInfo[];
-        const tab = list.find((t) => t.id === proxyInstance?.tabId) ?? list[0];
+        const tab = list.find(t => t.id === proxyInstance?.tabId) ?? list[0];
         if (!tab?.webSocketDebuggerUrl) {
           throw new Error(`Failed to obtain scoped proxy tab WebSocket debugger URL`);
         }
@@ -2275,7 +2309,9 @@ function printSummary(report: AuditReport) {
 
     if (routeData.wireCoherence) {
       const wc = routeData.wireCoherence;
-      console.log(`  [Wire/DOM Coherence] coherent=${wc.coherent}, uaMatch=${wc.userAgentMatch}, platformMatch=${wc.platformMatch}, mobileMatch=${wc.mobileMatch}, brandsMatch=${wc.brandsMatch}, langMatch=${wc.languagesMatch}`);
+      console.log(
+        `  [Wire/DOM Coherence] coherent=${wc.coherent}, uaMatch=${wc.userAgentMatch}, platformMatch=${wc.platformMatch}, mobileMatch=${wc.mobileMatch}, brandsMatch=${wc.brandsMatch}, langMatch=${wc.languagesMatch}`,
+      );
       if (!wc.coherent && wc.mismatches.length > 0) {
         console.log(`  [Wire/DOM Mismatches] ${wc.mismatches.join("; ")}`);
       }
@@ -2284,20 +2320,28 @@ function printSummary(report: AuditReport) {
     const p = routeData.probes;
     if (p) {
       const nk = p.navigatorKeys;
-      console.log(`  [Probe] navigator.ownKeys: [${nk.ownPropertyNames.join(", ")}] (nativeEmpty: ${nk.isNativeEmpty}, modelContext: ${nk.hasModelContext}, webMcpBridge: ${nk.hasWebMcpBridge})`);
+      console.log(
+        `  [Probe] navigator.ownKeys: [${nk.ownPropertyNames.join(", ")}] (nativeEmpty: ${nk.isNativeEmpty}, modelContext: ${nk.hasModelContext}, webMcpBridge: ${nk.hasWebMcpBridge})`,
+      );
       const wd = p.webdriver;
       const gl = p.webgl;
       const mdInit = p.mediaDevicesInitial;
       const mdGrant = p.mediaDevicesGranted;
       const cc = p.contextConsistency;
       const cons = (cc["consistency"] ?? {}) as Record<string, unknown>;
-      console.log(`  [Probe] navigator.webdriver: ${String(wd["value"])} (hasOwn: ${String(wd["hasOwnOnInstance"])}, desc: ${String(wd["hasDescriptorOnProto"])})`);
+      console.log(
+        `  [Probe] navigator.webdriver: ${String(wd["value"])} (hasOwn: ${String(wd["hasOwnOnInstance"])}, desc: ${String(wd["hasDescriptorOnProto"])})`,
+      );
       console.log(`  [Probe] WebGL Vendor/Renderer: ${String(gl["vendor"])} | ${String(gl["renderer"])} (software: ${String(gl["isSoftwareRenderer"])})`);
       console.log(`  [Probe] Media Devices Initial: fakeLabels = ${String(mdInit["hasFakeLabels"])} (${String(mdInit["count"])} devices)`);
       if (mdGrant) {
-        console.log(`  [Probe] Media Devices Granted: fakeLabels = ${String(mdGrant["hasFakeLabels"])} (${String(mdGrant["count"])} devices, gUM ok: ${String(mdGrant["gumOk"])})`);
+        console.log(
+          `  [Probe] Media Devices Granted: fakeLabels = ${String(mdGrant["hasFakeLabels"])} (${String(mdGrant["count"])} devices, gUM ok: ${String(mdGrant["gumOk"])})`,
+        );
       }
-      console.log(`  [Probe] Context Consistency: uaMatch=${String(cons["userAgentMatch"])}, langMatch=${String(cons["languageMatch"])}, platformMatch=${String(cons["platformMatch"])} (overall: ${String(cons["overallConsistent"])})`);
+      console.log(
+        `  [Probe] Context Consistency: uaMatch=${String(cons["userAgentMatch"])}, langMatch=${String(cons["languageMatch"])}, platformMatch=${String(cons["platformMatch"])} (overall: ${String(cons["overallConsistent"])})`,
+      );
     }
 
     const c = routeData.checkers;
@@ -2306,11 +2350,15 @@ function printSummary(report: AuditReport) {
     }
     if (c.sannysoft?.results) {
       const s = c.sannysoft.results;
-      console.log(`  [Checker] Sannysoft: status=${c.sannysoft.status}, clean=${c.sannysoft.clean}, verdict=${c.sannysoft.verdict}, webdriver=${s.webdriverResult?.text}, passed=${s.passedCount}, failed=${s.failedCount}, warn=${s.warnCount}`);
+      console.log(
+        `  [Checker] Sannysoft: status=${c.sannysoft.status}, clean=${c.sannysoft.clean}, verdict=${c.sannysoft.verdict}, webdriver=${s.webdriverResult?.text}, passed=${s.passedCount}, failed=${s.failedCount}, warn=${s.warnCount}`,
+      );
     }
     if (c.creepjs?.results) {
       const cr = c.creepjs.results;
-      console.log(`  [Checker] CreepJS: status=${c.creepjs.status}, clean=${c.creepjs.clean}, verdict=${c.creepjs.verdict}, trustScore=${cr.trustScore}, totalLies=${cr.totalLies}, likeHeadlessRating=${cr.likeHeadlessRating}%`);
+      console.log(
+        `  [Checker] CreepJS: status=${c.creepjs.status}, clean=${c.creepjs.clean}, verdict=${c.creepjs.verdict}, trustScore=${cr.trustScore}, totalLies=${cr.totalLies}, likeHeadlessRating=${cr.likeHeadlessRating}%`,
+      );
       if (cr.likeHeadlessReasons.length > 0) {
         console.log(`    likeHeadlessReasons: [${cr.likeHeadlessReasons.join(", ")}]`);
       }
@@ -2320,11 +2368,15 @@ function printSummary(report: AuditReport) {
     }
     if (c.browserscan?.results) {
       const bs = c.browserscan.results;
-      console.log(`  [Checker] BrowserScan: status=${c.browserscan.status}, clean=${c.browserscan.clean}, verdict=${c.browserscan.verdict}, normal=${bs.hasNormalResult}, webdriver=${bs.webdriverStatus}, cdp=${bs.cdpStatus}, navigator=${bs.navigatorStatus}`);
+      console.log(
+        `  [Checker] BrowserScan: status=${c.browserscan.status}, clean=${c.browserscan.clean}, verdict=${c.browserscan.verdict}, normal=${bs.hasNormalResult}, webdriver=${bs.webdriverStatus}, cdp=${bs.cdpStatus}, navigator=${bs.navigatorStatus}`,
+      );
     }
     if (c.fingerprint_demo?.results) {
       const fd = c.fingerprint_demo.results;
-      console.log(`  [Checker] Fingerprint Demo: status=${c.fingerprint_demo.status}, clean=${c.fingerprint_demo.clean}, verdict=${c.fingerprint_demo.verdict}, accessible=${fd.accessible}, bot=${fd.bot || fd.botVerdict}, devTools=${fd.developerTools}, tampering=${fd.tampering}`);
+      console.log(
+        `  [Checker] Fingerprint Demo: status=${c.fingerprint_demo.status}, clean=${c.fingerprint_demo.clean}, verdict=${c.fingerprint_demo.verdict}, accessible=${fd.accessible}, bot=${fd.bot || fd.botVerdict}, devTools=${fd.developerTools}, tampering=${fd.tampering}`,
+      );
     }
   }
 }

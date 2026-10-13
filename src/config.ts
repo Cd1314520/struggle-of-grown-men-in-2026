@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
+import { configProblems } from "./config-check";
 
 export const ROOT = resolve(import.meta.dir, "..");
 // Overridable so a test run can use throwaway state.
@@ -28,20 +29,38 @@ export interface Config {
   fillPauseSeconds: [number, number];
   resume: { dir: string; main: string; pdfName: string };
   chrome: { cdpPort: number; proxyPort: number; display: string; window: [number, number]; vncPort: number };
+  // How long agents' step-by-step records are kept; 0 keeps them for good. Decisions, gates, errors and mail are never removed.
+  retention?: { chatterDays?: number };
 }
 
-export const config = YAML.parse(readFileSync(join(ROOT, "config.yml"), "utf8")) as Config;
+const isSection = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+// config.local.yml laid over config.yml: a section is merged key by key, anything else replaces what was there.
+export function overlay(base: unknown, over: unknown): unknown {
+  if (!isSection(base) || !isSection(over)) return over === undefined ? base : over;
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(over)) merged[key] = overlay(base[key], value);
+  return merged;
+}
+
+// config.yml holds the settings that are the same wherever the app runs. config.local.yml, which is
+// not tracked, holds what belongs to this machine and its owner. Checked once, here, against config-check.ts: past this line the file is what `Config` says it is.
+function loadConfig(): Config {
+  let raw: unknown = YAML.parse(readFileSync(join(ROOT, "config.yml"), "utf8"));
+  // A test run sees config.yml alone, so it behaves the same on every machine.
+  const local = join(ROOT, "config.local.yml");
+  if (process.env.NODE_ENV !== "test" && existsSync(local)) raw = overlay(raw, YAML.parse(readFileSync(local, "utf8")));
+  const problems = configProblems(raw);
+  if (problems.length)
+    throw new Error(`config.yml (with config.local.yml, if there is one) cannot be used:\n${problems.map(problem => `  - ${problem}`).join("\n")}`);
+  return raw as Config;
+}
+export const config = loadConfig();
 config.questionDigest = {
   enabled: true,
   time: "09:00",
   timeZone: "America/Chicago",
   ...config.questionDigest,
 };
-if (typeof config.questionDigest.enabled !== "boolean" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(config.questionDigest.time)
-  || typeof config.questionDigest.timeZone !== "string" || !config.questionDigest.timeZone.trim())
-  throw new Error("questionDigest requires enabled: boolean, time: HH:mm (24-hour local time), and an IANA timeZone");
-// Intl validates the IANA zone; never silently schedule in the host's time zone.
-new Intl.DateTimeFormat("en-US", { timeZone: config.questionDigest.timeZone });
 if (process.env["AUTO_APPLY_PORT"]) {
   // test runs: local port, no public URLs
   config.port = Number(process.env["AUTO_APPLY_PORT"]);

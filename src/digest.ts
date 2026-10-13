@@ -16,7 +16,12 @@ export interface DigestStatus {
   undeliveredGroups: number;
 }
 
-interface Result { sent: boolean; groups: number; messageId?: string; reason?: string }
+interface Result {
+  sent: boolean;
+  groups: number;
+  messageId?: string;
+  reason?: string;
+}
 interface Delivery {
   id: string;
   recipient: string;
@@ -33,7 +38,8 @@ interface Delivery {
 }
 
 // ---- statements used in more than one place. Nothing outside this module touches the digest ledger.
-const lastSent = () => db.query<{ sent_at: string }, []>("SELECT sent_at FROM question_digest_deliveries WHERE state = 'sent' ORDER BY sent_at DESC LIMIT 1").get();
+const lastSent = () =>
+  db.query<{ sent_at: string }, []>("SELECT sent_at FROM question_digest_deliveries WHERE state = 'sent' ORDER BY sent_at DESC LIMIT 1").get();
 // Never overwrites a delivery that has since been proven sent.
 const markUnsent = (id: string, state: "uncertain" | "failed", error: string) =>
   db.query("UPDATE question_digest_deliveries SET state = ?, error = ? WHERE id = ? AND state != 'sent'").run(state, error, id);
@@ -47,7 +53,13 @@ function settings() {
 
 function localClock(now: Date, timeZone: string): { date: string; time: string } {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
   }).formatToParts(now);
   const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
   return { date: `${values["year"]}-${values["month"]}-${values["day"]}`, time: `${values["hour"]}:${values["minute"]}` };
@@ -62,11 +74,18 @@ function recipient(): string | null {
 }
 
 function unnotifiedGroups(): { group: QuestionGroup; fingerprint: string }[] {
-  const notified = new Set(db.query<{ fingerprint: string }, []>("SELECT fingerprint FROM question_digest_notified").all().map(row => row.fingerprint));
+  const notified = new Set(
+    db
+      .query<{ fingerprint: string }, []>("SELECT fingerprint FROM question_digest_notified")
+      .all()
+      .map(row => row.fingerprint),
+  );
   const groups = listQuestionGroups().map(group => ({
     group,
     // Membership, gate IDs, timestamps and answer values are deliberately absent.
-    fingerprint: createHash("sha256").update(JSON.stringify([group.key, group.kind, group.text, group.context, group.options])).digest("hex"),
+    fingerprint: createHash("sha256")
+      .update(JSON.stringify([group.key, group.kind, group.text, group.context, group.options]))
+      .digest("hex"),
   }));
   return groups.filter(item => !notified.has(item.fingerprint));
 }
@@ -81,8 +100,11 @@ function plaintext(groups: QuestionGroup[], deliveryId: string): string {
     "",
   ];
   const labels: Record<QuestionGroup["kind"], string> = {
-    question: "Question", cover_letter: "Cover letter requested", confirm_submit: "Final confirmation needed",
-    manual: "Manual browser handoff", submission_ambiguous: "Submission needs inspection (do not retry)",
+    question: "Question",
+    cover_letter: "Cover letter requested",
+    confirm_submit: "Final confirmation needed",
+    manual: "Manual browser handoff",
+    submission_ambiguous: "Submission needs inspection (do not retry)",
   };
   for (const group of groups) {
     lines.push(`${labels[group.kind]} — ${group.jobs.length} application${group.jobs.length === 1 ? "" : "s"}`);
@@ -92,8 +114,7 @@ function plaintext(groups: QuestionGroup[], deliveryId: string): string {
       lines.push(group.text);
       if (group.options.length) lines.push(`Choices: ${group.options.join(" | ")}`);
     }
-    for (const job of group.jobs)
-      lines.push(`  ${job.company} — ${job.title}: ${publicUrl()}/#progress/${job.id}`);
+    for (const job of group.jobs) lines.push(`  ${job.company} — ${job.title}: ${publicUrl()}/#progress/${job.id}`);
     lines.push("");
   }
   lines.push(`Auto-Apply delivery reference: ${digestDeliveryReference(deliveryId)}`);
@@ -111,18 +132,16 @@ export function digestStatus(): DigestStatus {
     recipient: address,
     lastSentAt: sent?.sent_at ?? null,
     lastError: kvGet("questionDigest.error") || null,
-    deliveryState: !cfg.enabled ? "disabled" : !address ? "not_connected" : latest?.state ?? (undeliveredGroups ? "ready" : "idle"),
+    deliveryState: !cfg.enabled ? "disabled" : !address ? "not_connected" : (latest?.state ?? (undeliveredGroups ? "ready" : "idle")),
     undeliveredGroups,
   };
 }
 
 function completeDelivery(delivery: Delivery, gmailId: string, sentAt: string) {
   db.transaction(() => {
-    db.query("UPDATE question_digest_deliveries SET state = 'sent', gmail_id = ?, sent_at = ?, error = NULL WHERE id = ?")
-      .run(gmailId, sentAt, delivery.id);
+    db.query("UPDATE question_digest_deliveries SET state = 'sent', gmail_id = ?, sent_at = ?, error = NULL WHERE id = ?").run(gmailId, sentAt, delivery.id);
     for (const fingerprint of JSON.parse(delivery.fingerprints) as string[])
-      db.query("INSERT OR IGNORE INTO question_digest_notified (fingerprint, delivery_id, sent_at) VALUES (?, ?, ?)")
-        .run(fingerprint, delivery.id, sentAt);
+      db.query("INSERT OR IGNORE INTO question_digest_notified (fingerprint, delivery_id, sent_at) VALUES (?, ?, ?)").run(fingerprint, delivery.id, sentAt);
     kvSet("questionDigest.error", "");
   }).immediate();
 }
@@ -137,51 +156,69 @@ async function deliver(options: { force?: boolean; now?: Date }): Promise<Result
 
   // Claim before any await. A unique pending row plus immediate transaction prevents two
   // server processes from preparing overlapping messages or retrying the same failure.
-  const claimed = db.transaction((): { delivery: Delivery; reconcile: boolean } | Result => {
-    const active = db.query<Delivery, []>("SELECT * FROM question_digest_deliveries WHERE state != 'sent' LIMIT 1").get();
-    if (active) {
-      if (!options.force && now.getTime() - Date.parse(active.attempt_at) < RETRY_INTERVAL_MS)
-        return { sent: false, groups: active.group_count, messageId: active.id, reason: "retry_later" };
-      const reconcile = active.state === "sending" || active.state === "uncertain";
-      // Only definitely rejected legacy deliveries may acquire the new footer before retry.
-      // Never rewrite a sent/uncertain snapshot or resend an older ambiguous message.
-      if (active.state === "failed") {
-        const footer = `Auto-Apply delivery reference: ${digestDeliveryReference(active.id)}`;
-        if (!active.body.endsWith(footer)) {
-          active.body += `\n${footer}`;
-          db.query("UPDATE question_digest_deliveries SET body = ? WHERE id = ?").run(active.body, active.id);
+  const claimed = db
+    .transaction((): { delivery: Delivery; reconcile: boolean } | Result => {
+      const active = db.query<Delivery, []>("SELECT * FROM question_digest_deliveries WHERE state != 'sent' LIMIT 1").get();
+      if (active) {
+        if (!options.force && now.getTime() - Date.parse(active.attempt_at) < RETRY_INTERVAL_MS)
+          return { sent: false, groups: active.group_count, messageId: active.id, reason: "retry_later" };
+        const reconcile = active.state === "sending" || active.state === "uncertain";
+        // Only definitely rejected legacy deliveries may acquire the new footer before retry.
+        // Never rewrite a sent/uncertain snapshot or resend an older ambiguous message.
+        if (active.state === "failed") {
+          const footer = `Auto-Apply delivery reference: ${digestDeliveryReference(active.id)}`;
+          if (!active.body.endsWith(footer)) {
+            active.body += `\n${footer}`;
+            db.query("UPDATE question_digest_deliveries SET body = ? WHERE id = ?").run(active.body, active.id);
+          }
         }
+        db.query("UPDATE question_digest_deliveries SET state = ?, attempt_at = ? WHERE id = ?").run(reconcile ? "uncertain" : "sending", timestamp, active.id);
+        return { delivery: active, reconcile };
       }
-      db.query("UPDATE question_digest_deliveries SET state = ?, attempt_at = ? WHERE id = ?")
-        .run(reconcile ? "uncertain" : "sending", timestamp, active.id);
-      return { delivery: active, reconcile };
-    }
-    if (!options.force) {
-      const last = lastSent();
-      if (last && localClock(new Date(last.sent_at), cfg.timeZone).date >= clock.date)
-        return { sent: false, groups: 0, reason: "already_sent_today" };
-    }
-    const groups = unnotifiedGroups();
-    if (!groups.length) return { sent: false, groups: 0, reason: "no_new_groups" };
-    const address = recipient();
-    if (!address) throw new Error("Digest requires the configured mailbox to be connected with a matching Gmail identity");
-    const id = `<auto-apply.questions.${randomUUID()}@${address.split("@")[1]}>`;
-    const delivery: Delivery = {
-      id,
-      recipient: address,
-      fingerprints: JSON.stringify(groups.map(item => item.fingerprint)),
-      group_count: groups.length,
-      subject: `Auto Apply: ${groups.length} new question group${groups.length === 1 ? "" : "s"}`,
-      body: plaintext(groups.map(item => item.group), id),
-      state: "sending", created_at: timestamp, attempt_at: timestamp, sent_at: null, gmail_id: null, error: null,
-    };
-    db
-      .query(`
+      if (!options.force) {
+        const last = lastSent();
+        if (last && localClock(new Date(last.sent_at), cfg.timeZone).date >= clock.date) return { sent: false, groups: 0, reason: "already_sent_today" };
+      }
+      const groups = unnotifiedGroups();
+      if (!groups.length) return { sent: false, groups: 0, reason: "no_new_groups" };
+      const address = recipient();
+      if (!address) throw new Error("Digest requires the configured mailbox to be connected with a matching Gmail identity");
+      const id = `<auto-apply.questions.${randomUUID()}@${address.split("@")[1]}>`;
+      const delivery: Delivery = {
+        id,
+        recipient: address,
+        fingerprints: JSON.stringify(groups.map(item => item.fingerprint)),
+        group_count: groups.length,
+        subject: `Auto Apply: ${groups.length} new question group${groups.length === 1 ? "" : "s"}`,
+        body: plaintext(
+          groups.map(item => item.group),
+          id,
+        ),
+        state: "sending",
+        created_at: timestamp,
+        attempt_at: timestamp,
+        sent_at: null,
+        gmail_id: null,
+        error: null,
+      };
+      db.query(
+        `
         INSERT INTO question_digest_deliveries (id, recipient, fingerprints, group_count, subject, body, state, created_at, attempt_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(delivery.id, delivery.recipient, delivery.fingerprints, delivery.group_count, delivery.subject, delivery.body, delivery.state, delivery.created_at, delivery.attempt_at);
-    return { delivery, reconcile: false };
-  }).immediate();
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        delivery.id,
+        delivery.recipient,
+        delivery.fingerprints,
+        delivery.group_count,
+        delivery.subject,
+        delivery.body,
+        delivery.state,
+        delivery.created_at,
+        delivery.attempt_at,
+      );
+      return { delivery, reconcile: false };
+    })
+    .immediate();
   if (!("delivery" in claimed)) return claimed;
   const { delivery, reconcile } = claimed;
   try {
@@ -197,7 +234,13 @@ async function deliver(options: { force?: boolean; now?: Date }): Promise<Result
       completeDelivery(delivery, match.id, match.sentAt);
       return { sent: true, groups: delivery.group_count, messageId: delivery.id, reason: "reconciled" };
     }
-    const gmailId = await sendSelfMessage({ messageId: delivery.id, subject: delivery.subject, text: delivery.body, expectedMailbox: delivery.recipient, date: delivery.created_at });
+    const gmailId = await sendSelfMessage({
+      messageId: delivery.id,
+      subject: delivery.subject,
+      text: delivery.body,
+      expectedMailbox: delivery.recipient,
+      date: delivery.created_at,
+    });
     completeDelivery(delivery, gmailId, timestamp);
     return { sent: true, groups: delivery.group_count, messageId: delivery.id };
   } catch (error) {

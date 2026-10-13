@@ -10,11 +10,13 @@
 //   - SQLite cannot alter a constraint or a column type in place. Create the new table, copy the rows
 //     across, drop the old table and rename, all in the one migration.
 //   - Backfills belong in the same migration as the column they fill.
+//   - One statement per db.run (see runEach): a failure in a later statement of a longer string is
+//     not reported. The baseline predates this rule and is tolerant by design.
 //
 // This module must not import anything that reads configuration: scripts and tests use it on
 // databases other than the app's own.
 import { Database } from "bun:sqlite";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 
 export interface Migration {
   version: number;
@@ -179,8 +181,86 @@ function baseline(db: Database) {
   `);
 }
 
+// Runs a migration's statements one at a time. bun:sqlite reports a failure only for the first
+// statement of a string holding several: a later one that fails is skipped without a word and the
+// rest still run, which in a migration that copies and then deletes would lose what it meant to move.
+function runEach(db: Database, statements: readonly string[]) {
+  for (const sql of statements) db.run(sql);
+}
+
+// Every change of jobs.status, kept. The triggers write it, so no statement can move a job without
+// leaving a row: not a bulk UPDATE in db.ts, not a script working on the file directly. History
+// starts with the first change after this migration; that row's from_status says where the job stood.
+function statusHistory(db: Database) {
+  runEach(db, [
+    `CREATE TABLE status_changes (
+      id INTEGER PRIMARY KEY,
+      job_id INTEGER NOT NULL,
+      from_status TEXT NOT NULL,
+      to_status TEXT NOT NULL,
+      note TEXT,          -- the note written with the change; NULL when the change left the note alone
+      approved_by TEXT,   -- who gave gate 1, on a move to 'approved'
+      at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    "CREATE INDEX status_changes_job ON status_changes(job_id, id)",
+    `CREATE TRIGGER jobs_status_changed AFTER UPDATE OF status ON jobs
+    WHEN OLD.status IS NOT NEW.status
+    BEGIN
+      INSERT INTO status_changes (job_id, from_status, to_status, note, approved_by)
+      VALUES (
+        NEW.id, OLD.status, NEW.status,
+        CASE WHEN NEW.note IS NOT OLD.note THEN NEW.note END,
+        CASE WHEN NEW.status = 'approved' THEN NEW.approved_by END
+      );
+    END`,
+    // A job folded into its duplicate takes its history with it.
+    `CREATE TRIGGER jobs_status_forgotten AFTER DELETE ON jobs
+    BEGIN
+      DELETE FROM status_changes WHERE job_id = OLD.id;
+    END`,
+  ]);
+}
+
+// Where an application stands between "approved" and a recorded outcome (see fill-state.ts). These
+// were kv entries named fill.<flag>.<job id>, each "1" or "0"; a row here says the same with types
+// and constraints. kv keeps fill.nextAt and fill.rest.<slot>, which are about browsers, not jobs.
+function fillState(db: Database) {
+  runEach(db, [
+    `CREATE TABLE fill_state (
+      job_id INTEGER PRIMARY KEY,
+      submitting INTEGER NOT NULL DEFAULT 0 CHECK (submitting IN (0, 1)),
+      verifying INTEGER NOT NULL DEFAULT 0 CHECK (verifying IN (0, 1)),
+      recovering INTEGER NOT NULL DEFAULT 0 CHECK (recovering IN (0, 1)),
+      slot INTEGER CHECK (slot >= 0),   -- the browser that last held this job's draft
+      manual_gate TEXT,                 -- the open gate under which a person reserved that browser
+      CHECK (verifying = 0 OR submitting = 1)
+    )`,
+    `INSERT INTO fill_state (job_id, submitting, verifying, recovering, slot, manual_gate)
+    SELECT
+      j.id,
+      COALESCE((SELECT value = '1' FROM kv WHERE key = 'fill.submitting.' || j.id), 0),
+      COALESCE((SELECT value = '1' FROM kv WHERE key = 'fill.verify.' || j.id), 0),
+      COALESCE((SELECT value = '1' FROM kv WHERE key = 'fill.recovery.' || j.id), 0),
+      (SELECT CAST(value AS INTEGER) FROM kv WHERE key = 'fill.slot.' || j.id),
+      (SELECT value FROM kv WHERE key = 'fill.manual.' || j.id)
+    FROM jobs j
+    WHERE EXISTS (
+      SELECT 1 FROM kv
+      WHERE key IN ('fill.submitting.' || j.id, 'fill.verify.' || j.id, 'fill.recovery.' || j.id, 'fill.slot.' || j.id, 'fill.manual.' || j.id)
+    )`,
+    `DELETE FROM kv
+    WHERE key GLOB 'fill.submitting.*' OR key GLOB 'fill.verify.*' OR key GLOB 'fill.recovery.*' OR key GLOB 'fill.slot.*' OR key GLOB 'fill.manual.*'`,
+    `CREATE TRIGGER jobs_fill_state_forgotten AFTER DELETE ON jobs
+    BEGIN
+      DELETE FROM fill_state WHERE job_id = OLD.id;
+    END`,
+  ]);
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: "baseline", up: baseline },
+  { version: 2, name: "status history", up: statusHistory },
+  { version: 3, name: "fill state", up: fillState },
 ];
 
 // The version this code reads and writes.
@@ -195,27 +275,55 @@ export function migrate(db: Database, migrations: readonly Migration[] = MIGRATI
     if (migration.version !== index + 1) throw new Error(`Migration "${migration.name}" must be version ${index + 1}, not ${migration.version}`);
   });
   const latest = migrations.length;
-  const tooNew = (version: number) => new Error(`Database schema is version ${version}, but this code only knows up to version ${latest}. Run the newer code, or restore a backup.`);
+  const tooNew = (version: number) =>
+    new Error(`Database schema is version ${version}, but this code only knows up to version ${latest}. Run the newer code, or restore a backup.`);
   const applied: Migration[] = [];
+  let backedUp = false;
   for (;;) {
     const current = schemaVersion(db);
     if (current > latest) throw tooNew(current);
     if (current === latest) return applied;
-    const step = db.transaction(() => {
-      const version = schemaVersion(db);
-      if (version > latest) throw tooNew(version);
-      const next = migrations[version];
-      if (!next) return null; // another process got there first
-      try {
-        next.up(db);
-      } catch (error) {
-        throw new Error(`Migration ${next.version} (${next.name}) failed and was rolled back: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-      }
-      // PRAGMA takes no parameters; the version is an integer checked above.
-      db.run(`PRAGMA user_version = ${next.version}`);
-      return next;
-    }).immediate();
+    const step = db
+      .transaction(() => {
+        const version = schemaVersion(db);
+        if (version > latest) throw tooNew(version);
+        const next = migrations[version];
+        if (!next) return null; // another process got there first
+        // Under the write lock, so the copy is of exactly the database this migration is about to change.
+        if (!backedUp) backUpBeforeUpgrade(db, version);
+        backedUp = true;
+        try {
+          next.up(db);
+        } catch (error) {
+          throw new Error(`Migration ${next.version} (${next.name}) failed and was rolled back: ${error instanceof Error ? error.message : String(error)}`, {
+            cause: error,
+          });
+        }
+        // PRAGMA takes no parameters; the version is an integer checked above.
+        db.run(`PRAGMA user_version = ${next.version}`);
+        return next;
+      })
+      .immediate();
     if (step) applied.push(step);
+  }
+}
+
+// Where the copy of a database taken before it is upgraded from `version` is kept.
+export const backupPath = (path: string, version: number) => `${path}.v${version}.bak`;
+
+// A database file that already holds something is copied before its schema changes, so an upgrade
+// that turns out wrong can be undone by putting the copy back. An upgrade that cannot be backed up
+// does not run. The copy is left for the user to delete.
+function backUpBeforeUpgrade(db: Database, version: number) {
+  const path = db.filename;
+  if (!path || path === ":memory:") return;
+  if (!db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' LIMIT 1").get()) return;
+  try {
+    // "wx": never written over. A copy already there was taken at this same version, by an earlier
+    // attempt at this upgrade or by another process starting at the same moment.
+    writeFileSync(backupPath(path, version), db.serialize(), { flag: "wx" });
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
   }
 }
 
@@ -280,7 +388,11 @@ export function openDatabase(path: string, mode: OpenMode): Database {
   if (mode === "readwrite") {
     // Look before opening for writing: that switches the file to WAL, and a refused database must be left as it was.
     const probe = connectDatabase(path, "readonly");
-    try { assertSchemaCurrent(probe, path); } finally { probe.close(); }
+    try {
+      assertSchemaCurrent(probe, path);
+    } finally {
+      probe.close();
+    }
   }
   const db = connectDatabase(path, mode === "migrate" ? "create" : mode);
   try {

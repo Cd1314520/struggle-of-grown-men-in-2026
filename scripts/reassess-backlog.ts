@@ -61,10 +61,12 @@ function selectAndFilter(db: Database) {
   }
 
   const allJobs = db
-    .query<JobRow, []>(`
+    .query<JobRow, []>(
+      `
       SELECT id, company, title, status, score, checklist, approved_by, resume_sha, resume_frozen_at, submitted_at, practice_assessment
       FROM jobs
-      ORDER BY id`)
+      ORDER BY id`,
+    )
     .all();
 
   const eligibleJobs: JobRow[] = [];
@@ -124,13 +126,13 @@ export function runReassessment(options: { apply?: boolean; dbPath?: string; sil
   // Refuses a database that is not at this code's schema version; it never upgrades one itself.
   const db = openDatabase(dbPath, apply ? "readwrite" : "readonly");
   try {
-  // In apply mode, selection and writes run inside the same transaction
-  const { allJobs, eligibleJobs, eligibleByStatus, excludedByReason } = apply
-    ? db.transaction(() => {
-      const filtered = selectAndFilter(db);
+    // In apply mode, selection and writes run inside the same transaction
+    const { allJobs, eligibleJobs, eligibleByStatus, excludedByReason } = apply
+      ? db.transaction(() => {
+          const filtered = selectAndFilter(db);
 
-      if (filtered.eligibleJobs.length > 0) {
-        const updateStmt = db.prepare(`
+          if (filtered.eligibleJobs.length > 0) {
+            const updateStmt = db.prepare(`
           UPDATE jobs
           SET status = 'triaged',
               score = NULL,
@@ -144,72 +146,71 @@ export function runReassessment(options: { apply?: boolean; dbPath?: string; sil
               updated_at = datetime('now')
           WHERE id = ? AND status = ?
         `);
-        const logEventStmt = db.prepare(`
+            const logEventStmt = db.prepare(`
           INSERT INTO events (job_id, worker, kind, message)
           VALUES (?, 'migration', 'migration', 'Requeued old assessed job for fresh practice prep')
         `);
 
-        for (const j of filtered.eligibleJobs) {
-          updateStmt.run(j.id, j.status);
-          logEventStmt.run(j.id);
+            for (const j of filtered.eligibleJobs) {
+              updateStmt.run(j.id, j.status);
+              logEventStmt.run(j.id);
+            }
+          }
+
+          return filtered;
+        })()
+      : selectAndFilter(db);
+
+    const sampleEligible = eligibleJobs.slice(0, 10).map(j => ({
+      id: j.id,
+      company: j.company,
+      title: j.title,
+      status: j.status,
+      score: j.score,
+    }));
+
+    const excludedCount = allJobs.length - eligibleJobs.length;
+
+    if (!silent) {
+      console.log(`=== Backlog Reassessment CLI ===`);
+      console.log(`Mode:    ${apply ? "APPLY (writing changes)" : "DRY-RUN (no changes made)"}`);
+      console.log(`DB:      ${dbPath}`);
+      console.log(`Total jobs in DB:         ${allJobs.length}`);
+      console.log(`Eligible to requeue:      ${eligibleJobs.length}`);
+      for (const [st, cnt] of Object.entries(eligibleByStatus)) {
+        console.log(`  - ${st.padEnd(20)}: ${cnt}`);
+      }
+      console.log(`Excluded / Protected:     ${excludedCount}`);
+      for (const [reason, cnt] of Object.entries(excludedByReason)) {
+        console.log(`  - ${reason.padEnd(28)}: ${cnt}`);
+      }
+
+      if (sampleEligible.length > 0) {
+        console.log(`\nSample eligible jobs (first ${sampleEligible.length}):`);
+        for (const s of sampleEligible) {
+          console.log(`  #${s.id} [${s.status}, score=${s.score}] ${s.company} - ${s.title}`);
         }
       }
 
-      return filtered;
-    })()
-    : selectAndFilter(db);
-
-  const sampleEligible = eligibleJobs.slice(0, 10).map(j => ({
-    id: j.id,
-    company: j.company,
-    title: j.title,
-    status: j.status,
-    score: j.score,
-  }));
-
-  const excludedCount = allJobs.length - eligibleJobs.length;
-
-  if (!silent) {
-    console.log(`=== Backlog Reassessment CLI ===`);
-    console.log(`Mode:    ${apply ? "APPLY (writing changes)" : "DRY-RUN (no changes made)"}`);
-    console.log(`DB:      ${dbPath}`);
-    console.log(`Total jobs in DB:         ${allJobs.length}`);
-    console.log(`Eligible to requeue:      ${eligibleJobs.length}`);
-    for (const [st, cnt] of Object.entries(eligibleByStatus)) {
-      console.log(`  - ${st.padEnd(20)}: ${cnt}`);
-    }
-    console.log(`Excluded / Protected:     ${excludedCount}`);
-    for (const [reason, cnt] of Object.entries(excludedByReason)) {
-      console.log(`  - ${reason.padEnd(28)}: ${cnt}`);
-    }
-
-    if (sampleEligible.length > 0) {
-      console.log(`\nSample eligible jobs (first ${sampleEligible.length}):`);
-      for (const s of sampleEligible) {
-        console.log(`  #${s.id} [${s.status}, score=${s.score}] ${s.company} - ${s.title}`);
+      if (apply) {
+        console.log(`\nSuccessfully requeued ${eligibleJobs.length} jobs to 'triaged' for fresh prep.`);
+      } else {
+        console.log("\nDry-run complete. No changes were made. Pass --apply to execute.");
       }
     }
 
-    if (apply) {
-      console.log(`\nSuccessfully requeued ${eligibleJobs.length} jobs to 'triaged' for fresh prep.`);
-    } else {
-      console.log("\nDry-run complete. No changes were made. Pass --apply to execute.");
-    }
-  }
-
-  return {
-    totalJobs: allJobs.length,
-    eligibleCount: eligibleJobs.length,
-    eligibleByStatus,
-    excludedCount,
-    excludedByReason,
-    applied: apply,
-    sampleEligible,
-  };
+    return {
+      totalJobs: allJobs.length,
+      eligibleCount: eligibleJobs.length,
+      eligibleByStatus,
+      excludedCount,
+      excludedByReason,
+      applied: apply,
+      sampleEligible,
+    };
   } finally {
     db.close();
   }
-
 }
 
 if (import.meta.main) {

@@ -87,18 +87,34 @@ function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function targetInfo(value: unknown): value is TargetInfo {
-  return record(value) && typeof value["targetId"] === "string" && typeof value["type"] === "string" &&
+  return (
+    record(value) &&
+    typeof value["targetId"] === "string" &&
+    typeof value["type"] === "string" &&
     (value["openerId"] === undefined || typeof value["openerId"] === "string") &&
     (value["parentId"] === undefined || typeof value["parentId"] === "string") &&
-    (value["browserContextId"] === undefined || typeof value["browserContextId"] === "string");
+    (value["browserContextId"] === undefined || typeof value["browserContextId"] === "string")
+  );
 }
 function packet(text: string): Packet | null {
   const value: unknown = JSON.parse(text);
-  if (!record(value) || (value["id"] !== undefined && typeof value["id"] !== "number") ||
-      (value["method"] !== undefined && typeof value["method"] !== "string") ||
-      (value["sessionId"] !== undefined && typeof value["sessionId"] !== "string") ||
-      (value["params"] !== undefined && !record(value["params"])) || (value["result"] !== undefined && !record(value["result"]))) return null;
-  return { id: value["id"], method: value["method"], sessionId: value["sessionId"], params: value["params"] ?? {}, result: value["result"], error: value["error"] };
+  if (
+    !record(value) ||
+    (value["id"] !== undefined && typeof value["id"] !== "number") ||
+    (value["method"] !== undefined && typeof value["method"] !== "string") ||
+    (value["sessionId"] !== undefined && typeof value["sessionId"] !== "string") ||
+    (value["params"] !== undefined && !record(value["params"])) ||
+    (value["result"] !== undefined && !record(value["result"]))
+  )
+    return null;
+  return {
+    id: value["id"],
+    method: value["method"],
+    sessionId: value["sessionId"],
+    params: value["params"] ?? {},
+    result: value["result"],
+    error: value["error"],
+  };
 }
 
 const INPUT = new Set(["Input.dispatchMouseEvent", "Input.dispatchKeyEvent", "Input.insertText"]);
@@ -165,18 +181,29 @@ async function glide(conn: Conn, msg: Packet, p: Pointer, x: number, y: number) 
     const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
     const px = (1 - e) ** 2 * sx + 2 * (1 - e) * e * cx + e * e * x + rand(-0.8, 0.8);
     const py = (1 - e) ** 2 * sy + 2 * (1 - e) * e * cy + e * e * y + rand(-0.8, 0.8);
-    inject(conn, msg, "Input.dispatchMouseEvent", { type: "mouseMoved", x: px, y: py, button: msg.params["button"] ?? "none", buttons: msg.params["buttons"] ?? 0, modifiers: msg.params["modifiers"] ?? 0 });
+    inject(conn, msg, "Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: px,
+      y: py,
+      button: msg.params["button"] ?? "none",
+      buttons: msg.params["buttons"] ?? 0,
+      modifiers: msg.params["modifiers"] ?? 0,
+    });
     await sleep(rand(6, 15));
   }
 }
 
 async function mouse(conn: Conn, msg: Packet, p: Pointer) {
   const q = msg.params as MouseParams;
-  if (q["type"] === "mouseWheel") { await sleep(rand(20, 70)); return; }
+  if (q["type"] === "mouseWheel") {
+    await sleep(rand(20, 70));
+    return;
+  }
   const same = p.asked && Math.abs(p.asked.x - q.x) < 1.5 && Math.abs(p.asked.y - q.y) < 1.5;
   if (!same) {
     // New target: land a few pixels off the exact centre the client computed.
-    const tx = q.x + rand(-3, 3), ty = q.y + rand(-2, 2);
+    const tx = q.x + rand(-3, 3),
+      ty = q.y + rand(-2, 2);
     await glide(conn, msg, p, tx, ty);
     p.asked = { x: q.x, y: q.y };
     p.x = tx;
@@ -216,7 +243,10 @@ async function key(msg: Packet, p: Pointer) {
 async function insertText(conn: Conn, msg: Packet, p: Pointer) {
   const text: unknown = msg.params["text"] ?? "";
   const chars = Array.from(String(text));
-  if (chars.length < 2) { await sleep(keyGap(p, chars[0])); return; }
+  if (chars.length < 2) {
+    await sleep(keyGap(p, chars[0]));
+    return;
+  }
   for (const ch of chars.slice(0, -1)) {
     await sleep(keyGap(p, ch));
     p.lastKeyAt = Date.now();
@@ -256,7 +286,9 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
         cachedNativeUa = ua;
         return ua;
       }
-    } catch { /* browser not up yet; the UA is learned later from Browser.getVersion */ }
+    } catch {
+      /* browser not up yet; the UA is learned later from Browser.getVersion */
+    }
     return undefined;
   }
 
@@ -271,12 +303,12 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
     return state;
   };
   const ownsTarget = (id: string) => !revoked && (allowed === null || allowed.has(id));
-  const rewrite = (text: string) => text.replaceAll(`127.0.0.1:${cdpPort}`, `127.0.0.1:${server.port}`).replaceAll(`localhost:${cdpPort}`, `127.0.0.1:${server.port}`);
+  const rewrite = (text: string) =>
+    text.replaceAll(`127.0.0.1:${cdpPort}`, `127.0.0.1:${server.port}`).replaceAll(`localhost:${cdpPort}`, `127.0.0.1:${server.port}`);
 
   function accept(info: TargetInfo, related = false) {
     if (revoked || scope?.excludedTargets.has(info.targetId)) return false;
-    if (!ownsTarget(info.targetId) && !related &&
-        !(info.openerId && ownsTarget(info.openerId)) && !(info.parentId && ownsTarget(info.parentId))) return false;
+    if (!ownsTarget(info.targetId) && !related && !(info.openerId && ownsTarget(info.openerId)) && !(info.parentId && ownsTarget(info.parentId))) return false;
     allowed?.add(info.targetId);
     if (info.targetId === scope?.targetId) contextId = info.browserContextId;
     return true;
@@ -321,10 +353,23 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
       if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
         if (scope && ((pageId === undefined && !/^\/devtools\/browser\/[^/]+$/.test(url.pathname)) || (pageId !== undefined && !ownsTarget(pageId))))
           return new Response("target is outside this application", { status: 403 });
-        const targets: TargetConnection | undefined = scope && allowed ? {
-          scope, allowed, pageId, sessions: new Map(), requests: new Map(), infos: new Map(),
-          autoAttach: null, monitors: new Map(), watched: new Set(), autoSessions: new Set(), announced: new Set(), discover: false,
-        } : undefined;
+        const targets: TargetConnection | undefined =
+          scope && allowed
+            ? {
+                scope,
+                allowed,
+                pageId,
+                sessions: new Map(),
+                requests: new Map(),
+                infos: new Map(),
+                autoAttach: null,
+                monitors: new Map(),
+                watched: new Set(),
+                autoSessions: new Set(),
+                announced: new Set(),
+                discover: false,
+              }
+            : undefined;
         return server.upgrade(req, { data: { path: url.pathname + url.search, targets } }) ? undefined : new Response("upgrade failed", { status: 400 });
       }
       if (scope) {
@@ -363,12 +408,16 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
         clients.add(ws);
         const upstream = new WebSocket(`ws://127.0.0.1:${cdpPort}${ws.data.path}`);
         const { promise: openPromise, resolve: resolveOpen }: PromiseWithResolvers<void> = Promise.withResolvers();
-        upstream.onopen = () => { resolveOpen(); };
+        upstream.onopen = () => {
+          resolveOpen();
+        };
         const conn: Conn = {
           upstream,
           ready: Promise.all([
             openPromise,
-            getNativeUa().then(ua => { if (ua) conn.nativeUserAgent = ua; }),
+            getNativeUa().then(ua => {
+              if (ua) conn.nativeUserAgent = ua;
+            }),
           ]).then(() => undefined),
           sessions: new Map(),
           queues: new Map(),
@@ -389,7 +438,11 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
             conn.pendingBrowserVersion.size > 0
           ) {
             let pre: Packet | null = null;
-            try { pre = packet(text); } catch { /* not JSON; the strict parse below decides what to do with it */ }
+            try {
+              pre = packet(text);
+            } catch {
+              /* not JSON; the strict parse below decides what to do with it */
+            }
             if (pre) {
               if (pre.method === "Runtime.consoleAPICalled" && Array.isArray(pre.params["args"])) {
                 const session = pre.sessionId ?? "";
@@ -398,10 +451,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
                     trackConsoleObjectId(conn, session, arg["objectId"]);
                   }
                 }
-              } else if (
-                pre.method === "Runtime.executionContextDestroyed" ||
-                pre.method === "Runtime.executionContextsCleared"
-              ) {
+              } else if (pre.method === "Runtime.executionContextDestroyed" || pre.method === "Runtime.executionContextsCleared") {
                 conn.consoleObjects.get(pre.sessionId ?? "")?.clear();
               } else if (pre.method === "Target.detachedFromTarget") {
                 if (typeof pre.params["sessionId"] === "string") {
@@ -415,10 +465,21 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
               }
             }
           }
-          if (!ws.data.targets && conn.injected.size === 0) { ws.send(text); return; }
+          if (!ws.data.targets && conn.injected.size === 0) {
+            ws.send(text);
+            return;
+          }
           let msg: Packet | null;
-          try { msg = packet(text); } catch { ws.close(); return; }
-          if (!msg) { ws.close(); return; }
+          try {
+            msg = packet(text);
+          } catch {
+            ws.close();
+            return;
+          }
+          if (!msg) {
+            ws.close();
+            return;
+          }
           const state = ws.data.targets;
           if (msg.id !== undefined && conn.injected.delete(msg.id)) {
             const target = state?.monitors.get(msg.id);
@@ -429,18 +490,23 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
             } else if (state && target && typeof msg.result?.["sessionId"] === "string") {
               state.sessions.set(msg.result["sessionId"], target);
               state.autoSessions.add(msg.result["sessionId"]);
-              if (state.autoAttach)
-                inject(conn, { sessionId: msg.result["sessionId"] }, "Target.setAutoAttach", state.autoAttach);
+              if (state.autoAttach) inject(conn, { sessionId: msg.result["sessionId"] }, "Target.setAutoAttach", state.autoAttach);
             }
             return;
           }
-          if (!state) { ws.send(text); return; }
+          if (!state) {
+            ws.send(text);
+            return;
+          }
           if (msg.id !== undefined) {
             const key = `${msg.sessionId ?? ""}:${msg.id}`;
             const request = state.requests.get(key);
             state.requests.delete(key);
             if (!request) return;
-            if (msg.error) { ws.send(text); return; }
+            if (msg.error) {
+              ws.send(text);
+              return;
+            }
             if (request.method === "Browser.getVersion" && typeof msg.result?.["userAgent"] === "string" && msg.result["userAgent"].length > 0) {
               conn.nativeUserAgent = msg.result["userAgent"];
               cachedNativeUa = msg.result["userAgent"];
@@ -456,21 +522,32 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
               // Workers use the persistent profile, not arbitrary/incognito contexts.
               if (contextId === undefined && typeof msg.result["defaultBrowserContextId"] === "string") contextId = msg.result["defaultBrowserContextId"];
               msg.result["browserContextIds"] = Array.isArray(msg.result["browserContextIds"])
-                ? msg.result["browserContextIds"].filter(id => id === contextId) : [];
+                ? msg.result["browserContextIds"].filter(id => id === contextId)
+                : [];
             } else if (request.method === "Target.createTarget") {
               const id = msg.result?.["targetId"];
-              if (typeof id !== "string" || state.scope.excludedTargets.has(id)) { ws.close(); return; }
+              if (typeof id !== "string" || state.scope.excludedTargets.has(id)) {
+                ws.close();
+                return;
+              }
               state.allowed.add(id);
               const info = state.infos.get(id);
               if (info) announce(ws, info);
               watch(ws, id);
             } else if (request.method === "Target.setAutoAttach" && !request.sessionId && !state.pageId && request.params["autoAttach"] === true) {
-              if (typeof msg.result?.["sessionId"] !== "string") { ws.close(); return; }
+              if (typeof msg.result?.["sessionId"] !== "string") {
+                ws.close();
+                return;
+              }
               state.sessions.set(msg.result["sessionId"], state.scope.targetId);
               state.autoSessions.add(msg.result["sessionId"]);
               if (state.autoAttach) inject(conn, { sessionId: msg.result["sessionId"] }, "Target.setAutoAttach", state.autoAttach);
               msg.result = {};
-            } else if (request.method === "Target.attachToTarget" && typeof msg.result?.["sessionId"] === "string" && typeof request.params["targetId"] === "string") {
+            } else if (
+              request.method === "Target.attachToTarget" &&
+              typeof msg.result?.["sessionId"] === "string" &&
+              typeof request.params["targetId"] === "string"
+            ) {
               state.sessions.set(msg.result["sessionId"], request.params["targetId"]);
             }
             ws.send(JSON.stringify({ id: msg.id, sessionId: msg.sessionId, result: msg.result }));
@@ -519,8 +596,14 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
           if (msg.sessionId && !ownsTarget(state.sessions.get(msg.sessionId) ?? "")) return;
           ws.send(text);
         };
-        upstream.onclose = () => { resolveOpen(); ws.close(); };
-        upstream.onerror = () => { resolveOpen(); ws.close(); };
+        upstream.onclose = () => {
+          resolveOpen();
+          ws.close();
+        };
+        upstream.onerror = () => {
+          resolveOpen();
+          ws.close();
+        };
       },
       async message(ws, raw) {
         const conn = connOf(ws);
@@ -539,8 +622,16 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
           return;
         }
         let parsed: Packet | null;
-        try { parsed = packet(text); } catch { ws.close(); return; }
-        if (!parsed) { ws.close(); return; }
+        try {
+          parsed = packet(text);
+        } catch {
+          ws.close();
+          return;
+        }
+        if (!parsed) {
+          ws.close();
+          return;
+        }
         const msg = parsed;
 
         let modified = false;
@@ -594,22 +685,40 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
           const fail = (message: string) => ws.send(JSON.stringify({ id: msg.id, sessionId: msg.sessionId, error: { code: -32000, message } }));
           if (msg.sessionId && !ownsTarget(state.sessions.get(msg.sessionId) ?? "")) return void fail("Session is outside this application");
           if (typeof msg.params["targetId"] === "string" && !ownsTarget(msg.params["targetId"])) return void fail("Target is outside this application");
-          if (typeof msg.params["sessionId"] === "string" && !ownsTarget(state.sessions.get(msg.params["sessionId"]) ?? "")) return void fail("Session is outside this application");
-          if (typeof msg.params["browserContextId"] === "string" && msg.params["browserContextId"] !== contextId) return void fail("Browser context is outside this application");
-          if (msg.method && PROFILE_MUTATIONS[msg.method] === true)
-            return void fail("Profile-wide mutation is not allowed for an application");
-          if (msg.method?.startsWith("Browser.") && !["Browser.getVersion", "Browser.getWindowForTarget", "Browser.getWindowBounds", "Browser.setWindowBounds", "Browser.setDownloadBehavior"].includes(msg.method))
+          if (typeof msg.params["sessionId"] === "string" && !ownsTarget(state.sessions.get(msg.params["sessionId"]) ?? ""))
+            return void fail("Session is outside this application");
+          if (typeof msg.params["browserContextId"] === "string" && msg.params["browserContextId"] !== contextId)
+            return void fail("Browser context is outside this application");
+          if (msg.method && PROFILE_MUTATIONS[msg.method] === true) return void fail("Profile-wide mutation is not allowed for an application");
+          if (
+            msg.method?.startsWith("Browser.") &&
+            !["Browser.getVersion", "Browser.getWindowForTarget", "Browser.getWindowBounds", "Browser.setWindowBounds", "Browser.setDownloadBehavior"].includes(
+              msg.method,
+            )
+          )
             return void fail("Browser-wide control is not allowed for an application");
-          if (msg.method?.startsWith("Target.") && ![
-            "Target.getTargets", "Target.getTargetInfo", "Target.getBrowserContexts", "Target.setDiscoverTargets",
-            "Target.setAutoAttach", "Target.attachToTarget", "Target.detachFromTarget",
-            "Target.createTarget", "Target.activateTarget", "Target.closeTarget",
-          ].includes(msg.method)) return void fail("Unsupported application-scoped target command");
+          if (
+            msg.method?.startsWith("Target.") &&
+            ![
+              "Target.getTargets",
+              "Target.getTargetInfo",
+              "Target.getBrowserContexts",
+              "Target.setDiscoverTargets",
+              "Target.setAutoAttach",
+              "Target.attachToTarget",
+              "Target.detachFromTarget",
+              "Target.createTarget",
+              "Target.activateTarget",
+              "Target.closeTarget",
+            ].includes(msg.method)
+          )
+            return void fail("Unsupported application-scoped target command");
           if (msg.method === "Target.attachToTarget" && msg.params["flatten"] !== true) return void fail("Scoped CDP requires flattened sessions");
           if (msg.method === "Target.createTarget") {
             if (msg.params["hidden"] === true || msg.params["forTab"] === true) return void fail("Application pages must be durable visible targets");
           }
-          if ((msg.method === "Target.getTargetInfo" || msg.method === "Browser.getWindowForTarget") && msg.params["targetId"] === undefined) msg.params["targetId"] = state.scope.targetId;
+          if ((msg.method === "Target.getTargetInfo" || msg.method === "Browser.getWindowForTarget") && msg.params["targetId"] === undefined)
+            msg.params["targetId"] = state.scope.targetId;
           if (msg.method === "Target.setDiscoverTargets") {
             state.discover = msg.params["discover"] === true;
             if (!state.discover) state.announced.clear();
@@ -622,10 +731,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
               if (msg.params["flatten"] !== true) return void fail("Scoped CDP requires flattened auto-attachment");
               const filter: unknown = msg.params["filter"];
               const requested: unknown[] = Array.isArray(filter) ? filter : [{}];
-              msg.params["filter"] = [
-                { type: "page", exclude: true }, { type: "tab", exclude: true }, { type: "browser", exclude: true },
-                ...requested,
-              ];
+              msg.params["filter"] = [{ type: "page", exclude: true }, { type: "tab", exclude: true }, { type: "browser", exclude: true }, ...requested];
             }
             if (!msg.sessionId && !state.pageId) {
               if (msg.params["autoAttach"] === true) {
@@ -645,11 +751,16 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
           }
           if (msg.id !== undefined) state.requests.set(`${msg.sessionId ?? ""}:${msg.id}`, request);
         }
-        if (!msg.method || !INPUT.has(msg.method)) { conn.upstream.send((state || modified) ? JSON.stringify(msg) : text); return; }
+        if (!msg.method || !INPUT.has(msg.method)) {
+          conn.upstream.send(state || modified ? JSON.stringify(msg) : text);
+          return;
+        }
         const session = msg.sessionId ?? "";
         const next = (conn.queues.get(session) ?? Promise.resolve())
-          .then(() => revoked ? undefined : humanize(conn, msg))
-          .catch((err: unknown) => { logEvent("error", `input pacing: ${err instanceof Error ? err.message : String(err)}`); })
+          .then(() => (revoked ? undefined : humanize(conn, msg)))
+          .catch((err: unknown) => {
+            logEvent("error", `input pacing: ${err instanceof Error ? err.message : String(err)}`);
+          })
           .then(() => {
             if (!revoked && conn.upstream.readyState === WebSocket.OPEN) conn.upstream.send(JSON.stringify(msg));
           });
@@ -675,5 +786,13 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
     void server.stop(true);
     throw new Error("CDP proxy requires a TCP listener");
   }
-  return { port, ownsTarget, revoke, close: () => { revoke(); void server.stop(true); } };
+  return {
+    port,
+    ownsTarget,
+    revoke,
+    close: () => {
+      revoke();
+      void server.stop(true);
+    },
+  };
 }

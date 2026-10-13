@@ -34,17 +34,29 @@ async function cdpAlive(slot: number) {
 const displayAlive = (display: string) =>
   new Promise<boolean>(resolve => {
     const sock = connect(`/tmp/.X11-unix/X${display.replace(":", "")}`);
-    sock.once("connect", () => { sock.destroy(); resolve(true); });
-    sock.once("error", () => { resolve(false); });
+    sock.once("connect", () => {
+      sock.destroy();
+      resolve(true);
+    });
+    sock.once("error", () => {
+      resolve(false);
+    });
   });
 
-const detached = (cmd: string[], env: Record<string, string | undefined>) => { Bun.spawn(["setsid", ...cmd], { stdin: "ignore", stdout: "ignore", stderr: "ignore", env }).unref(); };
+const detached = (cmd: string[], env: Record<string, string | undefined>) => {
+  Bun.spawn(["setsid", ...cmd], { stdin: "ignore", stdout: "ignore", stderr: "ignore", env }).unref();
+};
 
 const portOpen = (port: number) =>
   new Promise<boolean>(resolve => {
     const sock = connect(port, "127.0.0.1");
-    sock.once("connect", () => { sock.destroy(); resolve(true); });
-    sock.once("error", () => { resolve(false); });
+    sock.once("connect", () => {
+      sock.destroy();
+      resolve(true);
+    });
+    sock.once("error", () => {
+      resolve(false);
+    });
   });
 
 // noVNC view of the virtual display, for taking over a tab by hand. Localhost only.
@@ -54,8 +66,7 @@ async function ensureVnc(slot: number) {
   const rfb = vncPort - 180; // 6080 -> 5900
   if (!(await portOpen(rfb)))
     detached(["x11vnc", "-display", display, "-localhost", "-rfbport", String(rfb), "-forever", "-shared", "-nopw", "-quiet"], process.env);
-  if (!(await portOpen(vncPort)))
-    detached(["websockify", "--web", "/usr/share/novnc", `127.0.0.1:${vncPort}`, `127.0.0.1:${rfb}`], process.env);
+  if (!(await portOpen(vncPort))) detached(["websockify", "--web", "/usr/share/novnc", `127.0.0.1:${vncPort}`, `127.0.0.1:${rfb}`], process.env);
 }
 
 export async function ensureChrome(slot = 0) {
@@ -104,17 +115,14 @@ export async function ensureChrome(slot = 0) {
 export async function tabs(slot = 0): Promise<{ id: string; title: string; url: string; ws: string }[]> {
   if (!(await cdpAlive(slot))) return [];
   const list = (await (await fetch(`${cdp(slot)}/json/list`)).json()) as CdpTab[];
-  return list
-    .filter(t => t.type === "page")
-    .map(t => ({ id: t.id, title: t.title, url: t.url, ws: t.webSocketDebuggerUrl }));
+  return list.filter(t => t.type === "page").map(t => ({ id: t.id, title: t.title, url: t.url, ws: t.webSocketDebuggerUrl }));
 }
 export async function activateApplicationTab(slot: number, tabId: string): Promise<void> {
   if (!tabId.trim()) throw new Error("Cannot activate a blank application tab ID");
   const listed = await fetch(`${cdp(slot)}/json/list`, { signal: AbortSignal.timeout(1500) });
   if (!listed.ok) throw new Error(`Could not inspect application tabs (${listed.status})`);
-  const existing = await listed.json() as CdpTab[];
-  if (!existing.some(tab => tab.id === tabId && tab.type === "page"))
-    throw new Error("Saved application tab is missing; request application recovery instead");
+  const existing = (await listed.json()) as CdpTab[];
+  if (!existing.some(tab => tab.id === tabId && tab.type === "page")) throw new Error("Saved application tab is missing; request application recovery instead");
   const res = await fetch(`${cdp(slot)}/json/activate/${encodeURIComponent(tabId)}`, {
     signal: AbortSignal.timeout(1500),
   });
@@ -138,8 +146,15 @@ export async function prepareJobBrowser(slot: number, checkpointTabId: string | 
     const res = await fetch(`${cdp(slot)}/json/new?about:blank`, { method: "PUT" });
     if (!res.ok) throw new Error(`Could not create isolated application tab (${res.status})`);
     const created: unknown = await res.json();
-    if (!created || typeof created !== "object" || !("id" in created) || typeof created.id !== "string" ||
-        !created.id || excludedTargets.has(created.id) || existing.some(tab => tab.id === created.id))
+    if (
+      !created ||
+      typeof created !== "object" ||
+      !("id" in created) ||
+      typeof created.id !== "string" ||
+      !created.id ||
+      excludedTargets.has(created.id) ||
+      existing.some(tab => tab.id === created.id)
+    )
       throw new Error("CDP did not create a distinct application target");
     tabId = created.id;
   }
@@ -149,15 +164,15 @@ export async function prepareJobBrowser(slot: number, checkpointTabId: string | 
 // Retain tabs referenced by durable draft checkpoints, even when their slot is reused.
 export async function pruneTabs(slot: number, keep: number, protectedIds: ReadonlySet<string> = new Set()) {
   for (const tab of (await tabs(slot)).filter(t => !protectedIds.has(t.id)).slice(keep))
-    await fetch(`${cdp(slot)}/json/close/${tab.id}`).catch(() => { /* tab already closed or browser gone */ });
+    await fetch(`${cdp(slot)}/json/close/${tab.id}`).catch(() => {
+      /* tab already closed or browser gone */
+    });
 }
 
 // PNG of a tab (default: the most recently used real page), for the live view in the UI.
 export async function screenshot(slot = 0, tabId?: string): Promise<Uint8Array | null> {
   const all = await tabs(slot);
-  const tab = tabId !== undefined
-    ? all.find(t => t.id === tabId)
-    : all.find(t => !t.url.startsWith("about:") && !t.url.startsWith("chrome")) ?? all[0];
+  const tab = tabId !== undefined ? all.find(t => t.id === tabId) : (all.find(t => !t.url.startsWith("about:") && !t.url.startsWith("chrome")) ?? all[0]);
   if (!tab?.ws) return null;
   return new Promise(resolve => {
     const ws = new WebSocket(tab.ws);
@@ -165,7 +180,9 @@ export async function screenshot(slot = 0, tabId?: string): Promise<Uint8Array |
       ws.close();
       resolve(null);
     }, 8000);
-    ws.onopen = () => { ws.send(JSON.stringify({ id: 1, method: "Page.captureScreenshot", params: { format: "png" } })); };
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ id: 1, method: "Page.captureScreenshot", params: { format: "png" } }));
+    };
     ws.onmessage = ev => {
       const msg = JSON.parse(String(ev.data)) as ScreenshotReply;
       if (msg.id !== 1) return;

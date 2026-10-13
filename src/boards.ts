@@ -1,6 +1,6 @@
 // LinkedIn and Indeed job search, read logged out with no account. They are used only to find
 // postings: nothing is applied to on either site, and each posting is looked up on the employer's
-// own site first (see locate in pipeline.ts). Neither site offers this as a public API, so requests
+// own site first (see locate.ts). Neither site offers this as a public API, so requests
 // are few, spaced out, and stop for hours at the first sign of a block.
 import { fetchCompany, htmlToText, posted, type Ats, type Company, type Posting } from "./ats";
 import { config } from "./config";
@@ -20,7 +20,8 @@ type Board = (typeof BOARDS)[number];
 export const isBoardUrl = (url: string) => /^https?:\/\/([\w-]+\.)*(linkedin|indeed)\.com\//i.test(url);
 
 // Recruiters and reposting sites that hide the employer: there is no posting of theirs to find.
-const NO_EMPLOYER = /^(jobs via |lensa$|jobot|jobgether|talentify|dice$|cybercoders|actalent|teksystems|robert half|insight global|randstad|motion recruitment|hiremefast|get\.?it )/i;
+const NO_EMPLOYER =
+  /^(jobs via |lensa$|jobot|jobgether|talentify|dice$|cybercoders|actalent|teksystems|robert half|insight global|randstad|motion recruitment|hiremefast|get\.?it )/i;
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const pause = () => sleep(6000 + Math.random() * 9000);
@@ -39,7 +40,10 @@ const BROWSER = {
   "accept-language": "en-US,en;q=0.9",
   "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
 };
-const text = (html: string | undefined) => htmlToText(html ?? "").replace(/\s+/g, " ").trim();
+const text = (html: string | undefined) =>
+  htmlToText(html ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
 
 const LINKEDIN_PAGE = 10;
 async function linkedin(b: Boards): Promise<Posting[]> {
@@ -51,8 +55,19 @@ async function linkedin(b: Boards): Promise<Posting[]> {
   for (const keywords of b.queries) {
     for (let page = 0; page < pages; page++) {
       if (requests++) await pause();
-      const params = new URLSearchParams({ keywords, location: b.location, distance: String(b.distance), f_TPR: `r${hours * 3600}`, sortBy: "DD", start: String(page * LINKEDIN_PAGE) });
-      const res = await fetch(`https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?${params.toString()}`, { headers: BROWSER, redirect: "manual", signal: AbortSignal.timeout(30_000) });
+      const params = new URLSearchParams({
+        keywords,
+        location: b.location,
+        distance: String(b.distance),
+        f_TPR: `r${hours * 3600}`,
+        sortBy: "DD",
+        start: String(page * LINKEDIN_PAGE),
+      });
+      const res = await fetch(`https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?${params.toString()}`, {
+        headers: BROWSER,
+        redirect: "manual",
+        signal: AbortSignal.timeout(30_000),
+      });
       if (res.status !== 200) throw new Blocked(`search answered ${res.status}`);
       const html = await res.text();
       const cards = html.split(/<li>/).slice(1);
@@ -62,16 +77,24 @@ async function linkedin(b: Boards): Promise<Posting[]> {
       }
       let fresh = 0;
       for (const card of cards) {
-        const id = (/jobPosting:(\d+)/.exec(card))?.[1];
-        const title = text((/base-search-card__title[^>]*>([\s\S]*?)<\/h3>/.exec(card))?.[1]);
-        const company = text((/base-search-card__subtitle[^>]*>([\s\S]*?)<\/h4>/.exec(card))?.[1]);
+        const id = /jobPosting:(\d+)/.exec(card)?.[1];
+        const title = text(/base-search-card__title[^>]*>([\s\S]*?)<\/h3>/.exec(card)?.[1]);
+        const company = text(/base-search-card__subtitle[^>]*>([\s\S]*?)<\/h4>/.exec(card)?.[1]);
         if (!id || !title || !company || seen.has(id)) continue;
         seen.add(id);
         const url = `https://www.linkedin.com/jobs/view/${id}`;
         if (knownUrl(url)) continue;
         if (NO_EMPLOYER.test(company)) continue;
         fresh++;
-        out.push({ url, source: "linkedin", company, title, location: text((/job-search-card__location[^>]*>([\s\S]*?)<\/span>/.exec(card))?.[1]) || null, description: null, posted: posted((/<time[^>]*datetime="([^"]+)"/.exec(card))?.[1]) });
+        out.push({
+          url,
+          source: "linkedin",
+          company,
+          title,
+          location: text(/job-search-card__location[^>]*>([\s\S]*?)<\/span>/.exec(card)?.[1]) || null,
+          description: null,
+          posted: posted(/<time[^>]*datetime="([^"]+)"/.exec(card)?.[1]),
+        });
       }
       // Newest first: a page of postings already seen means the rest are older still.
       if (!fresh || cards.length < LINKEDIN_PAGE) break;
@@ -82,12 +105,16 @@ async function linkedin(b: Boards): Promise<Posting[]> {
 
 // The job page's description, for a posting whose employer page gave none. One request.
 export async function linkedinDescription(url: string): Promise<string | null> {
-  const id = (/linkedin\.com\/jobs\/view\/(?:[^/?]*-)?(\d+)/.exec(url))?.[1];
+  const id = /linkedin\.com\/jobs\/view\/(?:[^/?]*-)?(\d+)/.exec(url)?.[1];
   if (!id) return null;
   try {
-    const res = await fetch(`https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${id}`, { headers: BROWSER, redirect: "manual", signal: AbortSignal.timeout(30_000) });
+    const res = await fetch(`https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${id}`, {
+      headers: BROWSER,
+      redirect: "manual",
+      signal: AbortSignal.timeout(30_000),
+    });
     if (res.status !== 200) return null;
-    const body = (/show-more-less-html__markup[^>]*>([\s\S]*?)<\/div>/.exec((await res.text())))?.[1];
+    const body = /show-more-less-html__markup[^>]*>([\s\S]*?)<\/div>/.exec(await res.text())?.[1];
     return body ? htmlToText(body) || null : null;
   } catch {
     return null;
@@ -126,7 +153,12 @@ async function indeed(b: Boards): Promise<Posting[]> {
   for (const what of b.queries) {
     if (requests++) await pause();
     const query = `query { jobSearch(what: ${JSON.stringify(what)} location: {where: ${JSON.stringify(b.location)}, radius: ${b.distance}, radiusUnit: MILES} limit: 100 sort: DATE filters: [{ date: { field: "dateOnIndeed", start: "${hours}h" } }]) { results { job { key title sourceEmployerName description { html } location { admin1Code city } employer { name } recruit { viewJobUrl } } } } }`;
-    const res = await fetch("https://apis.indeed.com/graphql", { method: "POST", headers: INDEED_HEADERS, body: JSON.stringify({ query }), signal: AbortSignal.timeout(30_000) });
+    const res = await fetch("https://apis.indeed.com/graphql", {
+      method: "POST",
+      headers: INDEED_HEADERS,
+      body: JSON.stringify({ query }),
+      signal: AbortSignal.timeout(30_000),
+    });
     if (res.status !== 200) throw new Blocked(`search answered ${res.status}`);
     const data = (await res.json()) as IndeedResponse | null;
     if (!data?.data?.jobSearch) throw new Blocked(`search failed: ${JSON.stringify(data?.errors ?? data).slice(0, 200)}`);
@@ -185,7 +217,10 @@ const words = (s: string | null) => new Set((s ?? "").toLowerCase().match(/[a-z]
 export async function probeEmployer(job: Job): Promise<{ company: Company; posting: Posting } | null> {
   const key = companyKey(job.company);
   if (Date.now() - Date.parse(kvGet(`locate.miss.${key}`) ?? "1970-01-01") < MISS_DAYS * 86400_000) return null;
-  const hyphenated = job.company.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const hyphenated = job.company
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
   let boardFound = false;
   for (const slug of new Set([key, hyphenated])) {
     if (slug.length < 3) continue;
@@ -197,7 +232,8 @@ export async function probeEmployer(job: Job): Promise<{ company: Company; posti
       const same = postings.filter(p => p.url && findTwin({ company: job.company, title: p.title, description: p.description }, [job]));
       const here = words(job.location);
       // The same title is often open in several places: take the one for this location, else a US one.
-      const posting = same.find(p => [...words(p.location)].some(w => here.has(w))) ?? same.find(p => /\b(US|USA|United States)\b/.test(p.location ?? "")) ?? same[0];
+      const posting =
+        same.find(p => [...words(p.location)].some(w => here.has(w))) ?? same.find(p => /\b(US|USA|United States)\b/.test(p.location ?? "")) ?? same[0];
       if (posting) return { company, posting };
     }
   }

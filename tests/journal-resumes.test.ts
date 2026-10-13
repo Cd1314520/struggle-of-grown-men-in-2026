@@ -20,10 +20,7 @@ import {
   type ApprovalEventRow,
   type ResumeReviewerFn,
 } from "../scripts/journal-resumes";
-import type {
-  ResumeReviewInput,
-  ApplicationResumeReview,
-} from "../scripts/resume-review-model";
+import type { ResumeReviewInput, ApplicationResumeReview } from "../scripts/resume-review-model";
 
 /** Resolves with the Error a promise rejects with; fails the test if it settles any other way. */
 async function rejectionOf(promise: Promise<unknown>): Promise<Error> {
@@ -37,18 +34,18 @@ async function rejectionOf(promise: Promise<unknown>): Promise<Error> {
 }
 
 describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
-  const samplePdfBytes = readFileSync("data/jobs/8878/applied/2790dfe6397e/resume.pdf");
+  const samplePdfBytes = readFileSync(join(import.meta.dir, "fixtures/sample-resume.pdf"));
 
   function createMockReviewer(
     callsAccumulator: ResumeReviewInput[][],
-    handler?: (inputs: ResumeReviewInput[]) => Promise<ApplicationResumeReview[]>
+    handler?: (inputs: ResumeReviewInput[]) => Promise<ApplicationResumeReview[]>,
   ): ResumeReviewerFn {
     return async (inputs: ResumeReviewInput[], _knownThemes: string[]): Promise<ApplicationResumeReview[]> => {
       callsAccumulator.push(inputs);
       if (handler) {
         return handler(inputs);
       }
-      return inputs.map((inp) => ({
+      return inputs.map(inp => ({
         jobId: inp.jobId,
         gaps: [
           {
@@ -87,7 +84,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
 - Monitoring and alerting (Azure Application Insights, TypeScript dashboards)
 - Negative boundaries: distributed systems design, on-call or incident rotation, mentoring or managing other engineers
 `,
-      "utf8"
+      "utf8",
     );
 
     const db = openDatabase(dbPath, "migrate");
@@ -109,16 +106,12 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     return { dir, dbPath, journalPath, statePath, notesPath, jobsRoot, defaultOpts, mockCalls };
   }
 
-  function createValidJobArtifacts(
-    jobsRoot: string,
-    jobId: number,
-    customPdfBytes?: Buffer
-  ): { sha: string; pdfPath: string } {
+  function createValidJobArtifacts(jobsRoot: string, jobId: number, customPdfBytes?: Buffer): { sha: string; pdfPath: string } {
     const bytes = customPdfBytes ?? samplePdfBytes;
     const sha = createHash("sha256").update(bytes).digest("hex");
     const dir = join(jobsRoot, String(jobId), "applied", sha.slice(0, 12));
     mkdirSync(dir, { recursive: true });
-    const pdfPath = join(dir, "resume.pdf");
+    const pdfPath = join(dir, "alex_rivera_resume.pdf");
     writeFileSync(pdfPath, bytes);
     return { sha, pdfPath };
   }
@@ -176,11 +169,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     const nowIso = "2026-10-10T03:00:00.000Z";
 
     // Simulate pre-existing journal with high watermark checkpoint from previous stall run
-    writeFileSync(
-      journalPath,
-      `# Auto-Apply Observation & Stalls Journal\n\n<!-- journal-checkpoint: watermark=999999 -->\n\n### Prior stall run\n`,
-      "utf8"
-    );
+    writeFileSync(journalPath, `# Auto-Apply Observation & Stalls Journal\n\n<!-- journal-checkpoint: watermark=999999 -->\n\n### Prior stall run\n`, "utf8");
 
     const db = new Database(dbPath);
     db.run(`

@@ -1,20 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { openDatabase } from "../src/schema";
-import {
-  observeAutoApplyActivity,
-  JOURNAL_HEADER,
-  type AutoApplyJobAttempt,
-} from "./journal-stalls";
-import {
-  reviewResumes,
-  REVIEW_MODEL,
-  type ResumeReviewInput,
-  type ResumeGap,
-  type ApplicationResumeReview,
-} from "./resume-review-model";
+import { observeAutoApplyActivity, JOURNAL_HEADER, type AutoApplyJobAttempt } from "./journal-stalls";
+import { reviewResumes, REVIEW_MODEL, type ResumeReviewInput, type ResumeGap, type ApplicationResumeReview } from "./resume-review-model";
 
 // Resolve repository root via import.meta.url so default paths are independent of process.cwd()
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -26,10 +16,7 @@ export const DEFAULT_NOTES_PATH = join(REPO_ROOT, "profile/resume-notes.md");
 export const DEFAULT_JOBS_ROOT = join(REPO_ROOT, "data/jobs");
 export const DEFAULT_BATCH_SIZE = 5;
 export const DEFAULT_MAX_APPS = 25;
-export type ResumeReviewerFn = (
-  inputs: ResumeReviewInput[],
-  knownThemes: string[]
-) => Promise<ApplicationResumeReview[]>;
+export type ResumeReviewerFn = (inputs: ResumeReviewInput[], knownThemes: string[]) => Promise<ApplicationResumeReview[]>;
 
 export interface CliOptions {
   dbPath: string;
@@ -211,10 +198,7 @@ export function loadResumeJournalState(statePath: string): ResumeJournalState {
     return parsed as ResumeJournalState;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(
-      `Corrupt resume journal state file at ${statePath}: ${msg}. Refusing to overwrite corrupt state.`,
-      { cause: err }
-    );
+    throw new Error(`Corrupt resume journal state file at ${statePath}: ${msg}. Refusing to overwrite corrupt state.`, { cause: err });
   }
 }
 
@@ -232,9 +216,7 @@ export function computeFileSha256(filePath: string): string {
 }
 
 export function computeFingerprint(postingText: string, resumeText: string, notesText: string): string {
-  return createHash("sha256")
-    .update(`${postingText}\n---RESUME---\n${resumeText}\n---NOTES---\n${notesText}`)
-    .digest("hex");
+  return createHash("sha256").update(`${postingText}\n---RESUME---\n${resumeText}\n---NOTES---\n${notesText}`).digest("hex");
 }
 
 export function extractPdfText(pdfPath: string): { success: true; text: string } | { success: false; error: string } {
@@ -276,15 +258,11 @@ export function extractPublishedJournalMarkers(journalPath: string): {
 
   const content = readFileSync(journalPath, "utf8");
   // Match full evidence fingerprint marker: <!-- journal-resume-review: jobId=401 fp=<sha256> ... -->
-  for (const m of content.matchAll(
-    /<!--\s*journal-resume-review:\s*jobId=(\d+)\s+fp=([0-9a-fA-F]+)(?:\s+sha=([0-9a-fA-F]+))?\s*-->/g
-  )) {
+  for (const m of content.matchAll(/<!--\s*journal-resume-review:\s*jobId=(\d+)\s+fp=([0-9a-fA-F]+)(?:\s+sha=([0-9a-fA-F]+))?\s*-->/g)) {
     publishedJobFingerprints.add(`${m[1]}:${m[2]}`);
   }
   // Match missing evidence marker with reason hash: <!-- journal-resume-missing-evidence: jobId=401 reasonHash=<sha256[:12]> -->
-  for (const m of content.matchAll(
-    /<!--\s*journal-resume-missing-evidence:\s*jobId=(\d+)\s+reasonHash=([0-9a-fA-F]+)\s*-->/g
-  )) {
+  for (const m of content.matchAll(/<!--\s*journal-resume-missing-evidence:\s*jobId=(\d+)\s+reasonHash=([0-9a-fA-F]+)\s*-->/g)) {
     publishedMissingKeys.add(`${m[1]}:${m[2]}`);
   }
   // Match entry timestamp
@@ -300,7 +278,7 @@ export function verifyJobAttributionAndEvidence(
   attempt: AutoApplyJobAttempt,
   approvals: ApprovalEventRow[],
   jobsRoot: string,
-  notesPath: string
+  notesPath: string,
 ): JobEvidenceResult {
   if (!job) {
     return {
@@ -327,7 +305,7 @@ export function verifyJobAttributionAndEvidence(
 
   // Find governing approval event: latest approval at or before the freeze timestamp
   // (allow 5000ms clock tolerance for minor differences between node Date and sqlite datetime)
-  const priorApprovals = approvals.filter((a) => {
+  const priorApprovals = approvals.filter(a => {
     const apprMs = parseTimestampMs(a.at);
     return apprMs !== null && apprMs <= freezeMs + 5000;
   });
@@ -376,17 +354,21 @@ export function verifyJobAttributionAndEvidence(
     };
   }
 
-  // 4. Locate applied resume PDF: exact path data/jobs/<id>/applied/<sha[:12]>/resume.pdf
-  const pdfPath = join(jobsRoot, String(job.id), "applied", job.resume_sha.slice(0, 12), "resume.pdf");
-  if (!existsSync(pdfPath)) {
+  // 4. Locate applied resume PDF: the one PDF in data/jobs/<id>/applied/<sha[:12]>/. Its name is
+  // whatever resume.pdfName was when it was frozen; its identity is the SHA checked next.
+  const frozenDir = join(jobsRoot, String(job.id), "applied", job.resume_sha.slice(0, 12));
+  const pdfNames = existsSync(frozenDir) ? readdirSync(frozenDir).filter(name => name.toLowerCase().endsWith(".pdf")) : [];
+  const [pdfName] = pdfNames;
+  if (pdfName === undefined || pdfNames.length !== 1) {
     return {
       valid: false,
       jobId: job.id,
       company: job.company,
       title: job.title,
-      reason: `Frozen applied resume PDF not found at path: ${pdfPath}`,
+      reason: pdfNames.length > 1 ? `More than one PDF in the frozen resume directory: ${frozenDir}` : `Frozen applied resume PDF not found in: ${frozenDir}`,
     };
   }
+  const pdfPath = join(frozenDir, pdfName);
 
   // 5. Verify PDF SHA matches jobs.resume_sha
   let actualSha: string;
@@ -524,7 +506,7 @@ export function aggregateResumeThemes(reviews: CachedReviewEntry[]): {
     }
   }
 
-  const buildBucketSummaries = (map: typeof bucketMaps["supported"]): ThemeBucketSummary[] => {
+  const buildBucketSummaries = (map: (typeof bucketMaps)["supported"]): ThemeBucketSummary[] => {
     const list: ThemeBucketSummary[] = [];
 
     for (const item of map.values()) {
@@ -579,15 +561,12 @@ export function formatBucketTable(summaries: ThemeBucketSummary[]): string[] {
     return ["*None identified in cumulative reviewed applications.*", ""];
   }
 
-  const lines: string[] = [
-    "| Theme | Applications (Companies) | Importance (Req / Core / Pref) | Job IDs |",
-    "| :--- | :--- | :--- | :--- |",
-  ];
+  const lines: string[] = ["| Theme | Applications (Companies) | Importance (Req / Core / Pref) | Job IDs |", "| :--- | :--- | :--- | :--- |"];
 
   for (const s of summaries) {
     const appsText = `${s.distinctJobIds.size} app${s.distinctJobIds.size === 1 ? "" : "s"} (${s.distinctCompanies.size} co${s.distinctCompanies.size === 1 ? "" : "s"})`;
     const impText = `${s.requiredCount} req, ${s.coreCount} core, ${s.preferredCount} pref`;
-    const jobsText = s.jobIdsList.map((id) => `#${id}`).join(", ");
+    const jobsText = s.jobIdsList.map(id => `#${id}`).join(", ");
     lines.push(`| ${s.theme} | ${appsText} | ${impText} | ${jobsText} |`);
   }
 
@@ -620,21 +599,19 @@ export function formatResumeJournalEntry(params: {
   lines.push("");
 
   // 3. Denominator & Scope Summary
-  const allDistinctJobIds = new Set(params.allReviews.map((r) => r.jobId));
-  const allDistinctCompanies = new Set(params.allReviews.map((r) => r.company));
+  const allDistinctJobIds = new Set(params.allReviews.map(r => r.jobId));
+  const allDistinctCompanies = new Set(params.allReviews.map(r => r.company));
 
   lines.push("#### 1. Review Scope & Cumulative Denominator");
   lines.push(`- **Review Model**: \`${REVIEW_MODEL}\``);
   lines.push(`- **Newly Evaluated in This Run**: ${params.newReviews.length} application(s)`);
   lines.push(
-    `- **Cumulative Evaluated Applications**: ${allDistinctJobIds.size} distinct application(s) across ${allDistinctCompanies.size} company/companies`
+    `- **Cumulative Evaluated Applications**: ${allDistinctJobIds.size} distinct application(s) across ${allDistinctCompanies.size} company/companies`,
   );
   if (params.newReviews.length > 0) {
     lines.push("- **Evaluated Applications in Current Batch**:");
     for (const r of params.newReviews) {
-      lines.push(
-        `  - Job #${r.jobId}: **${r.company}** — *${r.title}* (Resume: \`${r.resumeSha.slice(0, 12)}\` at \`${r.sourcePdfPath}\`)`
-      );
+      lines.push(`  - Job #${r.jobId}: **${r.company}** — *${r.title}* (Resume: \`${r.resumeSha.slice(0, 12)}\` at \`${r.sourcePdfPath}\`)`);
     }
   }
   lines.push("");
@@ -642,20 +619,20 @@ export function formatResumeJournalEntry(params: {
   // 4. Methodological & Practice-Biased Sample Limitations
   lines.push("#### 2. Methodological & Sampling Limitations");
   lines.push(
-    "Observations represent read-only AI evaluations (`openai-codex/gpt-6-luna`) comparing verbatim text extracted from the exact frozen applied resume PDF (`pdftotext -layout`) against stored employer posting text and candidate notes (`profile/resume-notes.md`)."
+    "Observations represent read-only AI evaluations (`openai-codex/gpt-6-luna`) comparing verbatim text extracted from the exact frozen applied resume PDF (`pdftotext -layout`) against stored employer posting text and candidate notes (`profile/resume-notes.md`).",
   );
   lines.push("");
   lines.push(
-    "- **Practice-Biased Sample**: The auto-apply queue monitors entry-level and real practice applications matching auto-apply criteria, not a balanced cross-section of the entire software engineering market."
+    "- **Practice-Biased Sample**: The auto-apply queue monitors entry-level and real practice applications matching auto-apply criteria, not a balanced cross-section of the entire software engineering market.",
   );
   lines.push(
-    "- **Stored Posting Text**: Stored posting descriptions reflect the current saved text in the database (`jobs.description`), not an independently frozen employer posting capture at submission time."
+    "- **Stored Posting Text**: Stored posting descriptions reflect the current saved text in the database (`jobs.description`), not an independently frozen employer posting capture at submission time.",
   );
   lines.push(
-    "- **Unconfirmed Qualifications**: Marked as not evidenced in supplied material (resume PDF or `profile/resume-notes.md`), not a proven candidate skill gap. Clarification with the candidate is required."
+    "- **Unconfirmed Qualifications**: Marked as not evidenced in supplied material (resume PDF or `profile/resume-notes.md`), not a proven candidate skill gap. Clarification with the candidate is required.",
   );
   lines.push(
-    "- **Advisory Editorial Only**: Findings are provided solely for candidate review and editorial consideration. This monitor never alters resumes, candidate knowledge banks (`profile/answers.md`), or live application submissions."
+    "- **Advisory Editorial Only**: Findings are provided solely for candidate review and editorial consideration. This monitor never alters resumes, candidate knowledge banks (`profile/answers.md`), or live application submissions.",
   );
   lines.push("");
 
@@ -663,32 +640,26 @@ export function formatResumeJournalEntry(params: {
   const { supportedThemes, unconfirmedThemes, confirmedMismatchThemes } = aggregateResumeThemes(params.allReviews);
 
   lines.push("#### 3. Cumulative Ranked Resume Themes (Across Distinct Applications)");
-  lines.push(
-    "Counts indicate DISTINCT employer applications and companies where the qualification gap was identified:"
-  );
+  lines.push("Counts indicate DISTINCT employer applications and companies where the qualification gap was identified:");
   lines.push("");
 
   // Subsection 3A: Supported Omissions
   lines.push("##### A. Supported-but-Omitted & Underemphasized Experience");
   lines.push(
-    "*Experience supported by candidate notes (`profile/resume-notes.md`) or existing resume evidence that was omitted or underemphasized relative to employer requirements (including reframing already-supported resume work without requiring separate notes):*"
+    "*Experience supported by candidate notes (`profile/resume-notes.md`) or existing resume evidence that was omitted or underemphasized relative to employer requirements (including reframing already-supported resume work without requiring separate notes):*",
   );
   lines.push("");
   lines.push(...formatBucketTable(supportedThemes));
 
   // Subsection 3B: Unconfirmed Experience & Questions
   lines.push("##### B. Unconfirmed Experience & Questions for Candidate");
-  lines.push(
-    "*Employer requirements absent from both tailored resume and candidate notes (not evidenced in supplied material):*"
-  );
+  lines.push("*Employer requirements absent from both tailored resume and candidate notes (not evidenced in supplied material):*");
   lines.push("");
   lines.push(...formatBucketTable(unconfirmedThemes));
 
   // Subsection 3C: Explicitly Unsupported Requirements / Confirmed Negatives
   lines.push("##### C. Explicitly Unsupported Requirements (Candidate Negative Boundaries)");
-  lines.push(
-    "*Posting requirements that conflict with candidate negative boundaries in `profile/resume-notes.md`. Must never be claimed on resumes:*"
-  );
+  lines.push("*Posting requirements that conflict with candidate negative boundaries in `profile/resume-notes.md`. Must never be claimed on resumes:*");
   lines.push("");
   lines.push(...formatBucketTable(confirmedMismatchThemes));
 
@@ -723,14 +694,10 @@ export function formatResumeJournalEntry(params: {
   // 7. Evidence-Unavailable Applications
   if (params.allMissingEvidence.length > 0) {
     lines.push("#### 5. Evidence-Unavailable Applications");
-    lines.push(
-      "*The following auto-approved applications could not be evaluated due to missing or unattributable evidence:*"
-    );
+    lines.push("*The following auto-approved applications could not be evaluated due to missing or unattributable evidence:*");
     lines.push("");
     for (const m of params.allMissingEvidence) {
-      lines.push(
-        `- **Job #${m.jobId}** (${m.company} - \`${m.title}\`): ${m.reason} *(recorded at ${m.notedAt})*`
-      );
+      lines.push(`- **Job #${m.jobId}** (${m.company} - \`${m.title}\`): ${m.reason} *(recorded at ${m.notedAt})*`);
     }
     lines.push("");
   }
@@ -761,9 +728,7 @@ export function updateJournalFile(journalPath: string, entryContent: string): vo
   renameSync(tmpPath, journalPath);
 }
 
-export async function runResumeJournal(
-  options: CliOptions
-): Promise<{ changed: boolean; message: string; success: boolean }> {
+export async function runResumeJournal(options: CliOptions): Promise<{ changed: boolean; message: string; success: boolean }> {
   if (!existsSync(options.dbPath)) {
     throw new Error(`Database file not found at: ${options.dbPath}`);
   }
@@ -795,7 +760,7 @@ export async function runResumeJournal(
         }
       }
       const uniqueAttempts = Array.from(uniqueAttemptsMap.values());
-      const jobIds = uniqueAttempts.map((a) => a.jobId);
+      const jobIds = uniqueAttempts.map(a => a.jobId);
 
       // Query jobs rows
       // One bound JSON array stands in for the id list, so no value is ever spliced into the SQL.
@@ -804,10 +769,10 @@ export async function runResumeJournal(
         .query<JobDetailRow, [string]>(
           `SELECT id, company, title, description, resume_sha, resume_frozen_at, approved_by, status
            FROM jobs
-           WHERE id IN (SELECT value FROM json_each(?))`
+           WHERE id IN (SELECT value FROM json_each(?))`,
         )
         .all(jobIdList);
-      const jobDetailsMap = new Map<number, JobDetailRow>(jobRows.map((j) => [j.id, j]));
+      const jobDetailsMap = new Map<number, JobDetailRow>(jobRows.map(j => [j.id, j]));
 
       // Query approval events (auto and user approvals) for governing approval determination
       const approvalRows = db
@@ -818,7 +783,7 @@ export async function runResumeJournal(
              (kind = 'auto' AND worker = 'prep' AND (message LIKE 'Approved by auto apply:%' OR message LIKE 'Approved by reconsidered auto apply:%'))
              OR (kind = 'user' AND message = 'approve')
            )
-           ORDER BY id ASC`
+           ORDER BY id ASC`,
         )
         .all(jobIdList);
 
@@ -862,13 +827,7 @@ export async function runResumeJournal(
       const jobDetail = dbSnapshot.jobDetailsMap.get(attempt.jobId);
       const approvals = dbSnapshot.approvalsMap.get(attempt.jobId) ?? [];
 
-      const res = verifyJobAttributionAndEvidence(
-        jobDetail,
-        attempt,
-        approvals,
-        options.jobsRoot,
-        options.notesPath
-      );
+      const res = verifyJobAttributionAndEvidence(jobDetail, attempt, approvals, options.jobsRoot, options.notesPath);
 
       if (res.valid) {
         validEvidenceList.push(res);
@@ -913,7 +872,7 @@ export async function runResumeJournal(
     }
 
     // Check if any missing evidence needs publication in journal (keyed by jobId:reasonHash)
-    const unpublishedMissing = Object.values(state.missingEvidence).filter((m) => {
+    const unpublishedMissing = Object.values(state.missingEvidence).filter(m => {
       const reasonHash = createHash("sha256").update(m.reason).digest("hex").slice(0, 12);
       return !publishedMissingKeys.has(`${m.jobId}:${reasonHash}`);
     });
@@ -934,9 +893,7 @@ export async function runResumeJournal(
     }
 
     // Extract known themes for vocabulary consistency across model invocations
-    const knownThemes = Array.from(
-      new Set(Object.values(state.reviews).flatMap((r) => r.gaps.map((g) => normalizeTheme(g.theme))))
-    );
+    const knownThemes = Array.from(new Set(Object.values(state.reviews).flatMap(r => r.gaps.map(g => normalizeTheme(g.theme)))));
 
     // 6. If there are unpublished cached reviews or missing evidence but no unreviewed jobs, publish them directly
     if (jobsToReview.length === 0 && (cachedToPublish.length > 0 || unpublishedMissing.length > 0)) {
@@ -970,7 +927,7 @@ export async function runResumeJournal(
 
     for (let i = 0; i < jobsToReview.length; i += batchSize) {
       const batchEvidence = jobsToReview.slice(i, i + batchSize);
-      const batchInputs: ResumeReviewInput[] = batchEvidence.map((ev) => ({
+      const batchInputs: ResumeReviewInput[] = batchEvidence.map(ev => ({
         jobId: ev.jobId,
         company: ev.company,
         title: ev.title,
@@ -984,11 +941,9 @@ export async function runResumeJournal(
         const reviewer = options.reviewFn ?? reviewResumes;
         batchReviews = await reviewer(batchInputs, knownThemes);
       } catch (err: unknown) {
-        const failedJobIds = batchEvidence.map((e) => e.jobId).join(", ");
+        const failedJobIds = batchEvidence.map(e => e.jobId).join(", ");
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(
-          `[journal-resumes] Error invoking reviewResumes on batch [${failedJobIds}]: ${msg}`
-        );
+        console.error(`[journal-resumes] Error invoking reviewResumes on batch [${failedJobIds}]: ${msg}`);
         return {
           changed: totalReviewed > 0,
           message: `Model review failed on batch [${failedJobIds}]: ${msg}. Prior ${totalReviewed} review(s) preserved.`,
@@ -1001,11 +956,9 @@ export async function runResumeJournal(
       const batchCachedEntries: CachedReviewEntry[] = [];
 
       for (const ev of batchEvidence) {
-        const rev = batchReviews.find((r) => r.jobId === ev.jobId);
+        const rev = batchReviews.find(r => r.jobId === ev.jobId);
         if (!rev) {
-          throw new Error(
-            `Model review output missing coverage for jobId #${ev.jobId} (batch had ${batchReviews.length} result(s))`
-          );
+          throw new Error(`Model review output missing coverage for jobId #${ev.jobId} (batch had ${batchReviews.length} result(s))`);
         }
         const gaps = rev.gaps;
 

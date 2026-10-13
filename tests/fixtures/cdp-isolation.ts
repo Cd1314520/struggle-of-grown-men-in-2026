@@ -25,7 +25,11 @@ interface Wire {
   sessionId?: string | undefined;
   error?: unknown;
 }
-interface Connection { pageId: string | undefined; sessions: Map<string, string>; discover: boolean }
+interface Connection {
+  pageId: string | undefined;
+  sessions: Map<string, string>;
+  discover: boolean;
+}
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -37,7 +41,14 @@ function decode(text: string): Wire {
   assert(value["sessionId"] === undefined || typeof value["sessionId"] === "string");
   assert(value["params"] === undefined || object(value["params"]));
   assert(value["result"] === undefined || object(value["result"]));
-  return { id: value["id"], method: value["method"], sessionId: value["sessionId"], params: value["params"] ?? {}, result: value["result"], error: value["error"] };
+  return {
+    id: value["id"],
+    method: value["method"],
+    sessionId: value["sessionId"],
+    params: value["params"] ?? {},
+    result: value["result"],
+    error: value["error"],
+  };
 }
 const targets = new Map<string, Target>();
 function live(targetId: string): Target {
@@ -50,7 +61,16 @@ const commands: Wire[] = [];
 let nextTarget = 0;
 let nextSession = 0;
 function addTarget(url: string, type = "page", parentId?: string): Target {
-  const target: Target = { targetId: `target-${++nextTarget}`, type, title: url, url, browserContextId: "persistent-profile", draft: "", paused: false, parentId };
+  const target: Target = {
+    targetId: `target-${++nextTarget}`,
+    type,
+    title: url,
+    url,
+    browserContextId: "persistent-profile",
+    draft: "",
+    paused: false,
+    parentId,
+  };
   targets.set(target.targetId, target);
   return target;
 }
@@ -81,28 +101,42 @@ function attach(ws: ServerWebSocket<Connection>, target: Target, outerSession?: 
   return sessionId;
 }
 const upstream = Bun.serve<Connection>({
-  hostname: "127.0.0.1", port: 0,
+  hostname: "127.0.0.1",
+  port: 0,
   fetch(req, server) {
     const url = new URL(req.url);
     const page = /^\/devtools\/page\/(.+)$/.exec(url.pathname)?.[1];
     if (req.headers.get("upgrade")?.toLowerCase() === "websocket")
       return server.upgrade(req, { data: { pageId: page, sessions: new Map(), discover: false } }) ? undefined : new Response("bad upgrade", { status: 400 });
-    if (url.pathname === "/json/version") return Response.json({ Browser: "Fixture", webSocketDebuggerUrl: `ws://127.0.0.1:${server.port}/devtools/browser/fixture` });
+    if (url.pathname === "/json/version")
+      return Response.json({ Browser: "Fixture", webSocketDebuggerUrl: `ws://127.0.0.1:${server.port}/devtools/browser/fixture` });
     if (url.pathname === "/json/new") {
       assert.equal(req.method, "PUT");
       const target = addTarget(decodeURIComponent(url.search.slice(1)));
       broadcast("Target.targetCreated", { targetInfo: target });
       return Response.json({ ...target, id: target.targetId, webSocketDebuggerUrl: `ws://127.0.0.1:${server.port}/devtools/page/${target.targetId}` });
     }
-    if (url.pathname === "/json/list" || url.pathname === "/json") return Response.json([...targets.values()].filter(t => t.type === "page").map(t => ({ ...t, id: t.targetId, webSocketDebuggerUrl: `ws://127.0.0.1:${server.port}/devtools/page/${t.targetId}` })));
+    if (url.pathname === "/json/list" || url.pathname === "/json")
+      return Response.json(
+        [...targets.values()]
+          .filter(t => t.type === "page")
+          .map(t => ({ ...t, id: t.targetId, webSocketDebuggerUrl: `ws://127.0.0.1:${server.port}/devtools/page/${t.targetId}` })),
+      );
     const closing = /^\/json\/close\/(.+)$/.exec(url.pathname)?.[1];
-    if (closing !== undefined) { destroyTarget(closing); return new Response("closed"); }
+    if (closing !== undefined) {
+      destroyTarget(closing);
+      return new Response("closed");
+    }
     if (url.pathname.startsWith("/json/activate/")) return new Response("activated");
     return new Response("unknown", { status: 404 });
   },
   websocket: {
-    open(ws) { sockets.add(ws); },
-    close(ws) { sockets.delete(ws); },
+    open(ws) {
+      sockets.add(ws);
+    },
+    close(ws) {
+      sockets.delete(ws);
+    },
     message(ws, raw) {
       const msg = decode(String(raw));
       commands.push(msg);
@@ -110,10 +144,18 @@ const upstream = Bun.serve<Connection>({
       const targetId = msg.sessionId ? ws.data.sessions.get(msg.sessionId) : ws.data.pageId;
       const target = targetId ? targets.get(targetId) : undefined;
       switch (msg.method) {
-        case "Browser.getVersion": result = { product: "Fixture", protocolVersion: "1.3" }; break;
-        case "Target.getTargets": result = { targetInfos: [...targets.values()] }; break;
-        case "Target.getTargetInfo": result = { targetInfo: targets.get(String(msg.params["targetId"])) }; break;
-        case "Target.getBrowserContexts": result = { defaultBrowserContextId: "persistent-profile", browserContextIds: ["unrelated-incognito"] }; break;
+        case "Browser.getVersion":
+          result = { product: "Fixture", protocolVersion: "1.3" };
+          break;
+        case "Target.getTargets":
+          result = { targetInfos: [...targets.values()] };
+          break;
+        case "Target.getTargetInfo":
+          result = { targetInfo: targets.get(String(msg.params["targetId"])) };
+          break;
+        case "Target.getBrowserContexts":
+          result = { defaultBrowserContextId: "persistent-profile", browserContextIds: ["unrelated-incognito"] };
+          break;
         case "Target.setDiscoverTargets":
           ws.data.discover = msg.params["discover"] === true;
           if (ws.data.discover) for (const info of targets.values()) ws.send(JSON.stringify({ method: "Target.targetCreated", params: { targetInfo: info } }));
@@ -188,22 +230,34 @@ async function connect(browser: JobBrowser) {
   const socket = new WebSocket(version["webSocketDebuggerUrl"]);
   clientSockets.push(socket);
   const ready: PromiseWithResolvers<void> = Promise.withResolvers();
-  socket.onopen = () => { ready.resolve(); };
-  socket.onerror = () => { ready.reject(new Error("CDP fixture connection failed")); };
+  socket.onopen = () => {
+    ready.resolve();
+  };
+  socket.onerror = () => {
+    ready.reject(new Error("CDP fixture connection failed"));
+  };
   const pending = new Map<number, (msg: Wire) => void>();
   const events: Wire[] = [];
   let id = 0;
   socket.onmessage = ev => {
     const msg = decode(String(ev.data));
     if (msg.id === undefined) events.push(msg);
-    else { pending.get(msg.id)?.(msg); pending.delete(msg.id); }
+    else {
+      pending.get(msg.id)?.(msg);
+      pending.delete(msg.id);
+    }
   };
   await ready.promise;
   async function call(method: string, params: Record<string, unknown> = {}, sessionId?: string) {
     const requestId = ++id;
     const reply = Promise.withResolvers<Wire>();
-    const timer = setTimeout(() => { reply.reject(new Error(`No reply to ${method}`)); }, 2000);
-    pending.set(requestId, msg => { clearTimeout(timer); reply.resolve(msg); });
+    const timer = setTimeout(() => {
+      reply.reject(new Error(`No reply to ${method}`));
+    }, 2000);
+    pending.set(requestId, msg => {
+      clearTimeout(timer);
+      reply.resolve(msg);
+    });
     socket.send(JSON.stringify({ id: requestId, method, params, sessionId }));
     return reply.promise;
   }
@@ -245,19 +299,29 @@ try {
   const pageReady: PromiseWithResolvers<void> = Promise.withResolvers();
   const pageReply = Promise.withResolvers<Wire>();
   let pageConnected = false;
-  pageSocket.onopen = () => { pageConnected = true; pageReady.resolve(); };
+  pageSocket.onopen = () => {
+    pageConnected = true;
+    pageReady.resolve();
+  };
   pageSocket.onerror = () => {
     const error = new Error("Page CDP connection rejected");
-    if (pageConnected) pageReply.reject(error); else pageReady.reject(error);
+    if (pageConnected) pageReply.reject(error);
+    else pageReady.reject(error);
   };
   pageSocket.onmessage = ev => {
     const reply = decode(String(ev.data));
     if (reply.id === 1) pageReply.resolve(reply);
   };
   await pageReady.promise;
-  const pageTimer = setTimeout(() => { pageReply.reject(new Error("No page navigation reply")); }, 2000);
+  const pageTimer = setTimeout(() => {
+    pageReply.reject(new Error("No page navigation reply"));
+  }, 2000);
   pageSocket.send(JSON.stringify({ id: 1, method: "Page.navigate", params: { url: "https://fixture.invalid/application/B" } }));
-  try { assert.equal((await pageReply.promise).error, undefined); } finally { clearTimeout(pageTimer); }
+  try {
+    assert.equal((await pageReply.promise).error, undefined);
+  } finally {
+    clearTimeout(pageTimer);
+  }
   assert.equal(live(second.tabId).url, "https://fixture.invalid/application/B");
   assert.equal(live(first.tabId).draft, "A unsaved salary answer");
   assert.equal(live(first.tabId).url, "https://fixture.invalid/application/A");
@@ -274,14 +338,21 @@ try {
   assert.equal(live(first.tabId).paused, false);
   assert.equal(manual.draft, "human is editing this unsaved form");
   assert.equal(manual.paused, false);
-  const attachedFrame = b.events.find(event => event.method === "Target.attachedToTarget" && object(event.params["targetInfo"]) && event.params["targetInfo"]["targetId"] === frame.targetId);
+  const attachedFrame = b.events.find(
+    event => event.method === "Target.attachedToTarget" && object(event.params["targetInfo"]) && event.params["targetInfo"]["targetId"] === frame.targetId,
+  );
   assert(attachedFrame && typeof attachedFrame.params["sessionId"] === "string", "owned iframe must remain usable");
   await b.call("Runtime.evaluate", { expression: "write-draft", value: "Answer in an owned iframe" }, attachedFrame.params["sessionId"]);
   const frameAnswer = await b.call("Runtime.evaluate", { expression: "read-draft" }, attachedFrame.params["sessionId"]);
   assert(object(frameAnswer.result?.["result"]));
   assert.equal(frameAnswer.result["result"]["value"], "Answer in an owned iframe");
-  assert(!b.events.some(event => object(event.params["targetInfo"]) && [first.tabId, manual.targetId].includes(String(event.params["targetInfo"]["targetId"]))));
-  assert(!commands.some(command => command.method === "Target.setAutoAttach" && !command.sessionId && command.params["autoAttach"] === true), "no global auto-attach may reach Chrome");
+  assert(
+    !b.events.some(event => object(event.params["targetInfo"]) && [first.tabId, manual.targetId].includes(String(event.params["targetInfo"]["targetId"]))),
+  );
+  assert(
+    !commands.some(command => command.method === "Target.setAutoAttach" && !command.sessionId && command.params["autoAttach"] === true),
+    "no global auto-attach may reach Chrome",
+  );
 
   for (const hidden of [first.tabId, manual.targetId]) {
     assert((await b.call("Target.attachToTarget", { targetId: hidden, flatten: true })).error);
@@ -333,7 +404,9 @@ try {
   await b.call("Runtime.evaluate", { expression: "write-draft", value: "Owned popup form" }, String(attachedPopup.result?.["sessionId"]));
   assert.equal(live(popupId).draft, "Owned popup form");
   await b.call("Browser.getVersion"); // ordered barrier after target notifications
-  assert(b.events.some(event => event.method === "Target.targetCreated" && object(event.params["targetInfo"]) && event.params["targetInfo"]["targetId"] === popupId));
+  assert(
+    b.events.some(event => event.method === "Target.targetCreated" && object(event.params["targetInfo"]) && event.params["targetInfo"]["targetId"] === popupId),
+  );
   const closed = await b.call("Target.closeTarget", { targetId: popupId });
   assert.equal(closed.error, undefined);
   assert.equal(closed.result?.["success"], true);
@@ -344,7 +417,10 @@ try {
     .filter(event => event.method === "Target.attachedToTarget" && object(event.params["targetInfo"]) && event.params["targetInfo"]["targetId"] === popupId)
     .map(event => String(event.params["sessionId"]));
   assert(popupSessions.includes(String(attachedPopup.result?.["sessionId"])));
-  assert(popupSessions.some(sessionId => sessionId !== attachedPopup.result?.["sessionId"]), "popup must also have an automatic watch session");
+  assert(
+    popupSessions.some(sessionId => sessionId !== attachedPopup.result?.["sessionId"]),
+    "popup must also have an automatic watch session",
+  );
   for (const sessionId of popupSessions) {
     assert(b.events.some(event => event.method === "Target.detachedFromTarget" && event.params["sessionId"] === sessionId));
     assert((await b.call("Runtime.evaluate", { expression: "read-draft" }, sessionId)).error, "closed popup sessions must be retired");
@@ -352,7 +428,10 @@ try {
   const disabled = await b.call("Target.setAutoAttach", { autoAttach: false, waitForDebuggerOnStart: false, flatten: true });
   assert.equal(disabled.error, undefined);
   await b.call("Browser.getVersion"); // barrier after injected detach replies
-  assert(!commands.some(command => command.method === "Target.detachFromTarget" && popupSessions.includes(String(command.params["sessionId"]))), "cleanup must not detach closed popup sessions");
+  assert(
+    !commands.some(command => command.method === "Target.detachFromTarget" && popupSessions.includes(String(command.params["sessionId"]))),
+    "cleanup must not detach closed popup sessions",
+  );
   const liveDraft = await b.call("Runtime.evaluate", { expression: "read-draft" }, b.sessionId);
   assert.equal(liveDraft.error, undefined);
   assert(object(liveDraft.result?.["result"]));

@@ -1,13 +1,16 @@
+# Settings for this machine and its owner (the public addresses, the mailbox, the resume's file name)
+# go in config.local.yml, which is not tracked: see config.local.example.yml.
+
 # App settings. Restart the server after editing.
 port: 8787
 
 # How you reach the app and the live browser view (served over the tailnet by `tailscale serve`).
 # Used for the Gmail OAuth redirect and the links in the UI. null = http://localhost:<port>.
-publicUrl: https://your-machine.your-tailnet.ts.net:8787
-vncUrl: https://your-machine.your-tailnet.ts.net:6080
+publicUrl: null
+vncUrl: null
 
 # The dedicated application mailbox. Connecting any other Google account is refused.
-mailbox: you@example.com
+mailbox: null
 
 # One daily plaintext questions digest to this same connected mailbox, never another recipient.
 # Each unchanged group is notified once; adding jobs does not re-notify it. Send-now in Settings
@@ -106,3 +109,8 @@ chrome:
   display: ":99"
   window: [1440, 900]
   vncPort: 6080 # noVNC for manual takeover (localhost only); 0 disables
+
+# Agents' step-by-step records (each step, tool call and message) are removed after this many days;
+# 0 keeps them for good. Approvals, gates, errors, mail and your own actions are never removed.
+retention:
+  chatterDays: 30

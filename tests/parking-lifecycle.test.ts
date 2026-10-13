@@ -17,7 +17,8 @@ async function runScenarios(scenarios: string[]) {
       const proc = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures", "parking-lifecycle.ts"), scenario], {
         cwd: resolve(import.meta.dir, ".."),
         env: { ...process.env, AUTO_APPLY_DATA: data, AUTO_APPLY_PROFILE: profile, AUTO_APPLY_RESUME_DIR: resume, AUTO_APPLY_PORT: "19000" },
-        stdout: "pipe", stderr: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
       });
       const stdout = new Response(proc.stdout).text();
       const stderr = new Response(proc.stderr).text();
@@ -53,7 +54,9 @@ describe("durable parking lifecycle", () => {
   it("preserves submission ambiguity on inconclusive verification without auto-looping", () => runScenarios(["recovery-verify-inconclusive"]));
   it("transitions verified submitted application to terminal submitted state and cleans markers", () => runScenarios(["recovery-verify-submitted"]));
   it("atomically resolves draft ambiguity and requires fresh final approval on normal fill resumption", () => runScenarios(["recovery-verify-draft"]));
-  it("consumer-visible terminal result releases scheduler/employer slot only after process exit, clearing submit marker without ambiguity gate", () => runScenarios(["terminal-success"]));
-  it("conclusively closed posting releases slot and same-employer lock only after process exit and rejects stale callbacks", () => runScenarios(["terminal-closed"]));
+  it("consumer-visible terminal result releases scheduler/employer slot only after process exit, clearing submit marker without ambiguity gate", () =>
+    runScenarios(["terminal-success"]));
+  it("conclusively closed posting releases slot and same-employer lock only after process exit and rejects stale callbacks", () =>
+    runScenarios(["terminal-closed"]));
   it("preserves submit marker and durable gates when terminal persistence fails", () => runScenarios(["terminal-persistence-failure"]));
 });

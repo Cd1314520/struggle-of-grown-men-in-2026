@@ -5,9 +5,10 @@ import { join } from "node:path";
 import { mock } from "bun:test";
 import type { WorkerHandle, WorkerOptions } from "../../src/omp";
 import type { JobBrowser } from "../../src/chrome";
+import type { Browser } from "../../src/fill-session";
 
 // Dynamic imports intentionally exercise module initialization boundaries:
-// isolation guards/config precede DB opening, and mocks precede pipeline loading.
+// isolation guards/config precede DB opening, and mocks precede scheduler loading.
 assert(process.env["AUTO_APPLY_DATA"] && process.env["AUTO_APPLY_PROFILE"] && process.env["AUTO_APPLY_RESUME_DIR"], "isolated paths required");
 const scenario = process.argv[2];
 const { config, jobDir, DATA } = await import("../../src/config");
@@ -29,18 +30,18 @@ if (scenario === "browser") {
   const closed: string[] = [];
   const respond = (url: string): Response => {
     if (url.endsWith("/json/version")) return Response.json({});
-    if (url.endsWith("/json/list")) return Response.json([
-      { type: "page", id: "recent", title: "Other job", url: "https://fixture.invalid/other" },
-      { type: "page", id: "draft", title: "Parked draft", url: "https://fixture.invalid/draft" },
-      { type: "page", id: "obsolete", title: "Old tab", url: "https://fixture.invalid/old" },
-    ]);
+    if (url.endsWith("/json/list"))
+      return Response.json([
+        { type: "page", id: "recent", title: "Other job", url: "https://fixture.invalid/other" },
+        { type: "page", id: "draft", title: "Parked draft", url: "https://fixture.invalid/draft" },
+        { type: "page", id: "obsolete", title: "Old tab", url: "https://fixture.invalid/old" },
+      ]);
     closed.push(url.slice(url.lastIndexOf("/") + 1));
     return new Response("ok");
   };
-  globalThis.fetch = Object.assign(
-    (input: string | URL | Request) => Promise.resolve(respond(input instanceof Request ? input.url : String(input))),
-    { preconnect: globalThis.fetch.preconnect },
-  );
+  globalThis.fetch = Object.assign((input: string | URL | Request) => Promise.resolve(respond(input instanceof Request ? input.url : String(input))), {
+    preconnect: globalThis.fetch.preconnect,
+  });
   const chrome = await import("../../src/chrome");
   await chrome.pruneTabs(0, 1, new Set(["draft"]));
   assert.deepEqual(closed, ["obsolete"]);
@@ -75,25 +76,38 @@ interface SimulatedWorker {
   exit: () => void;
 }
 const workers: SimulatedWorker[] = [];
-const originalOmp = await import("../../src/omp");
-await mock.module("../../src/omp", () => ({
-  ...originalOmp,
-  runWorker: (options: WorkerOptions): WorkerHandle => {
-    const { promise: done, resolve } = Promise.withResolvers<Awaited<WorkerHandle["done"]>>();
-    const worker: SimulatedWorker = { options, aborted: false, exit: () => { resolve({ status: "aborted", lastText: "" }); } };
-    workers.push(worker);
-    // Abort deliberately does NOT settle done: assert slot stays owned until exit.
-    return { done, abort: () => { worker.aborted = true; } };
-  },
-}));
+// The scheduler is handed a simulated agent runner and browser in place of the real ones.
+const runWorker = (options: WorkerOptions): WorkerHandle => {
+  const { promise: done, resolve } = Promise.withResolvers<Awaited<WorkerHandle["done"]>>();
+  const worker: SimulatedWorker = {
+    options,
+    aborted: false,
+    exit: () => {
+      resolve({ status: "aborted", lastText: "" });
+    },
+  };
+  workers.push(worker);
+  // Abort deliberately does NOT settle done: assert slot stays owned until exit.
+  return {
+    done,
+    abort: () => {
+      worker.aborted = true;
+    },
+  };
+};
 const simulatedTabs = new Set<string>();
 const jobBrowsers: JobBrowser[] = [];
 let nextTab = 0;
 let activateWait: Promise<void> | null = null;
-if (scenario?.startsWith("restart-"))
-  for (const id of [1, 2, 3, 4]) simulatedTabs.add(id === 1 ? "draft-tab" : `draft-tab-${id}`);
-await mock.module("../../src/chrome", () => ({
-  ensureChrome: async () => { /* browser is inert in this fixture */ }, pruneTabs: async () => { /* simulated tabs are never pruned */ }, screenshot: () => Promise.resolve(null),
+if (scenario?.startsWith("restart-")) for (const id of [1, 2, 3, 4]) simulatedTabs.add(id === 1 ? "draft-tab" : `draft-tab-${id}`);
+const browser: Browser = {
+  ensureChrome: async () => {
+    /* browser is inert in this fixture */
+  },
+  pruneTabs: async () => {
+    /* simulated tabs are never pruned */
+  },
+  screenshot: () => Promise.resolve(null),
   tabs: () => Promise.resolve([...simulatedTabs].map(id => ({ id, title: "Fixture requisition", url: "https://fixture.invalid/draft", ws: "" }))),
   activateApplicationTab: async (_slot: number, tabId: string) => {
     if (!simulatedTabs.has(tabId)) throw new Error("Missing saved draft tab");
@@ -102,24 +116,47 @@ await mock.module("../../src/chrome", () => ({
   prepareJobBrowser: (_slot: number, saved: string | null, excluded: ReadonlySet<string>): Promise<JobBrowser> => {
     if (saved && excluded.has(saved)) return Promise.reject(new Error("Checkpoint belongs to another application"));
     const reused = saved !== null && simulatedTabs.has(saved);
-    const id = saved !== null && reused ? saved : (++nextTab === 1 ? "draft-tab" : `draft-tab-${nextTab}`);
+    const id = saved !== null && reused ? saved : ++nextTab === 1 ? "draft-tab" : `draft-tab-${nextTab}`;
     simulatedTabs.add(id);
     let revoked = false;
-    const b: JobBrowser = { tabId: id, reused, port: config.chrome.proxyPort, ownsTarget: target => !revoked && target === id, revoke: () => { revoked = true; }, close: () => { revoked = true; } };
+    const b: JobBrowser = {
+      tabId: id,
+      reused,
+      port: config.chrome.proxyPort,
+      ownsTarget: target => !revoked && target === id,
+      revoke: () => {
+        revoked = true;
+      },
+      close: () => {
+        revoked = true;
+      },
+    };
     jobBrowsers.push(b);
     return Promise.resolve(b);
   },
-}));
+};
 await mock.module("../../src/gmail", () => ({
   gmailStatus: () => ({ connected: false, address: null }),
-  search: () => { throw new Error("mail forbidden in fixture"); },
-  read: () => { throw new Error("mail forbidden in fixture"); },
-  markRead: () => { throw new Error("mail forbidden in fixture"); },
+  search: () => {
+    throw new Error("mail forbidden in fixture");
+  },
+  read: () => {
+    throw new Error("mail forbidden in fixture");
+  },
+  markRead: () => {
+    throw new Error("mail forbidden in fixture");
+  },
 }));
-await mock.module("../../src/digest", () => ({ tickQuestionDigest: async () => { /* digest mail is disabled in this fixture */ } }));
-const { db, getJob, updateJob, kvGet } = await import("../../src/db");
+await mock.module("../../src/digest", () => ({
+  tickQuestionDigest: async () => {
+    /* digest mail is disabled in this fixture */
+  },
+}));
+const { db, getJob, updateJob } = await import("../../src/db");
+const { authorizeSubmit, isSubmitting, isVerifying, isRecovering } = await import("../../src/fill-state");
 const core = await import("../../src/questions");
-const pipeline = await import("../../src/pipeline");
+const { Scheduler } = await import("../../src/scheduler");
+const scheduler = new Scheduler({ runWorker, browser });
 
 function must<T>(value: T | null | undefined, what: string): T {
   if (value == null) throw new Error(`missing ${what}`);
@@ -129,8 +166,13 @@ const jobRow = (id: number) => must(getJob(id), `job ${id}`);
 const openGate = (jobId: number) => must(core.getOpenGate(jobId), `open gate for job ${jobId}`);
 const workerAt = (index: number) => must(workers[index], `worker ${index}`);
 function addJob(id: number) {
-  db.query("INSERT INTO jobs (id,url,source,company,title,status,approved_by) VALUES (?,?,?, ?,?,'approved','user')")
-    .run(id, `https://fixture.invalid/job/${id}`, "fixture", `Employer ${id}`, `Requisition ${id}`);
+  db.query("INSERT INTO jobs (id,url,source,company,title,status,approved_by) VALUES (?,?,?, ?,?,'approved','user')").run(
+    id,
+    `https://fixture.invalid/job/${id}`,
+    "fixture",
+    `Employer ${id}`,
+    `Requisition ${id}`,
+  );
   const dir = jobDir(id);
   writeFileSync(join(dir, resume.PDF_NAME), `PDF for job ${id}`);
   writeFileSync(join(dir, resume.MAIN), `source for job ${id}`);
@@ -140,13 +182,20 @@ async function until(predicate: () => boolean) {
     if (predicate()) return;
     await Bun.sleep(5);
   }
-  throw new Error(`fixture transition timed out: ${JSON.stringify({
-    workers: workers.map(worker => worker.options.jobId),
-    jobs: db.query("SELECT id,status,pending,note,fill_checkpoint FROM jobs ORDER BY id LIMIT 8").all(),
-    gates: db.query("SELECT id,job_id,kind,state,text FROM question_gates WHERE state = 'open'").all(),
-  })}`);
+  throw new Error(
+    `fixture transition timed out: ${JSON.stringify({
+      workers: workers.map(worker => worker.options.jobId),
+      jobs: db.query("SELECT id,status,pending,note,fill_checkpoint FROM jobs ORDER BY id LIMIT 8").all(),
+      gates: db.query("SELECT id,job_id,kind,state,text FROM question_gates WHERE state = 'open'").all(),
+    })}`,
+  );
 }
-const navigation = { tab_id: "draft-tab", url: "https://fixture.invalid/draft", step: "Requisition 1 / questions", notes: "Use candidate home; verify saved draft" };
+const navigation = {
+  tab_id: "draft-tab",
+  url: "https://fixture.invalid/draft",
+  step: "Requisition 1 / questions",
+  notes: "Use candidate home; verify saved draft",
+};
 const question = { ...navigation, question: "Required salary?", context: "Employer 1 / annual USD base salary", options: [] };
 function call(worker: SimulatedWorker, name: string, args: Record<string, unknown>) {
   return must(worker.options.tools[name], `host tool ${name}`).handler(args);
@@ -157,13 +206,26 @@ if (scenario === "restart-setup") {
     addJob(id);
     const frozen = resume.freezeResume(id);
     updateJob(id, { status: "filling", resume_sha: frozen.sha, resume_frozen_at: new Date().toISOString() });
-    core.recordCheckpoint(id, { version: 1, slot: 0, tabId: id === 1 ? "draft-tab" : `draft-tab-${id}`, url: navigation.url, step: `Requisition ${id}`, notes: "Existing draft", resumeSha: frozen.sha, savedAt: new Date().toISOString() });
+    core.recordCheckpoint(id, {
+      version: 1,
+      slot: 0,
+      tabId: id === 1 ? "draft-tab" : `draft-tab-${id}`,
+      url: navigation.url,
+      step: `Requisition ${id}`,
+      notes: "Existing draft",
+      resumeSha: frozen.sha,
+      savedAt: new Date().toISOString(),
+    });
   }
   core.parkGate(1, { kind: "question", text: "Still unknown?", context: "Employer 1 exact question", options: [] }, core.readCheckpoint(1));
-  const answered = core.parkGate(2, { kind: "question", text: "Known after restart?", context: "Employer 2 exact question", options: [] }, core.readCheckpoint(2));
+  const answered = core.parkGate(
+    2,
+    { kind: "question", text: "Known after restart?", context: "Employer 2 exact question", options: [] },
+    core.readCheckpoint(2),
+  );
   core.answerGate(answered.id, "durable answer", "application");
   // This interrupted runnable marker must become ambiguity, not an ordinary resume.
-  db.query("INSERT INTO kv (key,value) VALUES ('fill.submitting.3','1')").run();
+  authorizeSubmit(3);
   // Use another slot for ambiguity so its lease doesn't intentionally block the queued answer.
   const checkpoint = must(core.readCheckpoint(3), "checkpoint for job 3");
   core.recordCheckpoint(3, { ...checkpoint, slot: 1 });
@@ -171,7 +233,7 @@ if (scenario === "restart-setup") {
   process.exit(0);
 }
 if (scenario === "restart-resume") {
-  pipeline.startScheduler();
+  scheduler.start();
   await until(() => workers.length === 1);
   assert.equal(jobRow(1).status, "needs_input");
   assert.equal(openGate(1).kind, "question");
@@ -179,17 +241,28 @@ if (scenario === "restart-resume") {
   assert.equal(jobRow(2).resume_sha, readFileSync(join(DATA, "expected-sha.txt"), "utf8"));
   assert.equal(must(core.resumeContext(2).answers[0], "answer for job 2").answer, "durable answer");
   assert.equal(openGate(3).kind, "submission_ambiguous");
-  assert.equal(kvGet("fill.submitting.3"), "1");
+  assert.equal(isSubmitting(3), true);
   assert.equal(jobRow(4).status, "approved");
-  assert.equal(pipeline.respond(3, "approve"), false);
+  assert.equal(core.respond(3, "approve"), false);
   process.exit(0);
 }
 
 if (scenario === "blocked-prefix") {
-  const insert = db.query("INSERT INTO jobs (id,url,source,company,title,status,approved_by,fill_checkpoint) VALUES (?,?, 'fixture', ?,?, 'approved','user',?)");
+  const insert = db.query(
+    "INSERT INTO jobs (id,url,source,company,title,status,approved_by,fill_checkpoint) VALUES (?,?, 'fixture', ?,?, 'approved','user',?)",
+  );
   db.transaction(() => {
     for (let id = 1; id <= 1001; id++) {
-      const checkpoint = { version: 1, slot: 1, tabId: `blocked-${id}`, url: null, step: "Other browser draft", notes: "Resume only in original slot", resumeSha: null, savedAt: new Date().toISOString() };
+      const checkpoint = {
+        version: 1,
+        slot: 1,
+        tabId: `blocked-${id}`,
+        url: null,
+        step: "Other browser draft",
+        notes: "Resume only in original slot",
+        resumeSha: null,
+        savedAt: new Date().toISOString(),
+      };
       insert.run(id, `https://fixture.invalid/blocked/${id}`, `Blocked employer ${id}`, `Blocked requisition ${id}`, JSON.stringify(checkpoint));
     }
   })();
@@ -198,8 +271,17 @@ if (scenario === "blocked-prefix") {
   const frozen = resume.freezeResume(1003);
   updateJob(1003, { resume_sha: frozen.sha, resume_frozen_at: new Date().toISOString() });
   simulatedTabs.add("eligible-draft");
-  core.recordCheckpoint(1003, { version: 1, slot: 0, tabId: "eligible-draft", url: navigation.url, step: "Exact eligible draft", notes: "Resume this draft", resumeSha: frozen.sha, savedAt: new Date().toISOString() });
-  pipeline.pump();
+  core.recordCheckpoint(1003, {
+    version: 1,
+    slot: 0,
+    tabId: "eligible-draft",
+    url: navigation.url,
+    step: "Exact eligible draft",
+    notes: "Resume this draft",
+    resumeSha: frozen.sha,
+    savedAt: new Date().toISOString(),
+  });
+  scheduler.pump();
   await until(() => workers.length === 1);
   assert.equal(jobRow(1003).status, "filling");
   assert.equal(jobRow(1002).status, "approved");
@@ -209,7 +291,10 @@ if (scenario === "blocked-prefix") {
   workerAt(0).exit();
   await until(() => workers.length === 2);
   assert.equal(jobRow(1002).status, "filling");
-  assert.equal(must(db.query<{ count: number }, []>("SELECT count(*) AS count FROM jobs WHERE id <= 1001 AND status != 'approved'").get(), "blocked job count").count, 0);
+  assert.equal(
+    must(db.query<{ count: number }, []>("SELECT count(*) AS count FROM jobs WHERE id <= 1001 AND status != 'approved'").get(), "blocked job count").count,
+    0,
+  );
   process.exit(0);
 }
 
@@ -222,12 +307,20 @@ if (scenario === "recovery-prefix") {
     updateJob(id, { resume_sha: frozen.sha });
     const tabId = `recovery-${id}`;
     simulatedTabs.add(tabId);
-    core.recordCheckpoint(id, { version: 1, slot: id === 2 ? 1 : 0, tabId, url: navigation.url,
-      step: `Requisition ${id}`, notes: "Saved draft", resumeSha: frozen.sha, savedAt: new Date().toISOString() });
+    core.recordCheckpoint(id, {
+      version: 1,
+      slot: id === 2 ? 1 : 0,
+      tabId,
+      url: navigation.url,
+      step: `Requisition ${id}`,
+      notes: "Saved draft",
+      resumeSha: frozen.sha,
+      savedAt: new Date().toISOString(),
+    });
     const gate = core.parkGate(id, { kind: "manual", text: "Saved login failure" }, core.readCheckpoint(id));
     if (id !== 2) core.queueRecovery(id, gate.id);
   }
-  await pipeline.reserveBrowser(2, openGate(2).id);
+  await scheduler.reserveBrowser(2, openGate(2).id);
   await until(() => workers.length === 1);
   assert.equal(workerAt(0).options.jobId, 4, "skip blocked recovery, preserve the next recovery's priority");
   assert.equal(jobRow(1).status, "approved");
@@ -243,9 +336,15 @@ if (scenario === "recovery-prefix") {
 }
 
 addJob(1);
-if (["release", "manual", "manual-same-employer", "manual-lost-tab", "confirm", "terminal-success", "terminal-closed", "terminal-persistence-failure"].includes(scenario ?? "")) addJob(2);
-if (["manual-same-employer", "terminal-success", "terminal-closed", "terminal-persistence-failure"].includes(scenario ?? "")) updateJob(2, { company: jobRow(1).company, company_key: jobRow(1).company_key });
-pipeline.pump();
+if (
+  ["release", "manual", "manual-same-employer", "manual-lost-tab", "confirm", "terminal-success", "terminal-closed", "terminal-persistence-failure"].includes(
+    scenario ?? "",
+  )
+)
+  addJob(2);
+if (["manual-same-employer", "terminal-success", "terminal-closed", "terminal-persistence-failure"].includes(scenario ?? ""))
+  updateJob(2, { company: jobRow(1).company, company_key: jobRow(1).company_key });
+scheduler.pump();
 await until(() => workers.length === 1);
 const first = workerAt(0);
 const initialSha = must(jobRow(1).resume_sha, "resume SHA for job 1");
@@ -255,15 +354,15 @@ if (scenario === "release" || scenario === "quick-answer") {
   await until(() => core.getOpenGate(1) !== null);
   assert.equal(first.aborted, true);
   assert.equal(jobRow(1).status, "needs_input");
-  assert.equal(pipeline.fillSlot(1), null);
-  assert.equal(kvGet("fill.submitting.1"), null);
+  assert.equal(scheduler.fillSlot(1), null);
+  assert.equal(isSubmitting(1), false);
   if (scenario === "quick-answer") {
-    assert.equal(pipeline.respond(1, "100000"), true);
-    assert.equal(pipeline.respond(1, "200000"), false);
+    assert.equal(core.respond(1, "100000"), true);
+    assert.equal(core.respond(1, "200000"), false);
     writeFileSync(join(jobDir(1), resume.PDF_NAME), "changed working PDF must not upload");
     writeFileSync(join(jobDir(1), resume.MAIN), "changed working source must not freeze");
   }
-  pipeline.pump();
+  scheduler.pump();
   assert.equal(workers.length, 1, "abort is not process exit; slot must not be reused yet");
   await call(first, "report_result", { outcome: "failed", note: "late old callback" });
   assert.equal(jobRow(1).status, scenario === "release" ? "needs_input" : "approved");
@@ -273,7 +372,7 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(workerAt(1).options.jobId, scenario === "release" ? 2 : 1);
   if (scenario === "release") {
     assert.equal(jobRow(1).status, "needs_input");
-    assert.equal(pipeline.fillSlot(1), null);
+    assert.equal(scheduler.fillSlot(1), null);
   } else {
     assert.equal(jobRow(1).resume_sha, initialSha);
     assert.equal(readFileSync(resume.frozenResume(1, initialSha).pdf, "utf8"), "PDF for job 1");
@@ -286,7 +385,7 @@ if (scenario === "release" || scenario === "quick-answer") {
   const args = { ...navigation, prompt: "Required letter, plain text" };
   const parking = call(first, "ask_cover_letter", args);
   await until(() => core.getOpenGate(1) !== null);
-  assert.equal(pipeline.respond(1, "My exact application letter."), true);
+  assert.equal(core.respond(1, "My exact application letter."), true);
   first.exit();
   await parking;
   await until(() => workers.length === 2);
@@ -298,25 +397,25 @@ if (scenario === "release" || scenario === "quick-answer") {
   const parking = call(first, "need_manual", { ...navigation, reason: "CAPTCHA/session needs human" });
   await until(() => core.getOpenGate(1) !== null);
   const gate = openGate(1);
-  await assert.rejects(pipeline.reserveBrowser(1, gate.id));
-  pipeline.pump();
+  await assert.rejects(scheduler.reserveBrowser(1, gate.id));
+  scheduler.pump();
   assert.equal(workers.length, 1, "stopping worker still owns the slot");
   first.exit();
   await parking;
   await until(() => workers.length === 2);
   assert.equal(workerAt(1).options.jobId, 2);
-  assert.equal(pipeline.fillSlot(1), null);
+  assert.equal(scheduler.fillSlot(1), null);
   assert.equal(core.manualLeases().size, 0);
   assert.equal(core.getOpenGate(1)?.id, gate.id);
-  await assert.rejects(pipeline.reserveBrowser(1, gate.id), "another worker owns the reused browser");
+  await assert.rejects(scheduler.reserveBrowser(1, gate.id), "another worker owns the reused browser");
   await call(workerAt(1), "report_result", { outcome: "closed", note: "Other posting closed" });
   workerAt(1).exit();
-  await until(() => !pipeline.activeFillSession(2));
+  await until(() => !scheduler.activeFillSession(2));
   if (scenario === "manual-lost-tab") {
-    await assert.rejects(pipeline.reserveBrowser(1, gate.id));
+    await assert.rejects(scheduler.reserveBrowser(1, gate.id));
     assert.equal(core.manualLeases().size, 0, "missing target must not leave a reservation");
   }
-  pipeline.scheduleRecovery(1, gate.id);
+  scheduler.scheduleRecovery(1, gate.id);
   await until(() => workers.length === 3);
   assert.equal(workerAt(2).options.jobId, 1);
   assert.equal(jobRow(1).resume_sha, initialSha);
@@ -326,12 +425,12 @@ if (scenario === "release" || scenario === "quick-answer") {
   const gate = openGate(1);
   first.exit();
   await parking;
-  await until(() => !pipeline.activeFillSession(1));
+  await until(() => !scheduler.activeFillSession(1));
   if (scenario === "manual-activation-race") {
     const activation = Promise.withResolvers<undefined>();
     activateWait = activation.promise;
-    const reserving = pipeline.reserveBrowser(1, gate.id);
-    pipeline.scheduleRecovery(1, gate.id);
+    const reserving = scheduler.reserveBrowser(1, gate.id);
+    scheduler.scheduleRecovery(1, gate.id);
     assert.equal(workers.length, 1, "activating browser remains busy after gate resolution");
     activation.resolve(undefined);
     await assert.rejects(reserving);
@@ -339,17 +438,19 @@ if (scenario === "release" || scenario === "quick-answer") {
     assert.equal(workerAt(1).options.jobId, 1);
     assert.equal(core.manualLeases().size, 0);
   } else {
-    await pipeline.reserveBrowser(1, gate.id);
-    assert.equal(pipeline.manualBrowserReserved(1), true);
-    assert.equal(pipeline.fillSlot(1), 0);
+    await scheduler.reserveBrowser(1, gate.id);
+    assert.equal(scheduler.manualBrowserReserved(1), true);
+    assert.equal(scheduler.fillSlot(1), 0);
     addJob(2);
-    pipeline.pump();
+    scheduler.pump();
     assert.equal(workers.length, 1);
-    assert.throws(() => { pipeline.releaseBrowser(1, "stale-gate"); });
-    assert.equal(pipeline.manualBrowserReserved(1), true);
-    pipeline.releaseBrowser(1, gate.id);
+    assert.throws(() => {
+      scheduler.releaseBrowser(1, "stale-gate");
+    });
+    assert.equal(scheduler.manualBrowserReserved(1), true);
+    scheduler.releaseBrowser(1, gate.id);
     assert.equal(core.getOpenGate(1)?.id, gate.id);
-    assert.equal(pipeline.manualBrowserReserved(1), false);
+    assert.equal(scheduler.manualBrowserReserved(1), false);
     await until(() => workers.length === 2);
     assert.equal(workerAt(1).options.jobId, 2);
   }
@@ -357,23 +458,23 @@ if (scenario === "release" || scenario === "quick-answer") {
   const summary = "Salary 100000; all fields checked";
   const review = call(first, "confirm_submit", { ...navigation, summary });
   await until(() => core.getOpenGate(1) !== null);
-  assert.equal(pipeline.respond(1, scenario === "manual-approval" ? "approve" : "Change salary to 110000"), true);
+  assert.equal(core.respond(1, scenario === "manual-approval" ? "approve" : "Change salary to 110000"), true);
   first.exit();
   await review;
   await until(() => workers.length === 2);
   const second = workerAt(1);
   const handoff = call(second, "need_manual", { ...navigation, reason: "Session recovery before final re-observation" });
   await until(() => core.getOpenGate(1)?.kind === "manual");
-  assert.equal(pipeline.respond(1, "done"), true);
-  assert.equal(pipeline.respond(1, "duplicate return-control"), false);
+  assert.equal(core.respond(1, "done"), true);
+  assert.equal(core.respond(1, "duplicate return-control"), false);
   second.exit();
   await handoff;
   await until(() => workers.length === 3);
   const third = workerAt(2);
   if (scenario === "manual-approval") {
     const authorization = call(third, "confirm_submit", { ...navigation, summary });
-    await until(() => kvGet("fill.submitting.1") === "1" || core.getOpenGate(1) !== null);
-    assert.equal(kvGet("fill.submitting.1"), "1", "manual return must not erase unchanged unused approval");
+    await until(() => isSubmitting(1) || core.getOpenGate(1) !== null);
+    assert.equal(isSubmitting(1), true, "manual return must not erase unchanged unused approval");
     assert.equal(core.getOpenGate(1), null);
     await authorization;
   } else {
@@ -381,7 +482,7 @@ if (scenario === "release" || scenario === "quick-answer") {
     const revisedReview = call(third, "confirm_submit", { ...navigation, summary: "Salary 110000; changed fields checked" });
     await until(() => core.getOpenGate(1) !== null);
     assert.equal(openGate(1).kind, "confirm_submit");
-    assert.notEqual(kvGet("fill.submitting.1"), "1", "manual return cannot turn a change request into approval");
+    assert.equal(isSubmitting(1), false, "manual return cannot turn a change request into approval");
     third.exit();
     await revisedReview;
   }
@@ -389,9 +490,9 @@ if (scenario === "release" || scenario === "quick-answer") {
   const parking = call(first, "confirm_submit", { ...navigation, summary: "Salary 100000; all fields checked" });
   await until(() => core.getOpenGate(1) !== null);
   assert.equal(openGate(1).kind, "confirm_submit");
-  assert.notEqual(kvGet("fill.submitting.1"), "1", "queuing approval cannot authorize a click");
-  assert.equal(pipeline.respond(1, "approve"), true);
-  assert.notEqual(kvGet("fill.submitting.1"), "1", "answering approval cannot authorize a click");
+  assert.equal(isSubmitting(1), false, "queuing approval cannot authorize a click");
+  assert.equal(core.respond(1, "approve"), true);
+  assert.equal(isSubmitting(1), false, "answering approval cannot authorize a click");
   first.exit();
   await parking;
   await until(() => workers.length === 2);
@@ -400,25 +501,25 @@ if (scenario === "release" || scenario === "quick-answer") {
     const reparking = call(second, "confirm_submit", { ...navigation, summary: "Salary 110000; changed fields" });
     await until(() => core.getOpenGate(1) !== null);
     assert.equal(openGate(1).kind, "confirm_submit");
-    assert.notEqual(kvGet("fill.submitting.1"), "1");
+    assert.equal(isSubmitting(1), false);
     second.exit();
     await reparking;
   } else {
     assert.match(await call(second, "confirm_submit", { ...navigation, summary: "Salary 100000; all fields checked" }), /^APPROVED/);
-    assert.equal(kvGet("fill.submitting.1"), "1");
+    assert.equal(isSubmitting(1), true);
     const ambiguity = call(second, "report_result", { outcome: "failed", note: "Timed out after final click" });
     await ambiguity;
     assert.equal(openGate(1).kind, "submission_ambiguous");
-    assert.equal(pipeline.respond(1, "approve"), false);
-    pipeline.pump();
+    assert.equal(core.respond(1, "approve"), false);
+    scheduler.pump();
     assert.equal(workers.length, 2, "stopping ambiguous worker retains capacity until exit");
     second.exit();
     await until(() => workers.length === 3);
     assert.equal(workerAt(2).options.jobId, 2);
-    assert.equal(kvGet("fill.submitting.1"), "1");
-    assert.equal(pipeline.fillSlot(1), null);
+    assert.equal(isSubmitting(1), true);
+    assert.equal(scheduler.fillSlot(1), null);
     core.resolveAmbiguous(1, "not_submitted");
-    assert.equal(kvGet("fill.submitting.1"), "0");
+    assert.equal(isSubmitting(1), false);
     assert.equal(core.resumeContext(1).approvedSummary, null);
     await call(workerAt(2), "report_result", { outcome: "closed", note: "Other job closed" });
     workerAt(2).exit();
@@ -432,24 +533,26 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(gate.kind, "manual");
   first.exit();
   await parking;
-  await until(() => !pipeline.activeFillSession(1));
-  pipeline.pump();
+  await until(() => !scheduler.activeFillSession(1));
+  scheduler.pump();
   assert.equal(workers.length, 1);
   assert.equal(core.manualLeases().size, 0);
 
-  assert.throws(() => { pipeline.scheduleRecovery(1, "stale-gate-id"); });
+  assert.throws(() => {
+    scheduler.scheduleRecovery(1, "stale-gate-id");
+  });
   assert.equal(core.getOpenGate(1)?.id, gate.id);
   assert.equal(core.manualLeases().size, 0);
 
-  pipeline.scheduleRecovery(1, gate.id);
+  scheduler.scheduleRecovery(1, gate.id);
   assert.equal(core.getOpenGate(1), null);
   assert.equal(jobRow(1).note, "Pre-submit site outage; no account yet");
 
-  pipeline.pump();
+  scheduler.pump();
   await until(() => workers.length === 2);
   const second = workerAt(1);
   assert.equal(second.options.jobId, 1);
-  assert.equal(kvGet("fill.recovery.1"), "0", "recovery flag cleared as worker starts");
+  assert.equal(isRecovering(1), false, "recovery flag cleared as worker starts");
   second.exit();
 } else if (scenario === "recovery-verify-guards") {
   const summary = "Salary 100000; all fields checked";
@@ -458,11 +561,11 @@ if (scenario === "release" || scenario === "quick-answer") {
   core.answerGate(openGate(1).id, "approve", "application");
   first.exit();
   await parking;
-  pipeline.pump();
+  scheduler.pump();
   await until(() => workers.length === 2);
   const second = workerAt(1);
   assert.match(await call(second, "confirm_submit", { ...navigation, summary }), /^APPROVED/);
-  assert.equal(kvGet("fill.submitting.1"), "1");
+  assert.equal(isSubmitting(1), true);
 
   const ambiguity = call(second, "report_result", { outcome: "failed", note: "Timeout waiting for confirmation" });
   await ambiguity;
@@ -472,12 +575,12 @@ if (scenario === "release" || scenario === "quick-answer") {
   await Bun.sleep(10);
   config.limits.applyPerDay = 0;
 
-  pipeline.scheduleRecovery(1, gate.id);
+  scheduler.scheduleRecovery(1, gate.id);
   assert.equal(core.getOpenGate(1), null);
-  assert.equal(kvGet("fill.submitting.1"), "1", "submit marker preserved up front");
-  assert.equal(kvGet("fill.verify.1"), "1", "durable verify mode set");
+  assert.equal(isSubmitting(1), true, "submit marker preserved up front");
+  assert.equal(isVerifying(1), true, "durable verify mode set");
 
-  pipeline.pump();
+  scheduler.pump();
   await until(() => workers.length === 3);
   const third = workerAt(2);
   assert.equal(third.options.jobId, 1);
@@ -496,17 +599,17 @@ if (scenario === "release" || scenario === "quick-answer") {
   core.answerGate(openGate(1).id, "approve", "application");
   first.exit();
   await parking;
-  pipeline.pump();
+  scheduler.pump();
   await until(() => workers.length === 2);
   const second = workerAt(1);
   await call(second, "confirm_submit", { ...navigation, summary });
   await call(second, "report_result", { outcome: "failed", note: "Browser dropped connection" });
   const gate = openGate(1);
   second.exit();
-  await until(() => !pipeline.activeFillSession(1));
+  await until(() => !scheduler.activeFillSession(1));
 
-  pipeline.scheduleRecovery(1, gate.id);
-  pipeline.pump();
+  scheduler.scheduleRecovery(1, gate.id);
+  scheduler.pump();
   await until(() => workers.length === 3);
   const third = workerAt(2);
 
@@ -519,9 +622,9 @@ if (scenario === "release" || scenario === "quick-answer") {
   const reparked = openGate(1);
   assert.equal(reparked.kind, "submission_ambiguous");
   assert.match(reparked.text, /Verification inconclusive: Portal dashboard returns 502/);
-  assert.equal(kvGet("fill.submitting.1"), "1");
-  assert.equal(kvGet("fill.verify.1"), "0");
-  assert.equal(kvGet("fill.recovery.1"), "0");
+  assert.equal(isSubmitting(1), true);
+  assert.equal(isVerifying(1), false);
+  assert.equal(isRecovering(1), false);
   assert.equal(third.aborted, true);
   third.exit();
   await inconclusive;
@@ -534,17 +637,17 @@ if (scenario === "release" || scenario === "quick-answer") {
   core.answerGate(openGate(1).id, "approve", "application");
   first.exit();
   await parking;
-  pipeline.pump();
+  scheduler.pump();
   await until(() => workers.length === 2);
   const second = workerAt(1);
   await call(second, "confirm_submit", { ...navigation, summary });
   await call(second, "report_result", { outcome: "failed", note: "Timeout after click" });
   const gate = openGate(1);
   second.exit();
-  await until(() => !pipeline.activeFillSession(1));
+  await until(() => !scheduler.activeFillSession(1));
 
-  pipeline.scheduleRecovery(1, gate.id);
-  pipeline.pump();
+  scheduler.scheduleRecovery(1, gate.id);
+  scheduler.pump();
   await until(() => workers.length === 3);
   const third = workerAt(2);
 
@@ -557,8 +660,8 @@ if (scenario === "release" || scenario === "quick-answer") {
     requisition_id: "REQ-001",
   });
   await until(() => jobRow(1).status === "submitted");
-  assert.equal(kvGet("fill.submitting.1"), "0");
-  assert.equal(kvGet("fill.verify.1"), "0");
+  assert.equal(isSubmitting(1), false);
+  assert.equal(isVerifying(1), false);
   assert.equal(core.getOpenGate(1), null);
   assert.equal(third.aborted, true);
   third.exit();
@@ -570,17 +673,17 @@ if (scenario === "release" || scenario === "quick-answer") {
   core.answerGate(openGate(1).id, "approve", "application");
   first.exit();
   await parking;
-  pipeline.pump();
+  scheduler.pump();
   await until(() => workers.length === 2);
   const second = workerAt(1);
   await call(second, "confirm_submit", { ...navigation, summary });
   await call(second, "report_result", { outcome: "failed", note: "Timeout after click" });
   const gate = openGate(1);
   second.exit();
-  await until(() => !pipeline.activeFillSession(1));
+  await until(() => !scheduler.activeFillSession(1));
 
-  pipeline.scheduleRecovery(1, gate.id);
-  pipeline.pump();
+  scheduler.scheduleRecovery(1, gate.id);
+  scheduler.pump();
   await until(() => workers.length === 3);
   const third = workerAt(2);
 
@@ -593,13 +696,13 @@ if (scenario === "release" || scenario === "quick-answer") {
     requisition_id: "REQ-001",
   });
   await until(() => jobRow(1).status === "approved");
-  assert.equal(kvGet("fill.submitting.1"), "0");
-  assert.equal(kvGet("fill.verify.1"), "0");
+  assert.equal(isSubmitting(1), false);
+  assert.equal(isVerifying(1), false);
   assert.equal(core.resumeContext(1).approvedSummary, null, "approval invalidated");
   assert.equal(third.aborted, true);
   third.exit();
   await draftRes;
-  pipeline.pump();
+  scheduler.pump();
   await until(() => workers.length === 4);
   const fourth = workerAt(3);
   assert.equal(fourth.options.jobId, 1);
@@ -612,13 +715,13 @@ if (scenario === "release" || scenario === "quick-answer") {
   const summary = "Salary 100000; all fields checked";
   const parking = call(first, "confirm_submit", { ...navigation, summary });
   await until(() => core.getOpenGate(1) !== null);
-  assert.equal(pipeline.respond(1, "approve"), true);
+  assert.equal(core.respond(1, "approve"), true);
   first.exit();
   await parking;
   await until(() => workers.length === 2);
   const second = workerAt(1);
   assert.match(await call(second, "confirm_submit", { ...navigation, summary }), /^APPROVED/);
-  assert.equal(kvGet("fill.submitting.1"), "1");
+  assert.equal(isSubmitting(1), true);
 
   const terminalReport = call(second, "report_result", { outcome: "submitted", note: "Confirmation #ABC-123" });
   assert.equal(await terminalReport, "Recorded.");
@@ -627,17 +730,17 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(jobRow(1).status, "submitted");
   assert.equal(jobRow(1).pending, null);
   assert.equal(core.getOpenGate(1), null, "success clears marker without ambiguity gate");
-  assert.equal(kvGet("fill.submitting.1"), "0", "submit marker cleared on conclusive success");
-  assert.equal(kvGet("fill.verify.1"), "0");
-  assert.equal(kvGet("fill.recovery.1"), "0");
+  assert.equal(isSubmitting(1), false, "submit marker cleared on conclusive success");
+  assert.equal(isVerifying(1), false);
+  assert.equal(isRecovering(1), false);
   assert.equal(second.aborted, true, "terminal result aborts worker process");
   assert.equal(must(jobBrowsers[1], "job browser 1").ownsTarget("draft-tab"), false, "browser revoked on terminal result");
 
   // Scheduler and employer slot remain occupied until process exits
-  pipeline.pump();
+  scheduler.pump();
   assert.equal(workers.length, 2, "slot remains occupied until handle.done / process exit");
-  assert.equal(pipeline.activeFillSession(1), true, "session remains until process exit");
-  assert.equal(pipeline.fillSlot(1), null, "slot ownership revoked for inactive session");
+  assert.equal(scheduler.activeFillSession(1), true, "session remains until process exit");
+  assert.equal(scheduler.fillSlot(1), null, "slot ownership revoked for inactive session");
   assert.equal(jobRow(2).status, "approved", "same-employer job cannot start while previous worker runs");
 
   // Stale callbacks while process is winding down cannot alter terminal status
@@ -646,15 +749,15 @@ if (scenario === "release" || scenario === "quick-answer") {
   const staleFail = await call(second, "report_result", { outcome: "failed", note: "Stale late failure" });
   assert.match(staleFail, /ERROR: stale or parked fill worker/);
   assert.equal(jobRow(1).status, "submitted");
-  assert.equal(kvGet("fill.submitting.1"), "0");
+  assert.equal(isSubmitting(1), false);
 
   // Worker process exits
   second.exit();
-  pipeline.pump();
+  scheduler.pump();
   await until(() => workers.length === 3);
   const third = workerAt(2);
   assert.equal(third.options.jobId, 2, "same-employer job starts only after process exit");
-  assert.equal(pipeline.activeFillSession(1), false, "fill session freed after process exit");
+  assert.equal(scheduler.activeFillSession(1), false, "fill session freed after process exit");
 
   // Stale callbacks after successor has started cannot touch terminal job or successor
   const stalePostExit = await call(second, "report_result", { outcome: "closed", note: "Late callback" });
@@ -674,14 +777,14 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(jobRow(1).status, "skipped");
   assert.equal(jobRow(1).note, "posting closed: Posting expired");
   assert.equal(core.getOpenGate(1), null);
-  assert.equal(kvGet("fill.submitting.1"), "0");
+  assert.equal(isSubmitting(1), false);
   assert.equal(first.aborted, true);
   assert.equal(must(jobBrowsers[0], "job browser 0").ownsTarget("draft-tab"), false, "browser revoked on closed report");
 
   // Slot remains held until process exit
-  pipeline.pump();
+  scheduler.pump();
   assert.equal(workers.length, 1);
-  assert.equal(pipeline.activeFillSession(1), true);
+  assert.equal(scheduler.activeFillSession(1), true);
   assert.equal(jobRow(2).status, "approved");
 
   const staleCall = await call(first, "report_result", { outcome: "submitted", note: "Late submitted" });
@@ -689,38 +792,40 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(jobRow(1).status, "skipped");
 
   first.exit();
-  pipeline.pump();
+  scheduler.pump();
   await until(() => workers.length === 2);
   const second = workerAt(1);
   assert.equal(second.options.jobId, 2);
-  assert.equal(pipeline.activeFillSession(1), false);
+  assert.equal(scheduler.activeFillSession(1), false);
   second.exit();
 } else if (scenario === "terminal-persistence-failure") {
   const summary = "Salary 100000; all fields checked";
   const parking = call(first, "confirm_submit", { ...navigation, summary });
   await until(() => core.getOpenGate(1) !== null);
-  assert.equal(pipeline.respond(1, "approve"), true);
+  assert.equal(core.respond(1, "approve"), true);
   first.exit();
   await parking;
   await until(() => workers.length === 2);
   const second = workerAt(1);
   assert.match(await call(second, "confirm_submit", { ...navigation, summary }), /^APPROVED/);
-  assert.equal(kvGet("fill.submitting.1"), "1");
+  assert.equal(isSubmitting(1), true);
 
-  db.query("INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, created_at) VALUES ('gate-persist-test', 1, 'manual', 'group-persist-test', 'match-persist-test', 'Employer 1', 'Inspect draft', 'Employer 1 / draft', '[]', 'open', datetime('now'))").run();
+  db.query(
+    "INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, created_at) VALUES ('gate-persist-test', 1, 'manual', 'group-persist-test', 'match-persist-test', 'Employer 1', 'Inspect draft', 'Employer 1 / draft', '[]', 'open', datetime('now'))",
+  ).run();
   assert.equal(core.getGate("gate-persist-test")?.state, "open");
 
   db.run("CREATE TRIGGER fail_jobs_update BEFORE UPDATE ON jobs BEGIN SELECT RAISE(ABORT, 'injected persistence failure'); END;");
   assert.throws(() => call(second, "report_result", { outcome: "submitted", note: "Should fail persistence" }), /injected persistence failure/);
 
-  assert.equal(kvGet("fill.submitting.1"), "1", "failed persistence must not clear submit marker");
+  assert.equal(isSubmitting(1), true, "failed persistence must not clear submit marker");
   assert.equal(core.getGate("gate-persist-test")?.state, "open", "failed persistence must not drop durable gates");
   assert.equal(jobRow(1).status, "filling", "job status remains filling");
   assert.equal(second.aborted, false, "worker must not be aborted when persistence fails");
 
   db.run("DROP TRIGGER fail_jobs_update;");
   assert.equal(await call(second, "report_result", { outcome: "submitted", note: "Successful retry" }), "Recorded.");
-  assert.equal(kvGet("fill.submitting.1"), "0", "marker cleared upon successful persistence commit");
+  assert.equal(isSubmitting(1), false, "marker cleared upon successful persistence commit");
   assert.equal(core.getGate("gate-persist-test")?.state, "closed", "gates dropped upon successful persistence commit");
   assert.equal(jobRow(1).status, "submitted");
   assert.equal(second.aborted, true);
