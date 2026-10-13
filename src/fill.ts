@@ -8,9 +8,9 @@ import { endVerification, isSubmitting, isVerifying, rememberSlot } from "./fill
 import { ownsFill, stopFailedFill, type FillRuntime, type FillSession } from "./fill-session";
 import { fillTools } from "./fill-tools";
 import * as gmail from "./gmail";
-import { parkGate, readCheckpoint, recordCheckpoint, resumeContext } from "./questions";
+import { getOpenGate, parkGate, readCheckpoint, recordCheckpoint, resumeContext } from "./questions";
 import { freezeResume, frozenResume } from "./resume";
-import { to } from "./status";
+import { isSettled, to, wasSent } from "./status";
 import { render } from "./worker-tools";
 
 // What the worker is told about where this application stands.
@@ -21,6 +21,38 @@ const RESUME_BRIEF =
 const FIRST_BRIEF = "First fill for this application. Open the exact posting and record the draft/requisition identity.";
 const SUBMIT_RULE =
   "- **Before final submit:** re-observe and verify all fields, take a full-page screenshot, then call `confirm_submit` with an exact summary and current navigation checkpoint. Click only if it returns APPROVED. An unused approval is valid only for the unchanged summary. Immediate post-click verification challenges (email codes or CAPTCHAs) continue this pending attempt; complete them using challenge controls. Any other uncertainty or requirement to click final application submit again requires `need_manual`; never click final application submit a second time.";
+
+// Parked applications whose pages stay open in one browser. Every open page costs memory for as long
+// as its question goes unanswered, so only the most recently parked keep theirs.
+export const PARKED_TABS = 8;
+
+// What becomes of the tabs that checkpoints on this browser point at, when `jobId` starts a fill there.
+// `keep` stay open. `closing` are given up: tab id -> the unfinished job that will resume without its
+// page (null for a job that is over). `others` belong to other applications and are off limits to this one.
+export function tabPlan(slot: number, jobId: number, limit = PARKED_TABS) {
+  const keep = new Set<string>(),
+    others = new Set<string>(),
+    closing = new Map<string, number | null>();
+  const parked: { tabId: string; jobId: number; savedAt: string }[] = [];
+  for (const row of jobsWithCheckpoint()) {
+    const checkpoint = readCheckpoint(row.id);
+    if (checkpoint?.slot !== slot || !checkpoint.tabId) continue;
+    const { tabId } = checkpoint;
+    if (row.id !== jobId) others.add(tabId);
+    // A page that may show whether the final submit went through is evidence until the outcome is known.
+    const evidence = !wasSent(row) && (isSubmitting(row.id) || getOpenGate(row.id)?.kind === "submission_ambiguous");
+    if (row.id === jobId || evidence) keep.add(tabId);
+    else if (isSettled(row)) closing.set(tabId, null);
+    else parked.push({ tabId, jobId: row.id, savedAt: checkpoint.savedAt });
+  }
+  parked.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+  for (const [i, p] of parked.entries()) {
+    if (i < limit) keep.add(p.tabId);
+    else closing.set(p.tabId, p.jobId);
+  }
+  for (const tabId of keep) closing.delete(tabId); // two checkpoints on one tab: keeping wins
+  return { keep, closing, others };
+}
 
 export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   const { slot } = session;
@@ -57,16 +89,17 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   }
   await rt.browser.ensureChrome(slot);
   if (!ownsFill(rt, session)) return;
-  const protectedTabs = new Set<string>();
-  const excludedTargets = new Set<string>();
-  for (const row of jobsWithCheckpoint()) {
-    const checkpoint = readCheckpoint(row.id);
-    if (checkpoint?.slot === slot && checkpoint.tabId) {
-      protectedTabs.add(checkpoint.tabId);
-      if (row.id !== job.id) excludedTargets.add(checkpoint.tabId);
-    }
-  }
-  await rt.browser.pruneTabs(slot, 5, protectedTabs);
+  const { keep: protectedTabs, closing, others: excludedTargets } = tabPlan(slot, job.id);
+  const open = new Set((await rt.browser.tabs(slot)).map(tab => tab.id));
+  await rt.browser.pruneTabs(slot, 5, protectedTabs, new Set(closing.keys()));
+  for (const [tabId, parkedJob] of closing)
+    if (parkedJob !== null && open.has(tabId))
+      logEvent(
+        "system",
+        `Closed this application's parked browser tab to free memory (more than ${PARKED_TABS} are parked in its browser). It resumes from its saved answers and the site's draft.`,
+        parkedJob,
+        "fill",
+      );
   if (!ownsFill(rt, session)) return;
   const jobBrowser = await rt.browser.prepareJobBrowser(slot, session.checkpoint.tabId, excludedTargets);
   session.browser = jobBrowser;

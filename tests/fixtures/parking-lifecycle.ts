@@ -45,6 +45,10 @@ if (scenario === "browser") {
   const chrome = await import("../../src/chrome");
   await chrome.pruneTabs(0, 1, new Set(["draft"]));
   assert.deepEqual(closed, ["obsolete"]);
+  // A tab that was given up is closed even though it is the most recent one.
+  closed.length = 0;
+  await chrome.pruneTabs(0, 1, new Set(["draft"]), new Set(["recent"]));
+  assert.deepEqual(closed, ["recent"]);
   assert.equal(await chrome.screenshot(0, "missing-parked-tab"), null);
   process.exit(0);
 }

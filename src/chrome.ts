@@ -161,9 +161,12 @@ export async function prepareJobBrowser(slot: number, checkpointTabId: string | 
   return { ...startCdpProxy(slot, { targetId: tabId, excludedTargets }), tabId, reused: Boolean(saved) };
 }
 
-// Retain tabs referenced by durable draft checkpoints, even when their slot is reused.
-export async function pruneTabs(slot: number, keep: number, protectedIds: ReadonlySet<string> = new Set()) {
-  for (const tab of (await tabs(slot)).filter(t => !protectedIds.has(t.id)).slice(keep))
+// Retain tabs referenced by durable draft checkpoints, even when their slot is reused. Tabs that
+// are `givenUp` are closed outright; of the rest that nothing protects, the `keep` most recent stay.
+export async function pruneTabs(slot: number, keep: number, protectedIds: ReadonlySet<string> = new Set(), givenUp: ReadonlySet<string> = new Set()) {
+  const open = await tabs(slot);
+  const stray = open.filter(t => !protectedIds.has(t.id) && !givenUp.has(t.id)).slice(keep);
+  for (const tab of [...open.filter(t => givenUp.has(t.id)), ...stray])
     await fetch(`${cdp(slot)}/json/close/${tab.id}`).catch(() => {
       /* tab already closed or browser gone */
     });

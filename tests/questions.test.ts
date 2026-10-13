@@ -34,6 +34,27 @@ function scenario(first: string, restart?: string) {
   }
 }
 
+describe("parked browser tabs", () => {
+  it("keeps only the most recently parked pages, drops finished jobs' pages, and never gives up submission evidence", () => {
+    scenario(`
+    const { tabPlan } = await import(${JSON.stringify(join(import.meta.dir, "../src/fill.ts"))});
+    const park = (id, status, savedAt, slot = 2) => { job(id); recordCheckpoint(id, { ...checkpoint, slot, tabId: "tab-" + id, savedAt }); updateJob(id, { status }); };
+    park(1, "needs_input", "2026-10-10T01:00:00.000Z");
+    park(2, "needs_input", "2026-10-10T03:00:00.000Z");
+    park(3, "needs_manual", "2026-10-10T02:00:00.000Z");
+    park(4, "submitted", "2026-10-10T04:00:00.000Z");
+    park(5, "needs_manual", "2026-10-09T00:00:00.000Z"); authorizeSubmit(5);
+    park(6, "approved", "2026-10-08T00:00:00.000Z");
+    park(7, "needs_input", "2026-10-10T05:00:00.000Z", 3);
+    park(8, "filling", "2026-10-10T06:00:00.000Z"); authorizeSubmit(8); updateJob(8, { status: "submitted" });
+    const plan = tabPlan(2, 6, 2);
+    assert.deepEqual([...plan.keep].sort(), ["tab-2", "tab-3", "tab-5", "tab-6"]);
+    assert.deepEqual([...plan.closing].sort(), [["tab-1", 1], ["tab-4", null], ["tab-8", null]]);
+    assert.deepEqual([...plan.others].sort(), ["tab-1", "tab-2", "tab-3", "tab-4", "tab-5", "tab-8"]);
+    `);
+  });
+});
+
 describe("durable questions", () => {
   it("groups only exact structured employer questions and isolates sensitive wording, choices, and context", () => {
     scenario(`
