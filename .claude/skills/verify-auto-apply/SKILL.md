@@ -5,7 +5,7 @@ description: Launch an isolated verification instance of auto-apply (the local j
 
 # verify-auto-apply
 
-auto-apply is a Bun server (`src/server.ts`) with a single-page UI (`ui/index.html`). A live copy normally runs on this machine as a systemd user service on **port 8787**, holding real site passwords, a connected mailbox and logged-in Chromes on CDP port 9222. It submits real job applications.
+auto-apply is a Bun server (`src/server.ts`) with a single-page UI (`ui/`: the page, its stylesheet, and TypeScript modules the server bundles on request). A live copy normally runs on this machine as a systemd user service on **port 8787**, holding real site passwords, a connected mailbox and logged-in Chromes on CDP port 9222. It submits real job applications.
 
 **Never drive, restart or point a browser at `:8787`, and never run `bun src/server.ts` or `bun run dev` to verify something.** A second copy of the real entry point shares the live Chrome's CDP port: approving a job there attaches a real agent to the owner's logged-in browser. Verification uses the instance below instead.
 
@@ -33,7 +33,7 @@ bun install                                      # once per checkout
 
 - `VERIFY_PORT` (default `18787`) and `VERIFY_HOME` (default `<repo>/artifacts/verify-auto-apply`, git-ignored) select the instance. Two runs are independent when **both** differ. With the defaults there is one instance per checkout; do not double-drive it.
 - State (throwaway): `$VERIFY_HOME/state/{data,profile,resume}`. Evidence (kept): `$VERIFY_HOME/evidence/`.
-- The server runs the code of the checkout the skill lives in and does not hot-reload: after editing `src/` or `ui/`, run `ctl.sh reset`. (`ui/index.html` is read per request; a page reload is enough for UI-only edits.)
+- The server runs the code of the checkout the skill lives in and does not hot-reload: after editing `src/` or `ui/`, run `ctl.sh reset`. (`ui/` is read, and its script rebundled when a file changed, per request; a page reload is enough for UI-only edits.)
 
 Seeded jobs. Each company is `Verify Co A`..`I`; the word in the posting URL (`https://ats.verify.invalid/<script>/<n>`) picks what the stand-in worker does once the job is approved:
 

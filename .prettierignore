@@ -1,9 +1,10 @@
-# Only the TypeScript is formatted. Prose, YAML, the single-file UI and generated files keep their own layout.
+# Only the TypeScript is formatted. Prose, YAML, the UI's page and stylesheet, and generated files keep their own layout.
 *
 !*/
 !src/**/*.ts
 !scripts/**/*.ts
 !tests/**/*.ts
+!ui/**/*.ts
 !eslint.config.mjs
 node_modules/
 data/

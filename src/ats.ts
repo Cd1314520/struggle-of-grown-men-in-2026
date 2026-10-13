@@ -63,7 +63,7 @@ async function getJson(url: string, body?: unknown): Promise<unknown> {
   const res = await fetch(url, {
     method: body ? "POST" : "GET",
     headers: body ? { ...HEADERS, "content-type": "application/json" } : HEADERS,
-    body: body ? JSON.stringify(body) : undefined,
+    ...(body ? { body: JSON.stringify(body) } : {}),
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);

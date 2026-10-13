@@ -7,7 +7,7 @@
     "dev": "bun --watch src/server.ts",
     "migrate": "bun scripts/migrate.ts",
     "reassess-backlog": "bun scripts/reassess-backlog.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p ui",
     "lint": "eslint .",
     "test": "bun test",
     "format": "prettier --write .",

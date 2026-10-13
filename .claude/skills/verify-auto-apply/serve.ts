@@ -2,7 +2,7 @@
 // port and data directory, with the outside world replaced by stand-ins. Started by ctl.sh; see SKILL.md.
 //
 // What is real: src/server.ts createHandler, src/scheduler.ts, the database and its migrations, every
-// status move, gate, answer and frozen resume, and ui/index.html.
+// status move, gate, answer and frozen resume, and the UI in ui/.
 // What is a stand-in: the agent runner and the browser (the two things a Scheduler takes as constructor
 // arguments), and outbound network, which is refused. Nothing here can reach the live Chrome on the
 // configured CDP port, a model, the mailbox or a job board.

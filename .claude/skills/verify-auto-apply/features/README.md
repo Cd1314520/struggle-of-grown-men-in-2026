@@ -12,7 +12,7 @@ The maintained source for verifying what a user of auto-apply sees. Read this in
 ## Driving conventions
 
 - Open pages by hash route (`$B/#review`, `$B/#progress/2`). Opening a job by route is equivalent to clicking its row.
-- Act through the selectors given; they are `data-*` attributes and ids from `ui/index.html`. Read results with `browser_snapshot` (pass `target: "#pane"` for the open job).
+- Act through the selectors given; they are `data-*` attributes and ids from the views in `ui/`. Read results with `browser_snapshot` (pass `target: "#pane"` for the open job).
 - At phone width the list and the job are separate screens; at desktop width (resize to 1280 wide or more) they sit side by side and the first job opens by itself. Recipes work at either width.
 - After an action that queues the stand-in worker, wait for the named heading with `browser_wait_for`. Each worker step takes about 0.4 s.
 - After Approve, Reject or Retry the UI moves to the next job in the list. Navigate back to the job by route before reading its state.

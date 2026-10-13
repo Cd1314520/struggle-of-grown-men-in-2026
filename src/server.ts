@@ -1,9 +1,10 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { AppState, JobDetail } from "./api-types";
 import { feedNames, loadCompanies } from "./ats";
 import { isBoardUrl } from "./boards";
 import { screenshot, tabs } from "./chrome";
-import { browserCount, config, jobDir, PROFILE, ROOT, STOCK_MAIN, vncUrl } from "./config";
+import { browserCount, config, jobDir, PROFILE, STOCK_MAIN, vncUrl } from "./config";
 import {
   boardJobs,
   getJob,
@@ -39,6 +40,7 @@ import { digestStatus, sendQuestionDigest } from "./digest";
 import { errorMessage } from "./errors";
 import { isSubmitting, recoveryMode } from "./fill-state";
 import { RETRYABLE, to, wasSent } from "./status";
+import { serveUi } from "./ui";
 
 const PROFILE_FILES = ["targets.md", "rubric.yml", MAIN, "resume-notes.md", "answers.md", "personal.yml", "companies.yml"];
 const safeThreshold = () => {
@@ -82,7 +84,7 @@ function resumeDiff(job: Job) {
   return out.stdout.toString().split("\n").slice(4).join("\n");
 }
 
-function state(scheduler: Scheduler) {
+function state(scheduler: Scheduler): AppState {
   const jobs = boardJobs().map(j => ({ ...j, opened_at: openedAt(j) }));
   const counts = statusCounts();
   const events = recentEvents();
@@ -112,6 +114,32 @@ function state(scheduler: Scheduler) {
     phase: config.phase,
     home: config.boards?.location.split(",")[0]?.trim() || null,
     profileFiles: PROFILE_FILES,
+  };
+}
+
+function jobDetail(scheduler: Scheduler, job: Job): JobDetail {
+  const files = resumeFiles(job.id, job.resume_sha);
+  const gate = getOpenGate(job.id);
+  // Historical slot assignments are not ownership: ordinary parked browsers are reused.
+  const slot = scheduler.fillSlot(job.id);
+  return {
+    ...job,
+    opened_at: openedAt(job),
+    events: jobEvents(job.id),
+    history: statusHistory(job.id),
+    sources: jobSources(job.id),
+    siblings: siblingJobs(job),
+    gate,
+    checkpoint: readCheckpoint(job.id),
+    browserReserved: slot !== null,
+    manualBrowserReserved: scheduler.manualBrowserReserved(job.id),
+    submissionAmbiguous: gate?.kind === "submission_ambiguous" || (job.status !== "filling" && isSubmitting(job.id)),
+    recoveryMode: recoveryMode(job.id),
+    vncUrl: config.chrome.vncPort && slot !== null ? vncUrl(slot) : null,
+    hasPdf: existsSync(files.pdf),
+    resumeFrozen: files.frozen,
+    pdfName: PDF_NAME,
+    diff: resumeDiff(job),
   };
 }
 
@@ -179,7 +207,8 @@ export function createHandler(scheduler: Scheduler) {
     const path = url.pathname;
     const body = async () => (await req.json().catch(() => ({}))) as Record<string, unknown>;
 
-    if (path === "/") return new Response(Bun.file(process.env["AUTO_APPLY_UI"] ?? join(ROOT, "ui/index.html")));
+    const page = await serveUi(path);
+    if (page) return page;
     if (path === "/api/state") return json(state(scheduler));
 
     if (path === "/api/questions" && req.method === "GET") return json({ groups: listQuestionGroups() });
@@ -234,34 +263,7 @@ export function createHandler(scheduler: Scheduler) {
       if (!job) return fail("no such job", 404);
       const sub = jobMatch[2];
       if (!sub) {
-        const events = jobEvents(job.id);
-        const files = resumeFiles(job.id, job.resume_sha);
-        const sources = jobSources(job.id);
-        const siblings = siblingJobs(job);
-        const gate = getOpenGate(job.id);
-        const checkpoint = readCheckpoint(job.id);
-        // Historical slot assignments are not ownership: ordinary parked browsers are reused.
-        const slot = scheduler.fillSlot(job.id);
-        const browserUrl = config.chrome.vncPort && slot !== null ? vncUrl(slot) : null;
-        return json({
-          ...job,
-          opened_at: openedAt(job),
-          events,
-          history: statusHistory(job.id),
-          sources,
-          siblings,
-          gate,
-          checkpoint,
-          browserReserved: slot !== null,
-          manualBrowserReserved: scheduler.manualBrowserReserved(job.id),
-          submissionAmbiguous: gate?.kind === "submission_ambiguous" || (job.status !== "filling" && isSubmitting(job.id)),
-          recoveryMode: recoveryMode(job.id),
-          vncUrl: browserUrl,
-          hasPdf: existsSync(files.pdf),
-          resumeFrozen: files.frozen,
-          pdfName: PDF_NAME,
-          diff: resumeDiff(job),
-        });
+        return json(jobDetail(scheduler, job));
       }
       if (sub === "/resume.pdf") {
         const file = Bun.file(resumeFiles(job.id, job.resume_sha).pdf);
