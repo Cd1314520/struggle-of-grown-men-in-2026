@@ -2,7 +2,7 @@
 
 Job #{{id}}: **{{title}}** at **{{company}}** ({{location}})
 {{url}}
-
+{{otherListings}}
 ## Step 1: answer the checklist and practice facts
 
 You do not score this job. Answer each statement below about the posting with `yes`, `no` or `unclear`, and give the short quote or fact that decides it. Judge each statement on its own, literally as written. Use `unclear` only when the posting really does not say; do not guess, and do not let one answer colour another. If the description below is missing or thin, read the posting at the URL first. For statements about the candidate, use `{{main}}` in your working directory.

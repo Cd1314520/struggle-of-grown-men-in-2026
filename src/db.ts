@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { DATA } from "./config";
+import { placeOf } from "./location";
 import { connectDatabase, migrate } from "./schema";
 import { AWAITING_OUTCOME, NOT_STARTED, OFF_BOARD, to, UNASSESSED, type Status } from "./status";
 
@@ -297,11 +298,34 @@ const mergeLocation = (existing: string | null, extra: string | null) => {
 // Aggregator listings only link on to the employer's form; a company board is the form itself.
 const AGGREGATORS = new Set(["remotive", "jobicy", "remoteok", "linkedin", "indeed"]);
 
+// Where the listing a job is applied through is. `location` leads with it; the places of the other
+// listings folded into the job follow, each after " | ".
+export const appliedLocation = (job: Pick<Job, "location">) => job.location?.split(" | ")[0] ?? null;
+
+// Makes another listing the one a job is applied through. The old one stays on as a listing.
+export function applyThrough(job: Pick<Job, "id" | "url" | "source" | "location">, url: string, source: string, location: string | null) {
+  addSource(job.id, job.url, job.source, appliedLocation(job));
+  db.query("DELETE FROM job_sources WHERE url = ?").run(url);
+  const places = location ? [location, ...(job.location?.split(" | ") ?? []).filter(place => place !== location)].join(" | ") : job.location;
+  db.query("UPDATE jobs SET url = ?, source = ?, location = ? WHERE id = ?").run(url, source, places, job.id);
+}
+
+// A role is often listed once per office. Whether `listing` is a better one to apply through than the
+// job's current one: the employer's own form beats an aggregator's link to it, and between two of a
+// kind a listing in the United States beats one abroad.
+export function betterListing(job: Pick<Job, "source" | "location">, listing: { source: string; location: string | null }) {
+  const aggregated = AGGREGATORS.has(job.source);
+  if (aggregated !== AGGREGATORS.has(listing.source)) return aggregated;
+  return placeOf(listing.location) === "us" && placeOf(appliedLocation(job)) === "abroad";
+}
+
 function fold(into: Job, url: string, source: string, location: string | null, description: string | null) {
-  if (AGGREGATORS.has(into.source) && !AGGREGATORS.has(source) && NOT_STARTED.includes(into.status)) {
-    // The employer's own listing turned up for a job first seen on an aggregator: apply there instead.
-    addSource(into.id, into.url, into.source, into.location);
-    db.query("UPDATE jobs SET url = ?, source = ? WHERE id = ?").run(url, source, into.id);
+  // Only a job no application was ever started for changes where it applies here; see preferUsListings.
+  if (NOT_STARTED.includes(into.status) && !into.resume_sha && betterListing(into, { source, location })) {
+    const cameHome = AGGREGATORS.has(into.source) === AGGREGATORS.has(source);
+    applyThrough(into, url, source, location);
+    // What was decided about the listing abroad says nothing about this one: assess the job again.
+    if (cameHome && !UNASSESSED.includes(into.status)) writeJob(into.id, { status: "found", note: null });
   } else addSource(into.id, url, source, location);
   // Until it has been assessed, let the extra listing widen the location and fill a missing description.
   if (UNASSESSED.includes(into.status))

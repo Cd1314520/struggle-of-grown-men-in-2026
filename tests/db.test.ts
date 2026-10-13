@@ -410,6 +410,43 @@ describe("postings, duplicates and sources", () => {
   `);
   });
 
+  it("applies through the US listing of a role that is also listed abroad", () => {
+    scenario(`
+    const role = { source: "lever", company: "Acme", title: "Data Engineer", description: null };
+    const id = store.insertJob({ ...role, url: "https://jobs.example/acme/london", location: "London, United Kingdom" }, "held");
+    assert.equal(store.insertJob({ ...role, url: "https://jobs.example/acme/nyc", location: "New York, NY" }), null);
+    let row = store.getJob(id);
+    assert.deepEqual([row.url, row.location, row.status], ["https://jobs.example/acme/nyc", "New York, NY | London, United Kingdom", "found"]);
+    assert.equal(store.appliedLocation(row), "New York, NY");
+    assert.deepEqual(store.jobSources(id), [{ url: "https://jobs.example/acme/london", source: "lever", location: "London, United Kingdom" }]);
+    // Another office abroad, or a second US one, changes nothing about where it applies.
+    assert.equal(store.insertJob({ ...role, url: "https://jobs.example/acme/dublin", location: "Dublin, Ireland" }), null);
+    assert.equal(store.insertJob({ ...role, url: "https://jobs.example/acme/dc", location: "Washington, D.C." }), null);
+    row = store.getJob(id);
+    assert.equal(row.url, "https://jobs.example/acme/nyc");
+    assert.equal(store.appliedLocation(row), "New York, NY");
+  `);
+  });
+
+  it("moves existing jobs off a listing abroad at start, except ones that cannot move", () => {
+    scenario(`
+    const { preferUsListings } = await import(${JSON.stringify(join(import.meta.dir, "../src/listings.ts"))});
+    const abroad = (id, fields) => { job(id, { url: "https://jobs.example/" + id + "/london", location: "London, United Kingdom | New York, NY", ...fields });
+      db.query("INSERT INTO job_sources (job_id, url, source, location) VALUES (?, ?, 'test', 'New York, NY')").run(id, "https://jobs.example/" + id + "/nyc"); };
+    abroad(1, { status: "held", resume_sha: "sha", resume_frozen_at: "2026-10-10T00:00:00Z", score: 70 });
+    abroad(2, { status: "submitted", submitted_at: "2026-10-10T00:00:00Z" });
+    abroad(3, { status: "needs_input" });
+    job(4, { status: "awaiting_approval", location: "London, United Kingdom" });
+    job(5, { status: "awaiting_approval", location: "Remote" });
+    db.query("INSERT INTO job_sources (job_id, url, source, location) VALUES (5, 'https://jobs.example/5/austin', 'test', 'Austin, TX')").run();
+    assert.equal(preferUsListings(), 1);
+    const moved = store.getJob(1);
+    assert.deepEqual([moved.url, moved.status, moved.resume_sha, store.appliedLocation(moved)], ["https://jobs.example/1/nyc", "found", null, "New York, NY"]);
+    for (const id of [2, 3, 4, 5]) assert.equal(store.getJob(id).url, id < 4 ? "https://jobs.example/" + id + "/london" : "https://ats.example/jobs/" + id);
+    assert.equal(preferUsListings(), 0);
+  `);
+  });
+
   it("relocates a job to an unknown employer posting", () => {
     scenario(`
     job(1, { url: "https://www.linkedin.com/jobs/view/1", source: "linkedin", status: "locating", location: "Houston", note: "looking", description: "old" });

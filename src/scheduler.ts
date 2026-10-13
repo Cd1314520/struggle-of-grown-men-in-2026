@@ -26,6 +26,7 @@ import { fill } from "./fill";
 import { defaultCheckpoint, endSession, ownsFill, stopFailedFill, type Browser, type FillRuntime, type FillSession } from "./fill-session";
 import { beginAttempt, dropManualLease, endVerification, isRecovering, isSubmitting, isVerifying, lastSlot, manualLeaseGate } from "./fill-state";
 import { countOne, due, usedToday } from "./limits";
+import { preferUsListings } from "./listings";
 import { locateEmployerPostings, locatePerDay } from "./locate";
 import { runWorker, type RunWorker } from "./omp";
 import { needsJudgment, parsePracticeAssessment } from "./practice";
@@ -351,6 +352,7 @@ export class Scheduler {
   // Puts right what a restart interrupted, then keeps the schedule.
   start() {
     dedupeExisting();
+    preferUsListings();
     requeueInterruptedPrep();
     recoverInterruptedFills();
     reviewStandingApprovals();

@@ -2,9 +2,10 @@
 import { existsSync } from "node:fs";
 import { autoApproval } from "./auto";
 import { config, jobDir, readProfile } from "./config";
-import { getJob, kvGet, logEvent, updateJob, type Job } from "./db";
+import { appliedLocation, getJob, jobSources, kvGet, logEvent, updateJob, type Job } from "./db";
 import { deferApproval, forgetDeferredApproval } from "./deferred-approvals";
 import { countOne, usedToday } from "./limits";
+import { placeOf } from "./location";
 import { arg, S, schema, type RunWorker } from "./omp";
 import { assessPractice } from "./practice";
 import { changedTemplateFiles, MAIN, pageCount, PDF_NAME, stageResume, stockPages, workingPdf } from "./resume";
@@ -13,11 +14,20 @@ import { to } from "./status";
 import { render } from "./worker-tools";
 
 export async function prep(job: Job, run: RunWorker) {
+  const feedback = kvGet(`feedback.${job.id}`); // set when the user asked for this job explicitly
+  // The listing that would be applied through, not the other offices the same role is listed for.
+  const location = appliedLocation(job);
+  if (!feedback && placeOf(location) === "abroad") {
+    updateJob(job.id, to.skipped("the listing is for a position outside the United States"));
+    return;
+  }
+  const elsewhere = jobSources(job.id)
+    .filter(listing => listing.url !== job.url && listing.location && listing.location !== location)
+    .map(listing => listing.location);
   const dir = jobDir(job.id);
   stageResume(dir);
   const maxPages = stockPages();
   updateJob(job.id, to.prepping());
-  const feedback = kvGet(`feedback.${job.id}`); // set when the user asked for this job explicitly
   // Both are set from tool callbacks.
   let verdict = null as Verdict | null;
   let reported = false as boolean;
@@ -34,7 +44,10 @@ export async function prep(job: Job, run: RunWorker) {
     maxTime: "20m",
     prompt: render("prep", {
       ...job,
-      location: job.location ?? "location not stated",
+      location: location ?? "location not stated",
+      otherListings: elsewhere.length
+        ? `\nThe same role is also listed for: ${[...new Set(elsewhere)].join("; ")}. Those are separate postings. Judge where the job is, its attendance rules and its pay only from the posting above, which is the one the application goes through.\n`
+        : "",
       checklist: checklistText(),
       notes: readProfile("resume-notes.md"),
       main: MAIN,

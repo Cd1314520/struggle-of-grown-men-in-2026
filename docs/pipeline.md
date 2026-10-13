@@ -14,6 +14,8 @@ One role is one job, wherever it is listed. A new posting is compared with every
 
 Titles that differ in level ("Engineer II" vs "Engineer III", "Senior") never match. A duplicate is folded into the existing job, whatever its state, including ones you skipped or rejected: the extra link is kept under the job's Posting tab, and the location list widens until the job has been assessed. If a role first seen on an aggregator later appears on the employer's own board, the job switches to the employer's link. The job lists group roles by employer and show how many you have already applied to there.
 
+A role listed once per office is one job, applied through one of its listings; `location` leads with that listing's place and the other offices follow. When the role is listed both in the United States and abroad, the job applies through the US listing (`betterListing` in `src/db.ts`; `preferUsListings` in `src/listings.ts` moves existing jobs at start and sends them back to be assessed). The assessment is told to judge location, attendance and pay from that listing only, and a job whose only listing is abroad is skipped before it is assessed, unless you asked for it by hand.
+
 ## Freshness
 
 Each job keeps the date its posting opened (`posted_at`), taken from the board where it says (Workday and LinkedIn give only the day; Indeed and hand-added postings give none, so the first sighting stands in). `openedAt` in `src/db.ts` turns that into one estimate, which decides the order jobs are assessed in (newest first) and how the lists are laid out: To review and Held are split into Just opened (6 hours), Today, This week and Older, by score inside each. An employer with more than three roles in one part shows its best two and folds the rest.
