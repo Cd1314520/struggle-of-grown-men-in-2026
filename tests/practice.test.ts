@@ -169,18 +169,29 @@ describe("rubric evaluate", () => {
     expect(res.practice).not.toBeNull();
   });
 
-  it("holds a tech company at scale even when real score is low", () => {
+  it("holds a tech company at scale on the real rubric, whatever its practice fit", () => {
     config.phase = "practice";
-    // Zero out real weighted criteria so real score is 0
-    const answers = answersList({
+    // A poor practice fit does not throw away a job the real search wants.
+    const answers = answersList({ "practice.python": "no", "practice.coding_is_core": "no", "practice.skills_overlap": "no" });
+    const res = evaluate(answers, scaledTech()) as Verdict;
+    expect(res.decision).toBe("hold");
+    expect(res.reason).toMatch(/^not a practice job: .*; real score 100 \(threshold 65\)$/);
+    expect(res.score).toBe(100);
+  });
+
+  it("skips a tech company at scale the real rubric turns down", () => {
+    config.phase = "practice";
+    const low = answersList({
       "real.scale": "no",
       "real.agent_native": "no",
       "real.core_work": "no",
       "real.experience_fits": "no",
       "real.skills_overlap": "no",
     });
-    const res = evaluate(answers, scaledTech()) as Verdict;
-    expect(res.decision).toBe("hold");
+    expect((evaluate(low, scaledTech()) as Verdict).reason).toBe("not a practice job, and real score 0 below threshold 65");
+    const failed = evaluate(answersList({ "real.not_senior": "no" }), scaledTech()) as Verdict;
+    expect(failed.decision).toBe("skip");
+    expect(failed.reason).toBe("not a practice job, and failed real requirement: not_senior");
   });
 
   it("skips new-grad and AI-training roles whatever the employer", () => {

@@ -115,6 +115,21 @@ export function evaluate(raw: unknown, practiceEvidence?: unknown): Verdict | st
     const real = scorePhase(r, "real", answers);
     items.push(...real.items);
     const practice = assessPractice(practiceEvidence);
+    const { qualifies, reason } = practiceVerdict(practice);
+    // Not one to practise on: whether it is worth keeping for later is the real search's question,
+    // so the real rubric decides between holding and skipping it, not the practice fit.
+    if (!qualifies) {
+      const kept = { score: real.score, threshold: real.threshold, items, practice };
+      if (real.failed.length)
+        return {
+          ...kept,
+          decision: "skip",
+          reason: `not a practice job, and failed real requirement: ${real.failed.map(i => i.key.split(".")[1]).join(", ")}`,
+        };
+      if (real.score < real.threshold)
+        return { ...kept, decision: "skip", reason: `not a practice job, and real score ${real.score} below threshold ${real.threshold}` };
+      return { ...kept, decision: "hold", reason: `not a practice job: ${reason}; real score ${real.score} (threshold ${real.threshold})` };
+    }
     if (current.failed.length)
       return {
         decision: "skip",
@@ -132,16 +147,6 @@ export function evaluate(raw: unknown, practiceEvidence?: unknown): Verdict | st
         items,
         practice,
         reason: `score ${current.score} below threshold ${current.threshold}`,
-      };
-    const { qualifies, reason } = practiceVerdict(practice);
-    if (!qualifies)
-      return {
-        decision: "hold",
-        score: current.score,
-        threshold: current.threshold,
-        items,
-        practice,
-        reason: `not a practice job: ${reason}`,
       };
     return {
       decision: "apply",
