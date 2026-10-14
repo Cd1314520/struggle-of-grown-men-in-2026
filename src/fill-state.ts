@@ -44,7 +44,7 @@ export const recoveryMode = (jobId: number): "verify" | "fill" | null => (isVeri
 
 // ---- transitions. Callers that change job or gate rows alongside wrap both in one db.transaction.
 
-// The worker was told to click final submit once.
+// The worker was told to click final submit.
 export const authorizeSubmit = (jobId: number) => {
   put(jobId, { submitting: true });
 };

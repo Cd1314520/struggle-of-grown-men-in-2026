@@ -117,7 +117,7 @@ export async function parkFill(rt: FillRuntime, session: FillSession, input: Gat
   return "PARKED. This worker has exited.";
 }
 
-// The worker has re-observed the form and asks to click final submit: authorize the one click, or park for review.
+// The worker has re-observed the form and asks to click final submit: authorize the submission, or park for review.
 export async function confirmSubmission(rt: FillRuntime, session: FillSession, summary: string): Promise<string> {
   const jobId = session.jobId;
   const job = getJob(jobId);
@@ -132,7 +132,7 @@ export async function confirmSubmission(rt: FillRuntime, session: FillSession, s
   if (!confirmsSubmit(job) || consumeSubmitApproval(jobId, summary)) {
     authorizeSubmit(jobId);
     logEvent("auto", `Final submission authorized after re-observation: ${summary}`, jobId, "fill");
-    return "APPROVED. Click the final submit button once now. Do not retry it if the result is uncertain.";
+    return "APPROVED. Click the final submit button now and see the application through to the site's confirmation. Submit again when the site says it is not submitted yet; do not when you cannot tell.";
   }
   return parkFill(rt, session, { kind: "confirm_submit", text: summary });
 }
