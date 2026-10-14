@@ -83,7 +83,8 @@ boards:
 
 # Concurrency. prep = assessments at once. fill = applications at once, each in its own Chrome
 # (own display, profile and ports, counted up from the `chrome` values below; live views on
-# vncPort, vncPort+1, ...). Two applications to the same employer never run together.
+# vncPort, vncPort+1, ...). Two applications to the same employer never run together, and a new one waits
+# while another to that employer is parked or resuming.
 concurrency:
   prep: 5
   fill: 5

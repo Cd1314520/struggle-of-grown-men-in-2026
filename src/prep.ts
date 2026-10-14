@@ -4,10 +4,11 @@ import { autoApproval } from "./auto";
 import { config, jobDir, readProfile } from "./config";
 import { appliedLocation, getJob, jobSources, kvGet, logEvent, updateJob, type Job } from "./db";
 import { deferApproval, forgetDeferredApproval } from "./deferred-approvals";
-import { countOne, usedToday } from "./limits";
+import { countOne, uncountOne, usedToday } from "./limits";
 import { placeOf } from "./location";
 import { arg, S, schema, type RunWorker } from "./omp";
 import { employerListing, employersText } from "./employers";
+import { isCapacityError } from "./errors";
 import { assessPractice, EMPLOYER_TYPES } from "./practice";
 import { changedTemplateFiles, MAIN, pageCount, PDF_NAME, stageResume, stockPages, workingPdf } from "./resume";
 import { checklistText, evaluate, type Verdict } from "./rubric";
@@ -168,5 +169,10 @@ export async function prep(job: Job, run: RunWorker) {
     },
   });
   const res = await done;
-  if (!reported && stillPrepping()) updateJob(job.id, to.failed(`prep did not finish: ${res.error ?? "no report"}`));
+  if (reported || !stillPrepping()) return;
+  if (isCapacityError(res.error)) {
+    // The provider stopped it, not the job: back in the queue, and the day's count given back.
+    uncountOne("prep");
+    updateJob(job.id, to.triaged("assessing again: the model provider was at capacity"));
+  } else updateJob(job.id, to.failed(`prep did not finish: ${res.error ?? "no report"}`));
 }

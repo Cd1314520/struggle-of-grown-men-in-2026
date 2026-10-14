@@ -21,11 +21,11 @@ import {
 import { checkAutoApprovedPractice } from "./auto";
 import { forgetDeferredApproval, pumpDeferredApprovals } from "./deferred-approvals";
 import { tickQuestionDigest } from "./digest";
-import { errorMessage } from "./errors";
+import { errorMessage, isCapacityError } from "./errors";
 import { fill } from "./fill";
 import { defaultCheckpoint, endSession, ownsFill, stopFailedFill, type Browser, type FillRuntime, type FillSession } from "./fill-session";
 import { beginAttempt, dropManualLease, endVerification, isRecovering, isSubmitting, isVerifying, lastSlot, manualLeaseGate } from "./fill-state";
-import { countOne, due, usedToday } from "./limits";
+import { backedOff, backOff, clearBackoff, countOne, due, usedToday } from "./limits";
 import { preferUsListings } from "./listings";
 import { locateEmployerPostings, locatePerDay } from "./locate";
 import { runWorker, type RunWorker } from "./omp";
@@ -68,6 +68,53 @@ interface FillStart {
 }
 
 const employerOf = (job: Job) => job.company_key ?? job.company;
+
+// Employers with an application that is started but not finished: parked on a question, a final
+// review or a handoff, or queued to resume its draft. A new application to one of them waits for that
+// one to finish, so one site's quirk or one unanswered question stalls a single application, not every
+// role at the employer.
+function employersWithOpenApplication(): Set<string> {
+  const open = new Set<string>();
+  for (const job of jobsInStatuses(["approved", "filling", ...PARKED]))
+    if (job.status !== "approved" || job.resume_sha || job.fill_checkpoint) open.add(employerOf(job));
+  return open;
+}
+
+// Every worker's result says whether the model provider is taking work.
+function watchCapacity(run: RunWorker): RunWorker {
+  return options => {
+    const handle = run(options);
+    void handle.done.then(result => {
+      if (result.status === "completed" && !result.error) clearBackoff();
+      else if (isCapacityError(result.error)) {
+        const until = backOff();
+        if (until) logEvent("system", `Model provider at capacity (${options.name} worker): no new agent work until ${new Date(until).toISOString()}`);
+      }
+    });
+    return handle;
+  };
+}
+
+// Assessments a capacity refusal ended before the back-off existed were marked failed; they never ran.
+function requeueCapacityFailures() {
+  let requeued = 0;
+  for (const job of jobsByStatus("failed", 100_000))
+    if (job.note?.startsWith("prep did not finish") && isCapacityError(job.note)) {
+      updateJob(job.id, to.triaged("assessing again: the model provider was at capacity"));
+      requeued++;
+    }
+  if (requeued) logEvent("system", `Requeued ${requeued} assessments the model provider refused for capacity`);
+}
+
+// Fill workers a capacity refusal stopped before final submit was authorized resume their drafts.
+function recoverCapacityHandoffs() {
+  for (const job of jobsByStatus("needs_manual")) {
+    const gate = getOpenGate(job.id);
+    if (gate?.kind !== "manual" || !isCapacityError(gate.text) || isSubmitting(job.id) || !readCheckpoint(job.id)) continue;
+    queueRecovery(job.id, gate.id);
+    logEvent("system", "Fill stopped by model provider capacity: resuming the same draft", job.id);
+  }
+}
 
 // Jobs a fill worker could be started for, in the order they should be tried: verification of an
 // ambiguous submit first, then draft recovery, then jobs with a saved draft, then oldest.
@@ -153,7 +200,7 @@ export class Scheduler {
   private readonly manualActivations = new Map<number, number>();
 
   constructor(deps: Partial<SchedulerDeps> = {}) {
-    this.run = deps.runWorker ?? runWorker;
+    this.run = watchCapacity(deps.runWorker ?? runWorker);
     this.rt = { sessions: new Map(), runWorker: this.run, browser: deps.browser ?? chrome };
     this.filling = Array.from({ length: browserCount() }, () => null);
     this.restUntil = this.filling.map((_, slot) => Number(kvGet(`fill.rest.${slot}`) ?? 0));
@@ -269,6 +316,7 @@ export class Scheduler {
 
   // Start whatever work is waiting. Safe to call any time state changes.
   pump() {
+    if (backedOff()) return;
     if (!this.isRunning("locate") && usedToday("locate") < locatePerDay() && jobsByStatus("locating", 1).length) void this.locate();
     if (profileProblems().length === 0) {
       pumpDeferredApprovals();
@@ -280,10 +328,11 @@ export class Scheduler {
     }
     const leases = manualLeases();
     let queue: FillCandidate[] | undefined;
+    let started: Set<string> | undefined;
     for (let slot = 0; slot < this.filling.length; slot++) {
       if (this.filling[slot] || leases.has(slot) || this.manualActivations.has(slot) || Date.now() < Math.max(this.nextFillAt, this.restUntil[slot] ?? 0))
         continue;
-      const next = this.pickFill(slot, (queue ??= fillQueue()), leases);
+      const next = this.pickFill(slot, (queue ??= fillQueue()), leases, (started ??= employersWithOpenApplication()));
       if (next) this.startFill(slot, next);
     }
   }
@@ -303,7 +352,7 @@ export class Scheduler {
   }
 
   // The first queued job that browser `slot` can take now.
-  private pickFill(slot: number, queue: FillCandidate[], leases: Map<number, number>): FillStart | null {
+  private pickFill(slot: number, queue: FillCandidate[], leases: Map<number, number>, started: Set<string>): FillStart | null {
     // Only current workers and explicit human inspection own employer sessions.
     const employers = new Set<string>();
     for (const owner of this.busyOwners(leases)) {
@@ -317,7 +366,7 @@ export class Scheduler {
       const saved = readCheckpoint(candidate.id);
       // Resuming an application already started finishes work the cap was spent on; it does not wait for tomorrow's.
       const isNew = !verify && !saved && !candidate.resume_sha;
-      if (isNew && usedToday("fill") >= config.limits.applyPerDay) continue;
+      if (isNew && (usedToday("fill") >= config.limits.applyPerDay || started.has(employerOf(candidate)))) continue;
       if (saved ? saved.slot !== slot : candidate.resume_sha && lastSlot(candidate.id) !== slot) continue;
       return { job: candidate, checkpoint: saved, isNew };
     }
@@ -359,19 +408,23 @@ export class Scheduler {
     dedupeExisting();
     preferUsListings();
     requeueInterruptedPrep();
+    requeueCapacityFailures();
     recoverInterruptedFills();
+    recoverCapacityHandoffs();
     reviewStandingApprovals();
     const tick = () => {
+      pruneOldChatter();
+      void tickQuestionDigest().catch((err: unknown) => {
+        logEvent("error", `Question digest: ${errorMessage(err)}`);
+      });
+      // Scans end in triage, and tracking is an agent too: both wait out a capacity pause.
+      if (backedOff()) return;
       if (due("last.scan", config.schedule.scanMinutes) && !profileProblems(["targets.md"]).length)
         void this.scan({ discover: due("last.discover", config.schedule.discoverMinutes) });
       if (due("last.track", config.schedule.trackMinutes) && !kvGet("last.track.attempt")?.startsWith(new Date().toISOString().slice(0, 13))) {
         kvSet("last.track.attempt", new Date().toISOString());
         void this.track();
       }
-      pruneOldChatter();
-      void tickQuestionDigest().catch((err: unknown) => {
-        logEvent("error", `Question digest: ${errorMessage(err)}`);
-      });
       this.pump();
     };
     setInterval(tick, 30_000);

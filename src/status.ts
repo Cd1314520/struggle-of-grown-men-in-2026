@@ -88,6 +88,8 @@ export const to = {
   // Back in the fill queue with gate 1 still standing. `pending` is the answered gate the next worker picks up.
   resumeFill: (note: string, pending: string | null = null): JobFields => ({ status: "approved", pending, note }),
   filling: (): JobFields => ({ status: "filling", pending: null }),
+  // An ambiguous submission whose verification worker is queued to run again, with no gate open.
+  verifyAgain: (note: string): JobFields => ({ status: "needs_manual", pending: null, note }),
   // Stopped under an open gate; `pending` describes it.
   parked: (status: ParkedStatus, pending: string): JobFields => ({ status, pending }),
   // The application was sent, by a worker or by hand. The one place submitted_at is written.

@@ -3,9 +3,10 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkAutoApprovedPractice } from "./auto";
 import { browserSlot, config, jobDir, readProfile } from "./config";
+import { isCapacityError } from "./errors";
 import { jobsWithCheckpoint, logEvent, updateJob, type Job } from "./db";
-import { endVerification, isSubmitting, isVerifying, rememberSlot } from "./fill-state";
-import { ownsFill, stopFailedFill, type FillRuntime, type FillSession } from "./fill-session";
+import { endVerification, isSubmitting, isVerifying, queueDraftRecovery, rememberSlot } from "./fill-state";
+import { endSession, ownsFill, stopFailedFill, type FillRuntime, type FillSession } from "./fill-session";
 import { fillTools } from "./fill-tools";
 import * as gmail from "./gmail";
 import { getOpenGate, parkGate, readCheckpoint, recordCheckpoint, resumeContext } from "./questions";
@@ -15,7 +16,7 @@ import { render } from "./worker-tools";
 
 // What the worker is told about where this application stands.
 const VERIFY_BRIEF =
-  "VERIFICATION-ONLY MODE. Final submission was authorized previously, but its outcome is ambiguous. Your ONLY task is to check whether this application was already submitted or is still an unsubmitted draft. Sign in with existing credentials and check the candidate portal/status or confirmation email. NEVER submit, authorize, or click final submit. A checkpoint or form does NOT prove non-submission; require explicit portal status or validation error. Call verify_status to record evidence, or need_manual if inconclusive.";
+  "VERIFICATION-ONLY MODE. Final submission was authorized previously, but its outcome is ambiguous. Your ONLY task is to check whether this application was already submitted or is still an unsubmitted draft. Sign in with existing credentials and check the candidate portal/status or confirmation email. NEVER submit, authorize, or click final submit. A checkpoint or form does NOT prove non-submission; require explicit portal status or validation error. The site saying the attempt is still unfinished IS such evidence: a page still asking for the emailed verification code before the application is submitted, or the form returned with an error saying the CAPTCHA or human check failed. Record that with source 'portal' and status 'not_submitted', quoting the page; a normal fill then finishes the same draft. Call verify_status to record evidence, or need_manual if inconclusive.";
 const RESUME_BRIEF =
   "RESUMING an application. Recover the exact requisition and check if an account or draft exists. A frozen resume or checkpoint is navigation history, NOT proof that an ATS account or draft exists on the site. Previous handoff notes in resumeContext.handoffHistory are historical observations, NOT binding directives; current instructions and live site evidence supersede intermediate assumptions. Look at the earliest/oldest handoff to identify the true root failure. If the earliest failure occurred before account creation (e.g. outage or 302 before registration) and the site confirms no account exists, create credentials with get_account (register: true) and proceed with the first application. If remote signup never finished or this is the first application after pre-draft outage, permit initial registration with previously stored credentials or new account. If identity cannot be verified, call need_manual.";
 const FIRST_BRIEF = "First fill for this application. Open the exact posting and record the draft/requisition identity.";
@@ -143,8 +144,13 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     tools,
   });
   const result = await session.handle.done;
+  // The provider stopped the worker, not the site: the next worker picks up the same draft.
+  const capacity = isCapacityError(result.error);
   if (isVerification) {
-    if (session.active) {
+    if (session.active && capacity && ownsFill(rt, session)) {
+      updateJob(job.id, to.verifyAgain(`verification stopped by model provider capacity; checking again (${result.error})`));
+      endSession(session);
+    } else if (session.active) {
       parkGate(
         job.id,
         {
@@ -156,6 +162,12 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
       endVerification(job.id);
       session.active = false;
     }
+    return;
+  }
+  if (capacity && !isSubmitting(job.id) && ownsFill(rt, session)) {
+    updateJob(job.id, to.resumeFill(`Resuming the same draft: the model provider was at capacity (${result.error})`));
+    queueDraftRecovery(job.id);
+    endSession(session);
     return;
   }
   stopFailedFill(rt, session, `Worker ended without a verified outcome (${result.error ?? result.status}).`);

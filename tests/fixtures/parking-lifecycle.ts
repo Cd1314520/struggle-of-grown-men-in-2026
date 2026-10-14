@@ -78,6 +78,8 @@ interface SimulatedWorker {
   options: WorkerOptions;
   aborted: boolean;
   exit: () => void;
+  // The process ends with an error, as when the model provider refuses the turn.
+  fail: (error: string) => void;
 }
 const workers: SimulatedWorker[] = [];
 // The scheduler is handed a simulated agent runner and browser in place of the real ones.
@@ -88,6 +90,9 @@ const runWorker = (options: WorkerOptions): WorkerHandle => {
     aborted: false,
     exit: () => {
       resolve({ status: "aborted", lastText: "" });
+    },
+    fail: error => {
+      resolve({ status: "error", error, lastText: "" });
     },
   };
   workers.push(worker);
@@ -156,10 +161,10 @@ await mock.module("../../src/digest", () => ({
     /* digest mail is disabled in this fixture */
   },
 }));
-const { db, getJob, updateJob } = await import("../../src/db");
+const { db, getJob, kvSet, updateJob } = await import("../../src/db");
 const { authorizeSubmit, isSubmitting, isVerifying, isRecovering } = await import("../../src/fill-state");
 const core = await import("../../src/questions");
-const { usedToday } = await import("../../src/limits");
+const { backedOff, usedToday } = await import("../../src/limits");
 const { Scheduler } = await import("../../src/scheduler");
 const scheduler = new Scheduler({ runWorker, browser });
 
@@ -400,7 +405,42 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.match(await call(workerAt(1), "ask_cover_letter", args), /My exact application letter\./);
   assert.equal(readFileSync(join(jobDir(1), "cover_letter.txt"), "utf8"), "My exact application letter.\n");
   assert.equal(core.getOpenGate(1), null);
-} else if (["manual", "manual-same-employer", "manual-lost-tab"].includes(scenario ?? "")) {
+} else if (scenario === "capacity") {
+  await call(first, "checkpoint", navigation);
+  first.fail("Codex error event: Codex is at capacity, please try again later (code=turn_rate_limit_exceeded)");
+  await until(() => !scheduler.activeFillSession(1));
+  assert.equal(jobRow(1).status, "approved", "back in the fill queue, not parked for a person");
+  assert.equal(core.getOpenGate(1), null);
+  assert.equal(isRecovering(1), true);
+  assert.equal(backedOff(), true);
+  scheduler.pump();
+  assert.equal(workers.length, 1, "nothing starts while the provider is at capacity");
+  kvSet("backoff.until", "0");
+  scheduler.pump();
+  await until(() => workers.length === 2);
+  assert.equal(workerAt(1).options.jobId, 1, "the same draft resumes");
+  assert.equal(jobRow(1).resume_sha, initialSha);
+  assert.equal(usedToday("fill"), 1, "resuming is not a new application");
+} else if (scenario === "manual-same-employer") {
+  const parking = call(first, "need_manual", { ...navigation, reason: "CAPTCHA/session needs human" });
+  await until(() => core.getOpenGate(1) !== null);
+  const gate = openGate(1);
+  first.exit();
+  await parking;
+  await until(() => !scheduler.activeFillSession(1));
+  scheduler.pump();
+  assert.equal(workers.length, 1, "a new application waits while the employer's started one is unfinished");
+  assert.equal(jobRow(2).status, "approved");
+  scheduler.scheduleRecovery(1, gate.id);
+  await until(() => workers.length === 2);
+  assert.equal(workerAt(1).options.jobId, 1);
+  scheduler.pump();
+  assert.equal(workers.length, 2, "nor while that one resumes its draft");
+  await call(workerAt(1), "report_result", { outcome: "submitted", note: "Submitted after recovery" });
+  workerAt(1).exit();
+  await until(() => workers.length === 3);
+  assert.equal(workerAt(2).options.jobId, 2);
+} else if (["manual", "manual-lost-tab"].includes(scenario ?? "")) {
   if (scenario === "manual-lost-tab") simulatedTabs.delete(navigation.tab_id);
   const parking = call(first, "need_manual", { ...navigation, reason: "CAPTCHA/session needs human" });
   await until(() => core.getOpenGate(1) !== null);

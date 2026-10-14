@@ -2,12 +2,13 @@
 import { feedNames, fetchCompany, fetchDescription, fetchFeed, loadCompanies } from "./ats";
 import { boardMinutes, boardNames, fetchBoard, isBoardUrl } from "./boards";
 import { config, readProfile } from "./config";
-import { insertJob, jobsByStatus, kvSet, logEvent, updateJob } from "./db";
+import { appliedLocation, insertJob, jobsByStatus, kvGet, kvSet, logEvent, updateJob, type Job } from "./db";
 import { employersText } from "./employers";
 import { errorMessage } from "./errors";
 import { due } from "./limits";
 import { arg, S, schema, type RunWorker } from "./omp";
 import { requireProfile } from "./profile";
+import { screenOut } from "./screen";
 import { to } from "./status";
 import { addCompanyTool, render, workDir } from "./worker-tools";
 
@@ -65,10 +66,27 @@ export async function scanSources(run: RunWorker, opts: { discover?: boolean } =
   await triage(run);
 }
 
+// Drops what screenOut rules out. Jobs the candidate picked by hand are left to the model.
+function screen(batch: Job[]): Job[] {
+  const left: Job[] = [];
+  let dropped = 0;
+  for (const job of batch) {
+    const reason = kvGet(`feedback.${job.id}`) ? null : screenOut(job.title, appliedLocation(job));
+    if (reason) {
+      updateJob(job.id, to.skipped(reason));
+      dropped++;
+    } else left.push(job);
+  }
+  if (dropped) logEvent("system", `Triage: screened out ${dropped} of ${batch.length} abroad or senior-level before reading`);
+  return left;
+}
+
 async function triage(run: RunWorker) {
   for (;;) {
-    const batch = jobsByStatus("found", 50);
-    if (!batch.length) return;
+    const found = jobsByStatus("found", 50);
+    if (!found.length) return;
+    const batch = screen(found);
+    if (!batch.length) continue;
     const ids = new Set(batch.map(j => j.id));
     let kept = null as number[] | null; // set from the tool callback
     let held: number[] = [];

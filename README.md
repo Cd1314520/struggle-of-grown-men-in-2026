@@ -26,7 +26,7 @@ Settings live in [`config.yml`](config.yml), with what identifies you or this ma
 
 Side exits: `needs_input` (agent asked a question), `needs_manual` (agent could not get past a CAPTCHA or block), `failed`, `skipped`, `rejected`.
 
-Triage uses the model named in `models.triage`, up to 50 postings per call, in sequential batches until the found backlog is drained.
+Triage first drops, without a model, postings abroad and senior-level titles (senior, staff, principal, lead, manager and above; `src/screen.ts`), then uses the model named in `models.triage`, up to 50 postings per call, in sequential batches until the found backlog is drained.
 
 | Worker | Built-in omp tools | Host tools |
 |---|---|---|
