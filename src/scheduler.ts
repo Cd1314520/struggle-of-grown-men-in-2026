@@ -34,6 +34,7 @@ import { prep } from "./prep";
 import { profileProblems } from "./profile";
 import {
   cancelJobGates,
+  clearQueuedQuestions,
   getOpenGate,
   manualLeases,
   parkGate,
@@ -329,6 +330,7 @@ export class Scheduler {
     this.filling[slot] = session;
     this.rt.sessions.set(job.id, session);
     beginAttempt(job.id);
+    clearQueuedQuestions(job.id);
     if (isNew) countOne("fill");
     this.nextFillAt = Date.now() + min * 1000;
     kvSet("fill.nextAt", String(this.nextFillAt));

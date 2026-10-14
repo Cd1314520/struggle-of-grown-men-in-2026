@@ -294,6 +294,36 @@ export function findStoredAnswer(jobId: number, input: GateInput): string | null
   if (!key.standingAllowed) return null;
   return db.query<{ answer: string }, [string]>("SELECT answer FROM standing_answers WHERE match_key = ?").get(key.matchKey)?.answer ?? null;
 }
+// ---- questions a worker found together. It queues every unknown question on a page and parks once,
+// on the first still unanswered; answering that one opens the next instead of starting a worker for it.
+export function queueQuestion(jobId: number, input: GateInput) {
+  const key = identity(requireJob(jobId), input);
+  db.query("INSERT OR IGNORE INTO queued_questions (job_id, match_key, text, context, options, queued_at) VALUES (?, ?, ?, ?, ?, ?)").run(
+    jobId,
+    key.matchKey,
+    input.text,
+    key.context,
+    JSON.stringify(key.options),
+    now(),
+  );
+}
+// The first queued question that neither this application nor a standing answer has answered yet.
+export function nextQueuedQuestion(jobId: number): GateInput | null {
+  const rows = db
+    .query<{ text: string; context: string; options: string }, [number]>(
+      "SELECT text, context, options FROM queued_questions WHERE job_id = ? ORDER BY queued_at, rowid",
+    )
+    .all(jobId);
+  for (const row of rows) {
+    const input: GateInput = { kind: "question", text: row.text, context: row.context, options: JSON.parse(row.options) as string[] };
+    if (findStoredAnswer(jobId, input) === null) return input;
+  }
+  return null;
+}
+// A worker starting on the application re-observes the form and asks again whatever it still needs.
+export function clearQueuedQuestions(jobId: number) {
+  db.query("DELETE FROM queued_questions WHERE job_id = ?").run(jobId);
+}
 export function listQuestionGroups(): QuestionGroup[] {
   const groups = new Map<string, QuestionGroup>();
   for (const row of db.query<GateRow, []>("SELECT * FROM question_gates WHERE state = 'open' ORDER BY created_at, id").all()) {
@@ -338,6 +368,9 @@ function saveAnswer(row: GateRow, answer: string, scope: AnswerScope, at: string
     at,
     row.id,
   );
+  // Another question found on the same page is still open: ask it now rather than spend a worker finding it again.
+  const next = row.kind === "question" || row.kind === "cover_letter" ? nextQueuedQuestion(row.job_id) : null;
+  if (next) return void park(row.job_id, next, null);
   const value = gate(row);
   value.state = "answered";
   writeJob(row.job_id, to.resumeFill("Answer saved; queued to resume the existing application", payload(value)));

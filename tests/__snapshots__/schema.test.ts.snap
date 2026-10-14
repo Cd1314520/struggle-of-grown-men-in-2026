@@ -1,11 +1,16 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
 exports[`schema migrations produces exactly the recorded schema 1`] = `
-"version 3
+"version 4
 
 CREATE TRIGGER jobs_fill_state_forgotten AFTER DELETE ON jobs
 BEGIN
 DELETE FROM fill_state WHERE job_id = OLD.id;
+END;
+
+CREATE TRIGGER jobs_queued_questions_forgotten AFTER DELETE ON jobs
+BEGIN
+DELETE FROM queued_questions WHERE job_id = OLD.id;
 END;
 
 CREATE TRIGGER jobs_status_changed AFTER UPDATE OF status ON jobs
@@ -131,6 +136,16 @@ scope TEXT CHECK(scope IN ('application','standing')),
 shot INTEGER,
 created_at TEXT NOT NULL,
 answered_at TEXT
+);
+
+CREATE TABLE queued_questions (
+job_id INTEGER NOT NULL,
+match_key TEXT NOT NULL,
+text TEXT NOT NULL,
+context TEXT NOT NULL,
+options TEXT NOT NULL,
+queued_at TEXT NOT NULL,
+PRIMARY KEY (job_id, match_key)
 );
 
 CREATE TABLE standing_answers (

@@ -9,7 +9,7 @@ const prelude = `
 import assert from "node:assert/strict";
 import { db, getJob, kvGet, kvSet, updateJob, onChange } from ${JSON.stringify(join(import.meta.dir, "../src/db.ts"))};
 import { authorizeSubmit, queueVerification, isSubmitting, isVerifying, isRecovering, manualLeaseGate } from ${JSON.stringify(join(import.meta.dir, "../src/fill-state.ts"))};
-import { parkGate, getGate, getOpenGate, findStoredAnswer, answerGate, listQuestionGroups, resumeContext, consumeSubmitApproval, returnManualControl, cancelJobGates, manualLeases, reserveManualLease, releaseManualLease, queueRecovery, resolveAmbiguous, resolveAmbiguityWithEvidence, recordCheckpoint, readCheckpoint } from ${JSON.stringify(join(import.meta.dir, "../src/questions.ts"))};
+import { parkGate, getGate, getOpenGate, findStoredAnswer, answerGate, listQuestionGroups, resumeContext, consumeSubmitApproval, returnManualControl, cancelJobGates, manualLeases, reserveManualLease, releaseManualLease, queueRecovery, resolveAmbiguous, resolveAmbiguityWithEvidence, recordCheckpoint, readCheckpoint, queueQuestion, nextQueuedQuestion, clearQueuedQuestions } from ${JSON.stringify(join(import.meta.dir, "../src/questions.ts"))};
 const prompt = { kind: "question", text: "May we contact your current employer?", context: "Employer contact consent; applies to this hiring process", options: ["Yes", "No"] };
 const checkpoint = { version: 1, slot: 2, tabId: "draft-tab", url: "https://ats.example/draft/123", step: "contact consent", notes: "Inspect the existing draft", resumeSha: "frozen-sha", savedAt: "2026-10-10T01:00:00.000Z" };
 function job(id, company = "Acme, Inc.", title = "Engineer") {
@@ -141,6 +141,35 @@ describe("durable questions", () => {
     assert.equal(getOpenGate(4).id, unstructured.id);
     parkGate(5, prompt, null);
     assert.deepEqual(resumeContext(5).answers, [{ kind: "question", question: prompt.text, context: prompt.context, options: prompt.options, answer: "No" }]);
+  `);
+  });
+
+  it("asks a page's queued questions one after another before requeueing the application once", () => {
+    scenario(`
+    job(1);
+    const second = { ...prompt, text: "Have you ever used a different name?", options: [] };
+    const third = { ...prompt, text: "Are you able to work from our office three days a week?", options: ["Yes", "No"] };
+    queueQuestion(1, prompt); queueQuestion(1, second); queueQuestion(1, third);
+    assert.deepEqual(nextQueuedQuestion(1), prompt);
+    const first = parkGate(1, nextQueuedQuestion(1), checkpoint);
+    assert.deepEqual(answerGate(first.id, "No", "application"), { jobIds: [1] });
+    assert.equal(getJob(1).status, "needs_input");
+    assert.equal(getOpenGate(1).text, second.text);
+    assert.deepEqual(readCheckpoint(1), checkpoint);
+    answerGate(getOpenGate(1).id, "No", "application");
+    assert.equal(getOpenGate(1).text, third.text);
+    answerGate(getOpenGate(1).id, "Yes", "application");
+    assert.equal(getJob(1).status, "approved");
+    assert.equal(getOpenGate(1), null);
+    assert.deepEqual(resumeContext(1).answers.map(a => a.answer), ["No", "No", "Yes"]);
+
+    // A worker that starts again clears the queue: an answer then requeues at once.
+    job(2);
+    queueQuestion(2, prompt); queueQuestion(2, second);
+    clearQueuedQuestions(2);
+    const only = parkGate(2, prompt, checkpoint);
+    answerGate(only.id, "Yes", "application");
+    assert.equal(getJob(2).status, "approved");
   `);
   });
 

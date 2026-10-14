@@ -257,10 +257,32 @@ function fillState(db: Database) {
   ]);
 }
 
+// Questions a fill worker found on one page and could not answer, beyond the one it parked on (see
+// questions.ts). Answering one opens the next as the job's gate; the worker resumes once none is left.
+// A worker that starts again clears them: it re-observes the form and asks again.
+function queuedQuestions(db: Database) {
+  runEach(db, [
+    `CREATE TABLE queued_questions (
+      job_id INTEGER NOT NULL,
+      match_key TEXT NOT NULL,
+      text TEXT NOT NULL,
+      context TEXT NOT NULL,
+      options TEXT NOT NULL,
+      queued_at TEXT NOT NULL,
+      PRIMARY KEY (job_id, match_key)
+    )`,
+    `CREATE TRIGGER jobs_queued_questions_forgotten AFTER DELETE ON jobs
+    BEGIN
+      DELETE FROM queued_questions WHERE job_id = OLD.id;
+    END`,
+  ]);
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: "baseline", up: baseline },
   { version: 2, name: "status history", up: statusHistory },
   { version: 3, name: "fill state", up: fillState },
+  { version: 4, name: "queued questions", up: queuedQuestions },
 ];
 
 // The version this code reads and writes.

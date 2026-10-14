@@ -28,6 +28,7 @@ const TABLES = [
   "question_digest_deliveries",
   "question_digest_notified",
   "question_gates",
+  "queued_questions",
   "standing_answers",
   "status_changes",
   "submit_approvals",

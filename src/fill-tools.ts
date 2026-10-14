@@ -19,7 +19,16 @@ import {
   type FillSession,
 } from "./fill-session";
 import { arg, S, schema, type HostTool, type ToolArgs } from "./omp";
-import { cancelJobGates, evidenceProblem, findStoredAnswer, resolveAmbiguityWithEvidence, type AmbiguityEvidence, type GateInput } from "./questions";
+import {
+  cancelJobGates,
+  evidenceProblem,
+  findStoredAnswer,
+  nextQueuedQuestion,
+  queueQuestion,
+  resolveAmbiguityWithEvidence,
+  type AmbiguityEvidence,
+  type GateInput,
+} from "./questions";
 import { to } from "./status";
 import { gmailTools } from "./worker-tools";
 
@@ -131,13 +140,15 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
       },
     },
     ask_user: {
-      description: "Consult profile first; then get an exact scoped answer or durably park and terminate this worker.",
+      description:
+        "Consult profile first; then get an exact scoped answer, or record the question. Every unknown question on the page goes in one batch: `more: true` records it and returns, the last one without `more` durably parks on all of them and terminates this worker.",
       parameters: schema({
         question: S.str("The form question verbatim, not including options"),
         context: S.str(
           "Verbatim answer-relevant surrounding form/legal text and constraints. Put job IDs, navigation and fill progress in checkpoint fields, not here, unless materially required by this question. Never omit answer-relevant wording.",
         ),
         options: { type: "array", items: { type: "string" }, description: "All current choices verbatim and in order, or [] for free text" },
+        more: { type: "boolean", description: "true when other unknown questions on this page are still to be asked: record this one and keep going" },
         ...navigationFields,
       }),
       handler: async args => {
@@ -147,7 +158,11 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
         const input: GateInput = { kind: "question", text: arg.str(args, "question"), context: arg.str(args, "context"), options };
         const answer = findStoredAnswer(job.id, input);
         if (answer !== null) return `Exact scoped candidate answer: ${answer}`;
-        return parkFill(rt, session, input, await checkpointFrom(rt, session, args));
+        if (!ownsFill(rt, session)) throw new Error("stale fill worker");
+        queueQuestion(job.id, input);
+        if (args["more"] === true)
+          return "Recorded. Leave this field blank, fill everything else you can on this page, and ask its other unknown questions; the last one without `more` parks the application on all of them.";
+        return parkFill(rt, session, nextQueuedQuestion(job.id) ?? input, await checkpointFrom(rt, session, args));
       },
     },
     ask_cover_letter: {
