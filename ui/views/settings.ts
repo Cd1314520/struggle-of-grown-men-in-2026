@@ -76,7 +76,7 @@ export function settingsHtml() {
       <p class="prose auto-status">${autoHtml()} Change it in <code>config.yml</code>.</p>
       <dl class="kv auto-settings" style="margin-top:12px">
         <dt>Practice gate</dt>
-        <dd class="auto-gate">A job counts as practice only when its employer is one your real search rules out: on your practice list, or judged an early-stage startup, a non-tech enterprise, an IT services firm or consultancy, or government, or a tech company at scale with concrete evidence it is behind on agent adoption. Employers on your frontier list, and tech companies at scale that are agent-native or not clearly behind, are held back for the real search. Pay, location and a low real score are not practice proof.</dd>
+        <dd class="auto-gate">A job counts as practice only when its employer is one your real search rules out: on your practice list, or judged an early-stage startup, a non-tech enterprise, an IT services firm or consultancy, or government. Employers on your frontier list, and every tech company at scale (a rejection there follows you across its teams), are held back for the real search. Pay, location and a low real score are not practice proof.</dd>
         <dt>Caps</dt>
         <dd class="auto-caps">${a.perDay} auto-approvals/day (${a.approvedToday} so far today); ${S.applyPerDay} new applications/day (blocked and failed starts count; resuming one already started does not). Daily quotas reset at midnight UTC.</dd>
         <dt>Safeguards</dt>

@@ -99,9 +99,10 @@ export function parsePracticeAssessment(serialized: string | null | undefined): 
  * search rules out and nothing says it is a job to keep for later:
  * 1) the employer is on the practice list in profile/employers.yml; or
  * 2) it is not on the frontier list and was judged an early-stage startup, a non-tech enterprise, an
- *    IT services firm or consultancy, or government; or
- * 3) it is a tech company at scale with concrete evidence that it is behind on agent adoption.
- * A tech company at scale that is agent-native, or not clearly behind, is held for the real search.
+ *    IT services firm or consultancy, or government.
+ * A tech company at scale is always held for the real search, however its agent adoption was judged:
+ * large employers keep one record of a candidate across teams, so a practice rejection from a slow
+ * team counts against a later application to a strong one.
  *
  * Never infers eligibility from a low real score or from the absence of evidence.
  */
@@ -111,13 +112,10 @@ export function practiceVerdict(assessment: PracticeAssessment | null): { qualif
   if (!assessment) return no("no usable practice assessment");
   if (assessment.listed === "frontier") return no("the employer is on your frontier list");
   if (assessment.listed === "practice") return yes("the employer is on your practice list");
-  const { employerType, employerEvidence, agentNative, agentNativeEvidence } = assessment;
+  const { employerType, employerEvidence, agentNative } = assessment;
   if (employerType === null || agentNative === null) return no("the employer has not been judged under the current practice rules");
   if (employerType !== "tech_scaled") return yes(`${EMPLOYER_LABELS[employerType]} (${employerEvidence})`);
-  if (agentNative === "no") return yes(`tech company behind on agent adoption (${agentNativeEvidence})`);
-  return no(
-    `a tech company at scale that is ${agentNative === "yes" ? "agent-native" : "not clearly behind on agent adoption"}, kept for the real search (${employerEvidence})`,
-  );
+  return no(`a tech company at scale, kept for the real search (${employerEvidence})`);
 }
 
 // The qualifying reason, or null if the job does not qualify for practice.

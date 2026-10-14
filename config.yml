@@ -21,7 +21,7 @@ questionDigest:
   timeZone: America/Chicago
 
 # practice = apply only where the employer is one the real search rules out (startup, non-tech, IT services,
-#            government, or a tech company behind on agents); profile/employers.yml settles employers by hand.
+#            government; never a tech company at scale); profile/employers.yml settles employers by hand.
 # real = apply to the roles in the Real phase section of profile/targets.md.
 phase: practice
 

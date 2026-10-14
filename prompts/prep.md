@@ -24,7 +24,7 @@ In the practice phase, also send the `practice` object:
 - `agentNative`: whether the engineering organisation visibly builds and ships with AI agents.
   - `"yes"`: concrete signs such as agents used in daily engineering, agentic products, internal agent platforms, or public engineering writing about it.
   - `"no"`: concrete signs it is behind, such as a posting that introduces AI coding tools as new, a legacy stack with no AI work in sight, or a team described as just starting on AI.
-  - `"unclear"`: anything else. Do not guess: for a tech company at scale, `"unclear"` keeps the job back for the real search, which is the safe outcome.
+  - `"unclear"`: anything else. Do not guess.
 - `agentNativeEvidence`: the fact that decides a yes or no; empty only when unclear.
 
 Call `submit_checklist` with an answer for every checklist id and, in the practice phase, the `practice` object. The orchestrator computes the score from fixed weights and replies either CONTINUE or STOP. On STOP you are finished: do not tailor anything.

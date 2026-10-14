@@ -54,9 +54,9 @@ describe("practice assessment boundaries", () => {
     ["a tech company at scale with unclear agent adoption does not", scaledTech(), false],
     ["an agent-native tech company at scale does not", scaledTech({ agentNative: "yes", agentNativeEvidence: "Ships agents to customers" }), false],
     [
-      "a tech company at scale behind on agents qualifies",
+      "a tech company at scale behind on agents does not: a rejection there follows the candidate across teams",
       scaledTech({ agentNative: "no", agentNativeEvidence: "Posting introduces Copilot as a new pilot" }),
-      true,
+      false,
     ],
     ["the frontier list overrides the judgment", judged({ listed: "frontier" }), false],
     ["the practice list overrides the judgment", scaledTech({ agentNative: "yes", agentNativeEvidence: "Agentic product", listed: "practice" }), true],
@@ -105,15 +105,10 @@ describe("parsePracticeAssessment version gate", () => {
 describe("why a job is or is not one for practice", () => {
   it("names the kind of employer that makes it practice", () => {
     expect(practiceReason(assessPractice(judged()))).toBe("practice: non-tech enterprise (Regional insurer; internal claims tooling)");
-    expect(practiceReason(assessPractice(scaledTech({ agentNative: "no", agentNativeEvidence: "AI tools are a new pilot" })))).toBe(
-      "practice: tech company behind on agent adoption (AI tools are a new pilot)",
-    );
   });
 
   it("says why a tech company at scale is kept back", () => {
-    expect(practiceRefusal(assessPractice(scaledTech()))).toBe(
-      "a tech company at scale that is not clearly behind on agent adoption, kept for the real search (Payments platform, thousands of engineers)",
-    );
+    expect(practiceRefusal(assessPractice(scaledTech()))).toBe("a tech company at scale, kept for the real search (Payments platform, thousands of engineers)");
     expect(practiceRefusal(assessPractice(judged({ listed: "frontier" })))).toBe("the employer is on your frontier list");
   });
 
@@ -353,7 +348,7 @@ describe("applications already under way when the rules asked for a judgment", (
     const stopped = checkAutoApprovedPractice({ approved_by: "auto", practice_assessment: kept, resume_sha: sha });
     expect(stopped.ok).toBe(false);
     expect(stopped.reason).toBe(
-      "auto-approved, but not a practice job: a tech company at scale that is not clearly behind on agent adoption, kept for the real search (Payments platform, thousands of engineers)",
+      "auto-approved, but not a practice job: a tech company at scale, kept for the real search (Payments platform, thousands of engineers)",
     );
   });
 });

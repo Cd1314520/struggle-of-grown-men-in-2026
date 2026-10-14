@@ -175,7 +175,7 @@ if (scenario === "action-guards") {
   assert.equal(statusOf(kept), "held");
   assert.equal(
     getJob(kept)?.note,
-    "needs your review: auto-approved, but not a practice job: a tech company at scale that is not clearly behind on agent adoption, kept for the real search (Autonomy company at scale)",
+    "needs your review: auto-approved, but not a practice job: a tech company at scale, kept for the real search (Autonomy company at scale)",
   );
   assert.equal(getJob(kept)?.approved_by, null);
   // The employer lists as they stand now, over what was stored.
