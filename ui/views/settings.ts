@@ -81,7 +81,7 @@ export function settingsHtml() {
         <dt>Practice gate</dt>
         <dd class="auto-gate">A job counts as practice only on positive evidence that you would decline it: a posted annual base ceiling of at most ${usd(LOW_PAY_MAX_USD)}; or mandatory onsite/hybrid attendance outside the Austin / Houston area, with either a posted ceiling of at most ${usd(ONSITE_PAY_MAX_USD)} or no posted pay and work judged not to be high-end tech. Anything else is held back to protect roles you may want. A low real score or travel is not practice proof.</dd>
         <dt>Caps</dt>
-        <dd class="auto-caps">${a.perDay} auto-approvals/day (${a.approvedToday} so far today); ${S.applyPerDay} application attempts/day (blocked and failed starts count). Daily quotas reset at midnight UTC.</dd>
+        <dd class="auto-caps">${a.perDay} auto-approvals/day (${a.approvedToday} so far today); ${S.applyPerDay} new applications/day (blocked and failed starts count; resuming one already started does not). Daily quotas reset at midnight UTC.</dd>
         <dt>Safeguards</dt>
         <dd class="auto-safeguards">Missing practice proof is held back (not spent); low fit or failed qualifications are skipped. Hand-picked postings${a.allowConcerns ? "" : " and jobs with concerns"} wait in To review.${a.allowConcerns ? " Concerns alone do not block a proven practice role." : ""} Invalid auto-approvals are held before fill. ${confirmNote}</dd>
       </dl>

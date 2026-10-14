@@ -159,6 +159,7 @@ await mock.module("../../src/digest", () => ({
 const { db, getJob, updateJob } = await import("../../src/db");
 const { authorizeSubmit, isSubmitting, isVerifying, isRecovering } = await import("../../src/fill-state");
 const core = await import("../../src/questions");
+const { usedToday } = await import("../../src/limits");
 const { Scheduler } = await import("../../src/scheduler");
 const scheduler = new Scheduler({ runWorker, browser });
 
@@ -363,6 +364,8 @@ if (scenario === "release" || scenario === "quick-answer") {
   if (scenario === "quick-answer") {
     assert.equal(core.respond(1, "100000"), true);
     assert.equal(core.respond(1, "200000"), false);
+    // The cap is spent, but resuming an application already started does not wait for tomorrow's.
+    config.limits.applyPerDay = 1;
     writeFileSync(join(jobDir(1), resume.PDF_NAME), "changed working PDF must not upload");
     writeFileSync(join(jobDir(1), resume.MAIN), "changed working source must not freeze");
   }
@@ -378,6 +381,7 @@ if (scenario === "release" || scenario === "quick-answer") {
     assert.equal(jobRow(1).status, "needs_input");
     assert.equal(scheduler.fillSlot(1), null);
   } else {
+    assert.equal(usedToday("fill"), 1, "a resume is not counted as a new application");
     assert.equal(jobRow(1).resume_sha, initialSha);
     assert.equal(readFileSync(resume.frozenResume(1, initialSha).pdf, "utf8"), "PDF for job 1");
     assert.match(await call(workerAt(1), "ask_user", question), /100000/);

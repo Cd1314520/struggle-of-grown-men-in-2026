@@ -62,7 +62,8 @@ interface FillCandidate {
 interface FillStart {
   job: Job;
   checkpoint: FillCheckpoint | null;
-  isVerification: boolean;
+  // A new application, not one already started: only these count toward limits.applyPerDay.
+  isNew: boolean;
 }
 
 const employerOf = (job: Job) => job.company_key ?? job.company;
@@ -312,21 +313,23 @@ export class Scheduler {
     // Multiple parked/recovering applications may share a persistent profile.
     for (const { job: candidate, verify } of queue) {
       if (this.rt.sessions.has(candidate.id) || employers.has(employerOf(candidate)) || getOpenGate(candidate.id)) continue;
-      if (!verify && usedToday("fill") >= config.limits.applyPerDay) continue;
       const saved = readCheckpoint(candidate.id);
+      // Resuming an application already started finishes work the cap was spent on; it does not wait for tomorrow's.
+      const isNew = !verify && !saved && !candidate.resume_sha;
+      if (isNew && usedToday("fill") >= config.limits.applyPerDay) continue;
       if (saved ? saved.slot !== slot : candidate.resume_sha && lastSlot(candidate.id) !== slot) continue;
-      return { job: candidate, checkpoint: saved, isVerification: verify };
+      return { job: candidate, checkpoint: saved, isNew };
     }
     return null;
   }
 
-  private startFill(slot: number, { job, checkpoint, isVerification }: FillStart) {
+  private startFill(slot: number, { job, checkpoint, isNew }: FillStart) {
     const [min, max] = config.fillPauseSeconds;
     const session: FillSession = { jobId: job.id, slot, active: true, checkpoint: checkpoint ?? defaultCheckpoint(job, slot) };
     this.filling[slot] = session;
     this.rt.sessions.set(job.id, session);
     beginAttempt(job.id);
-    if (!isVerification) countOne("fill");
+    if (isNew) countOne("fill");
     this.nextFillAt = Date.now() + min * 1000;
     kvSet("fill.nextAt", String(this.nextFillAt));
     fill(this.rt, job, session)
