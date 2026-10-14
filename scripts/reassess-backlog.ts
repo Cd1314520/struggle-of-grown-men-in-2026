@@ -60,6 +60,16 @@ function selectAndFilter(db: Database) {
     if (Number.isFinite(id)) feedbackIds.add(id);
   }
 
+  // Jobs the user held by hand stay as they put them, whatever the rules would now say.
+  const heldByUser = new Set(
+    db
+      .query<{ job_id: number }, []>(
+        "SELECT DISTINCT job_id FROM events WHERE kind = 'user' AND job_id IS NOT NULL AND (message = 'hold' OR message LIKE 'hold: %')",
+      )
+      .all()
+      .map(r => r.job_id),
+  );
+
   const allJobs = db
     .query<JobRow, []>(
       `
@@ -99,6 +109,11 @@ function selectAndFilter(db: Database) {
 
     if (j.resume_sha !== null || j.resume_frozen_at !== null) {
       excludedByReason["frozen_resume"] = (excludedByReason["frozen_resume"] ?? 0) + 1;
+      continue;
+    }
+
+    if (j.status === "held" && heldByUser.has(j.id)) {
+      excludedByReason["held_by_user"] = (excludedByReason["held_by_user"] ?? 0) + 1;
       continue;
     }
 

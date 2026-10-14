@@ -107,6 +107,26 @@ describe("Backlog Reassessment Script - Migration Invariants & Edge Cases", () =
     }
   });
 
+  it("leaves jobs the user held by hand where they put them", () => {
+    const { dir, dbPath, db } = setupTestDb();
+    try {
+      for (const id of [1, 2])
+        db.query(
+          `INSERT INTO jobs (id, url, source, company, title, status, score, checklist) VALUES (?, 'http://' || ?, 'board', 'Co', 'Eng', 'held', 75, '[{}]')`,
+        ).run(id, id);
+      db.query(`INSERT INTO events (job_id, kind, message) VALUES (1, 'user', 'hold: keep for the real search')`).run();
+
+      const result = runReassessment({ dbPath, apply: true, silent: true });
+      expect(result.eligibleCount).toBe(1);
+      expect(result.excludedByReason["held_by_user"]).toBe(1);
+      expect(db.query<{ status: string }, [number]>("SELECT status FROM jobs WHERE id = ?").get(1)?.status).toBe("held");
+      expect(db.query<{ status: string }, [number]>("SELECT status FROM jobs WHERE id = ?").get(2)?.status).toBe("triaged");
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("resets approved_by to NULL on requeue", () => {
     const { dir, dbPath, db } = setupTestDb();
     try {
