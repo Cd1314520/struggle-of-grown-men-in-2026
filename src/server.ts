@@ -159,6 +159,13 @@ function jobAction(scheduler: Scheduler, job: Job, action: string, text: string)
       scheduler.abortFill(job.id);
       updateJob(job.id, to.rejected(text || null));
       break;
+    case "hold": // set aside for later, like a job the phase rules hold back; retry releases it
+      if (job.status === "held") return "already held";
+      if (job.status === "rejected") return "rejected; reconsider it first";
+      if (wasSent(job)) return "this application was already sent; it cannot be held";
+      scheduler.abortFill(job.id);
+      updateJob(job.id, to.held(text || "held by you"));
+      break;
     case "redo": // re-run scoring/tailoring with the user's feedback
       if (job.status !== "awaiting_approval") return "the resume can only be changed while the job is awaiting approval";
       // Once an application has started, its resume is frozen and a draft may already carry it: a

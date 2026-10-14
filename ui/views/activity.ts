@@ -8,6 +8,7 @@ import { eventRow, notices, title } from "./common";
 const USER_ACTS: Record<string, (note: string) => string> = {
   approve: () => "You approved it.",
   reject: () => "You rejected it.",
+  hold: () => "You held it for later.",
   retry: () => "You sent it back to the queue.",
   redo: note => `You asked for changes: ${note}`,
   mark_submitted: () => "You marked it as submitted.",

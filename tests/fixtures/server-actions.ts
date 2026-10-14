@@ -1,9 +1,11 @@
 // Drives the HTTP handler in a fresh process with throwaway state. Run with a scenario name; the
 // caller sets AUTO_APPLY_DATA, AUTO_APPLY_PROFILE and AUTO_APPLY_PORT.
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const scenario = process.argv[2];
-const { config } = await import("../../src/config");
+const { config, PROFILE } = await import("../../src/config");
 const { db, getJob, statusHistory, updateJob } = await import("../../src/db");
 const { createHandler } = await import("../../src/server");
 const { Scheduler, reviewStandingApprovals } = await import("../../src/scheduler");
@@ -77,6 +79,19 @@ if (scenario === "action-guards") {
   }
   const rejected = job("rejected");
   assert.equal((await act(rejected, "reject")).status, 409);
+  assert.equal((await act(rejected, "hold")).status, 409);
+  assert.equal((await act(held, "hold")).status, 409);
+  const sent = job("submitted", { submitted_at: "2026-10-01T00:00:00.000Z" });
+  assert.equal((await act(sent, "hold")).status, 409);
+  assert.equal(statusOf(sent), "submitted");
+
+  // hold: sets an unsent job aside, parked ones included; retry releases it.
+  for (const status of ["awaiting_approval", "awaiting_submit", "needs_input"]) {
+    const id = job(status);
+    assert.equal((await act(id, "hold", "not a practice job")).status, 200, `hold from ${status}`);
+    assert.equal(statusOf(id), "held");
+    assert.equal(getJob(id)?.note, "not a practice job");
+  }
 
   // What the guards leave alone.
   const review = job("awaiting_approval");
@@ -123,62 +138,66 @@ if (scenario === "action-guards") {
   assert.equal((await handle(new Request(`${BASE}/api/state`))).status, 200);
 } else if (scenario === "standing-approvals") {
   config.phase = "practice";
-  const away = {
-    version: 1,
-    annualBaseMaxUsd: null as number | null,
-    salaryEvidence: "",
-    mandatoryNonlocalOnsite: "yes",
-    locationEvidence: "Onsite in Denver",
+  const practice = {
+    version: 3,
+    employerType: "non_tech_enterprise",
+    employerEvidence: "Insurer, internal tools",
+    agentNative: "unclear",
+    agentNativeEvidence: "",
+    listed: null,
   };
-  const approved = (assessment: object | null, extra: { approved_by?: string; resume_sha?: string } = {}) => {
+  // Made under the pay and location rules, which never judged the employer.
+  const oldRules = { version: 2, annualBaseMaxUsd: null, salaryEvidence: "", mandatoryNonlocalOnsite: "yes", locationEvidence: "Onsite in Denver" };
+  const approved = (assessment: object | null, extra: { approved_by?: string; resume_sha?: string; company?: string } = {}) => {
     const id = job("approved", extra.resume_sha ? { resume_sha: extra.resume_sha } : {});
-    db.query("UPDATE jobs SET approved_by = ?, practice_assessment = ? WHERE id = ?").run(
+    db.query("UPDATE jobs SET approved_by = ?, practice_assessment = ?, company = ? WHERE id = ?").run(
       extra.approved_by ?? "auto",
       assessment ? JSON.stringify(assessment) : null,
+      extra.company ?? "Acme",
       id,
     );
     return id;
   };
-  const wellPaid = approved({ ...away, annualBaseMaxUsd: 197000, salaryEvidence: "$153k - $197k" });
-  const modest = approved({ ...away, annualBaseMaxUsd: 95000, salaryEvidence: "$95k" });
-  const lowPay = approved({ ...away, annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" });
-  const unposted = approved(away);
-  const ordinary = approved({ ...away, version: 2, highEndTech: "no", highEndTechEvidence: "Insurer, internal tools" });
-  const frontier = approved({ ...away, version: 2, highEndTech: "yes", highEndTechEvidence: "Autonomy company" });
+  const kept = approved({ ...practice, employerType: "tech_scaled", employerEvidence: "Autonomy company at scale" });
+  const ordinary = approved(practice);
+  writeFileSync(join(PROFILE, "employers.yml"), "frontier: [Stripe]\n");
+  const listed = approved(practice, { company: "Stripe, Inc." });
+  const unjudged = approved(oldRules);
   const unreadable = approved(null);
-  const byHand = approved({ ...away, annualBaseMaxUsd: 197000, salaryEvidence: "$197k" }, { approved_by: "user" });
-  const started = approved({ ...away, annualBaseMaxUsd: 197000, salaryEvidence: "$197k" }, { resume_sha: SHA });
+  const byHand = approved(oldRules, { approved_by: "user" });
+  const started = approved(oldRules, { resume_sha: SHA });
 
   reviewStandingApprovals();
 
   // Still qualifies, approved by hand, or already under way: untouched.
-  for (const id of [modest, lowPay, ordinary, byHand, started]) assert.equal(statusOf(id), "approved", `job ${id}`);
+  for (const id of [ordinary, byHand, started]) assert.equal(statusOf(id), "approved", `job ${id}`);
   // No longer a practice job: held for the user, with the reason, and no longer approved.
-  assert.equal(statusOf(wellPaid), "held");
+  assert.equal(statusOf(kept), "held");
   assert.equal(
-    getJob(wellPaid)?.note,
-    "needs your review: auto-approved, but not a practice job: posted base ceiling $197,000 is above the $100,000 practice limit",
+    getJob(kept)?.note,
+    "needs your review: auto-approved, but not a practice job: a tech company at scale that is not clearly behind on agent adoption, kept for the real search (Autonomy company at scale)",
   );
-  assert.equal(getJob(wellPaid)?.approved_by, null);
-  assert.equal(statusOf(frontier), "held");
-  assert.match(getJob(frontier)?.note ?? "", /high-end tech work \(Autonomy company\)/);
+  assert.equal(getJob(kept)?.approved_by, null);
+  // The employer lists as they stand now, over what was stored.
+  assert.equal(statusOf(listed), "held");
+  assert.match(getJob(listed)?.note ?? "", /on your frontier list/);
   assert.equal(statusOf(unreadable), "held");
   // Only lacks the judgment the rules now ask for: back to prep to get it.
-  assert.equal(statusOf(unposted), "triaged");
-  assert.equal(getJob(unposted)?.approved_by, null);
+  assert.equal(statusOf(unjudged), "triaged");
+  assert.equal(getJob(unjudged)?.approved_by, null);
   assert.deepEqual(
-    statusHistory(unposted).map(c => [c.from_status, c.to_status]),
+    statusHistory(unjudged).map(c => [c.from_status, c.to_status]),
     [["approved", "triaged"]],
   );
 
   // Running it again changes nothing.
   reviewStandingApprovals();
-  assert.equal(statusHistory(wellPaid).length, 1);
-  assert.equal(statusOf(modest), "approved");
+  assert.equal(statusHistory(kept).length, 1);
+  assert.equal(statusOf(ordinary), "approved");
 
   // Outside the practice phase the practice rules do not apply.
   config.phase = "real";
-  const real = approved({ ...away, annualBaseMaxUsd: 197000, salaryEvidence: "$197k" });
+  const real = approved({ ...practice, employerType: "tech_scaled" });
   reviewStandingApprovals();
   assert.equal(statusOf(real), "approved");
 } else {

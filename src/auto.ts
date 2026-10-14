@@ -3,10 +3,18 @@
 // Anything the rules do not clear lands in To review exactly as before.
 import { config } from "./config";
 import type { Job } from "./db";
+import { employerListing } from "./employers";
 import { needsJudgment, parsePracticeAssessment, practiceReason, practiceRefusal } from "./practice";
 import { evaluate, type Verdict } from "./rubric";
 
 export const autoApply = () => ({ enabled: false, phases: ["practice"], minScore: 80, allowConcerns: false, perDay: 5, submit: false, ...config.autoApply });
+
+// A stored assessment read against the candidate's employer lists as they stand now: an employer
+// moved onto the frontier list since the job was assessed is no longer spent on practice.
+function storedAssessment(job: { company?: string; practice_assessment?: string | null }) {
+  const assessment = parsePracticeAssessment(job.practice_assessment);
+  return assessment && job.company !== undefined ? { ...assessment, listed: employerListing(job.company) } : assessment;
+}
 
 export interface AutoApprovalResult {
   approve: boolean;
@@ -45,7 +53,7 @@ export function autoApproval(verdict: Verdict, facts: { concerns: string | null;
 export type ReconsiderJob = Pick<
   Job,
   "status" | "approved_by" | "checklist" | "practice_assessment" | "resume_sha" | "resume_frozen_at" | "submitted_at" | "concerns"
-> & { id?: number };
+> & { id?: number; company?: string };
 
 export interface ReconsiderFacts {
   handPicked: boolean;
@@ -86,7 +94,7 @@ export function reconsiderAutoApproval(job: ReconsiderJob, facts: ReconsiderFact
 
   let practice = null;
   if (config.phase === "practice") {
-    practice = parsePracticeAssessment(job.practice_assessment);
+    practice = storedAssessment(job);
     const refusal = practiceRefusal(practice);
     if (refusal) return deny(`not a practice job: ${refusal}`);
   }
@@ -148,7 +156,7 @@ export function reconsiderAutoApproval(job: ReconsiderJob, facts: ReconsiderFact
 }
 
 // Whether the fill worker stops for gate 2 on this job.
-export function confirmsSubmit(job: { approved_by: string | null; practice_assessment?: string | null }): boolean {
+export function confirmsSubmit(job: { approved_by: string | null; company?: string; practice_assessment?: string | null }): boolean {
   // Manual or non-auto approvals preserve global flag semantics.
   if (job.approved_by !== "auto") {
     return config.confirmBeforeSubmit;
@@ -158,7 +166,7 @@ export function confirmsSubmit(job: { approved_by: string | null; practice_asses
   // In practice phase, fail closed if stored practice assessment is missing, malformed,
   // or does not qualify, regardless of config.confirmBeforeSubmit.
   if (config.phase === "practice") {
-    const assessment = parsePracticeAssessment(job.practice_assessment);
+    const assessment = storedAssessment(job);
     if (!assessment || !practiceReason(assessment)) {
       return true;
     }
@@ -174,14 +182,19 @@ export function confirmsSubmit(job: { approved_by: string | null; practice_asses
 }
 
 // Early gate before freeze/navigation: re-check auto-approved practice jobs at fill start.
-export function checkAutoApprovedPractice(job: { approved_by: string | null; practice_assessment?: string | null; resume_sha?: string | null }): {
+export function checkAutoApprovedPractice(job: {
+  approved_by: string | null;
+  company?: string;
+  practice_assessment?: string | null;
+  resume_sha?: string | null;
+}): {
   ok: boolean;
   reason?: string;
 } {
   if (job.approved_by !== "auto" || config.phase !== "practice") {
     return { ok: true };
   }
-  const assessment = parsePracticeAssessment(job.practice_assessment);
+  const assessment = storedAssessment(job);
   const refusal = practiceRefusal(assessment);
   if (!refusal) return { ok: true, reason: practiceReason(assessment) ?? "" };
   // An application already under way cannot be assessed again: its resume is frozen. When all its

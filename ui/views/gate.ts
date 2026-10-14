@@ -64,7 +64,9 @@ export function gateHtml(j: JobDetail) {
     </dl><p class="hint">A local checkpoint does not prove the employer saved the page. The worker verifies the existing draft before continuing. Its former browser may now belong to another application.</p></details></div>`
     : "";
   const first = j.status === "awaiting_approval" ? "" : "first";
-  const reject = `<button class="btn quiet danger" data-act="reject">Reject</button>`;
+  // An application that may already have gone out can only be resolved or rejected, never held.
+  const hold = j.submissionAmbiguous ? "" : `<button class="btn quiet" data-act="hold">Hold for later</button>`;
+  const reject = `${hold}<button class="btn quiet danger" data-act="reject">Reject</button>`;
   const recoveryMode = j.recoveryMode ?? (j.submissionAmbiguous && !p && (j.status === "filling" || j.status === "needs_manual") ? "verify" : null);
   if (recoveryMode === "verify") {
     const isRunning = j.status === "filling";

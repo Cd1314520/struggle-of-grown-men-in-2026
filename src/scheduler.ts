@@ -90,7 +90,7 @@ export function reviewStandingApprovals() {
     if (guard.ok) continue;
     forgetDeferredApproval(job.id);
     if (needsJudgment(parsePracticeAssessment(job.practice_assessment))) {
-      updateJob(job.id, { ...to.triaged("assessing again: the practice rules now ask whether unposted pay hides a job to keep"), approved_by: null });
+      updateJob(job.id, { ...to.triaged("assessing again: the practice rules now judge the employer, not the pay or location"), approved_by: null });
       logEvent("auto", "Auto-approval withdrawn for a fresh assessment under the current practice rules", job.id);
     } else {
       updateJob(job.id, { ...to.held(`needs your review: ${guard.reason ?? "no longer a practice job"}`), approved_by: null });

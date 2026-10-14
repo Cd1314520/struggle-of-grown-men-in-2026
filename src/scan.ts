@@ -3,6 +3,7 @@ import { feedNames, fetchCompany, fetchDescription, fetchFeed, loadCompanies } f
 import { boardMinutes, boardNames, fetchBoard, isBoardUrl } from "./boards";
 import { config, readProfile } from "./config";
 import { insertJob, jobsByStatus, kvSet, logEvent, updateJob } from "./db";
+import { employersText } from "./employers";
 import { errorMessage } from "./errors";
 import { due } from "./limits";
 import { arg, S, schema, type RunWorker } from "./omp";
@@ -78,6 +79,7 @@ async function triage(run: RunWorker) {
       cwd: workDir(),
       maxTime: "10m",
       prompt: render("triage", {
+        employers: employersText(),
         targets: readProfile("targets.md"),
         postings: batch.map(j => `${j.id} | ${j.company} | ${j.title} | ${j.location ?? "?"}`).join("\n"),
       }),
@@ -125,6 +127,7 @@ async function discover(run: RunWorker) {
     cwd: workDir(),
     maxTime: "25m",
     prompt: render("discover", {
+      employers: employersText(),
       targets: readProfile("targets.md"),
       companies:
         loadCompanies()

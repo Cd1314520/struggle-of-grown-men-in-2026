@@ -1,142 +1,107 @@
 // Which jobs are for practice. Pure, with no imports: the web UI bundles this file to show the same
 // verdict (ui/views/practice.ts), so it must stay free of server code.
+//
+// A job is for practice when its employer is one the candidate would turn down for the real search:
+// the work would not be at real scale in an agent-native organisation. Pay and location no longer
+// decide it: the candidate puts experience above both and will relocate.
 
-// A posted ceiling at or under this is a reason to decline on its own.
-export const LOW_PAY_MAX_USD = 80_000;
-// Mandatory attendance somewhere else is a reason to decline too, but it does not make a well-paid
-// role practice: above this ceiling the job is one to keep for later, wherever it is.
-export const ONSITE_PAY_MAX_USD = 100_000;
+// What kind of employer it is. Only `tech_scaled` can be a real target.
+export const EMPLOYER_TYPES = ["tech_scaled", "startup", "non_tech_enterprise", "it_services", "government"] as const;
+export type EmployerType = (typeof EMPLOYER_TYPES)[number];
+export type Judgment = "yes" | "no" | "unclear";
+
+export const EMPLOYER_LABELS: Record<EmployerType, string> = {
+  tech_scaled: "tech company at scale",
+  startup: "early-stage startup",
+  non_tech_enterprise: "non-tech enterprise",
+  it_services: "IT services or consultancy",
+  government: "government or public sector",
+};
+
+// Employers settled by hand in profile/employers.yml. The host fills this in, never the worker.
+export type Listed = "frontier" | "practice";
 
 export interface PracticeEvidence {
-  annualBaseMaxUsd: number | null;
-  salaryEvidence: string;
-  mandatoryNonlocalOnsite: "yes" | "no" | "unclear";
-  locationEvidence: string;
-  // Whether the company and the work are high-end tech: hard distributed or high-scale problems at a
-  // tech or tech-adjacent employer. It stands in for the pay when the posting does not state it.
-  // null: not judged (assessments from before version 2).
-  highEndTech: "yes" | "no" | null;
-  highEndTechEvidence: string;
+  // null: not judged (assessments from before version 3, which judged pay and location instead).
+  employerType: EmployerType | null;
+  employerEvidence: string;
+  // Whether the engineering organisation visibly builds and ships with agents.
+  agentNative: Judgment | null;
+  agentNativeEvidence: string;
+  listed: Listed | null;
 }
 
 export interface PracticeAssessment extends PracticeEvidence {
-  version: 2;
+  version: 3;
 }
 
+const notJudged = (): PracticeAssessment => ({
+  version: 3,
+  employerType: null,
+  employerEvidence: "",
+  agentNative: null,
+  agentNativeEvidence: "",
+  listed: null,
+});
+
+const text = (v: unknown) => (typeof v === "string" ? v.trim() : v === undefined ? "" : null);
+
 /**
- * Validates raw practice evidence and constructs a PracticeAssessment (version: 2).
- * Fails closed (returns null) on invalid types, non-finite/non-positive salary,
- * or empty evidence for positive claims. Model does not supply version.
+ * Validates raw practice evidence and constructs a PracticeAssessment (version: 3).
+ * Fails closed (returns null) on unknown values or a judgment without evidence. The model does not
+ * supply version, and its `listed` is whatever the host wrote over it.
  */
 export function assessPractice(raw: unknown): PracticeAssessment | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return null;
-  }
-
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
 
-  // Validate annualBaseMaxUsd
-  const rawSalary = obj["annualBaseMaxUsd"];
-  let annualBaseMaxUsd: number | null;
-  if (rawSalary === null) {
-    annualBaseMaxUsd = null;
-  } else if (typeof rawSalary === "number") {
-    if (!Number.isFinite(rawSalary) || rawSalary <= 0) {
-      return null;
-    }
-    annualBaseMaxUsd = rawSalary;
-  } else {
-    return null;
-  }
+  const employerType = obj["employerType"];
+  if (!EMPLOYER_TYPES.includes(employerType as EmployerType)) return null;
+  const employerEvidence = text(obj["employerEvidence"]);
+  if (!employerEvidence) return null;
 
-  // Validate salaryEvidence
-  if (typeof obj["salaryEvidence"] !== "string") {
-    return null;
-  }
-  const salaryEvidence = obj["salaryEvidence"].trim();
-  if (annualBaseMaxUsd !== null && salaryEvidence.length === 0) {
-    return null;
-  }
+  const agentNative = obj["agentNative"];
+  if (agentNative !== "yes" && agentNative !== "no" && agentNative !== "unclear") return null;
+  const agentNativeEvidence = text(obj["agentNativeEvidence"]);
+  if (agentNativeEvidence === null) return null;
+  // "Unclear" needs no quote; a yes or no does.
+  if (agentNative !== "unclear" && !agentNativeEvidence) return null;
 
-  // Validate mandatoryNonlocalOnsite
-  const rawLocation = obj["mandatoryNonlocalOnsite"];
-  if (rawLocation !== "yes" && rawLocation !== "no" && rawLocation !== "unclear") {
-    return null;
-  }
-  const mandatoryNonlocalOnsite: "yes" | "no" | "unclear" = rawLocation;
+  const listed = obj["listed"] ?? null;
+  if (listed !== null && listed !== "frontier" && listed !== "practice") return null;
 
-  // Validate locationEvidence
-  if (typeof obj["locationEvidence"] !== "string") {
-    return null;
-  }
-  const locationEvidence = obj["locationEvidence"].trim();
-  if (mandatoryNonlocalOnsite === "yes" && locationEvidence.length === 0) {
-    return null;
-  }
-
-  // Absent in assessments stored before version 2: kept, as "not judged". A worker must supply it (prep.ts).
-  const rawTech = obj["highEndTech"];
-  if (rawTech !== undefined && rawTech !== null && rawTech !== "yes" && rawTech !== "no") {
-    return null;
-  }
-  const highEndTech: "yes" | "no" | null = rawTech ?? null;
-  const rawTechEvidence = obj["highEndTechEvidence"];
-  if (rawTechEvidence !== undefined && typeof rawTechEvidence !== "string") {
-    return null;
-  }
-  const highEndTechEvidence = (rawTechEvidence ?? "").trim();
-  if (highEndTech !== null && highEndTechEvidence.length === 0) {
-    return null;
-  }
-
-  return {
-    version: 2,
-    annualBaseMaxUsd,
-    salaryEvidence,
-    mandatoryNonlocalOnsite,
-    locationEvidence,
-    highEndTech,
-    highEndTechEvidence,
-  };
+  return { version: 3, employerType: employerType as EmployerType, employerEvidence, agentNative, agentNativeEvidence, listed };
 }
 
 /**
  * Parses persisted practice assessment JSON.
- * Fails closed (returns null) on malformed JSON, an unknown version (it must be 1 or 2),
- * or schema mismatch.
+ * Fails closed (returns null) on malformed JSON, an unknown version, or schema mismatch. Versions 1
+ * and 2 judged pay and location, which no longer decide anything: they read as not judged.
  */
 export function parsePracticeAssessment(serialized: string | null | undefined): PracticeAssessment | null {
   if (typeof serialized !== "string") return null;
   const trimmed = serialized.trim();
   if (!trimmed) return null;
-
   try {
     const parsed: unknown = JSON.parse(trimmed);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
-    }
-    // Version 1 lacks the high-end tech judgment and reads as "not judged"; nothing else is known.
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     const version = (parsed as Record<string, unknown>)["version"];
-    if (version !== 1 && version !== 2) {
-      return null;
-    }
-    const assessed = assessPractice(parsed);
-    if (!assessed) return null;
-    return assessed;
+    if (version === 1 || version === 2) return notJudged();
+    if (version !== 3) return null;
+    return assessPractice(parsed);
   } catch {
     return null;
   }
 }
 
-const usd = (amount: number) => `$${Math.round(amount).toLocaleString("en-US")}`;
-
 /**
- * Whether a job is one for practice, and why or why not. It is, when there is evidence the candidate
- * would decline it and nothing says it is a job to keep for later:
- * 1) the posted annual USD base ceiling is at most LOW_PAY_MAX_USD, wherever the job is; or
- * 2) attendance is mandatory outside the commute (mandatoryNonlocalOnsite === 'yes') and either
- *    a) the posted ceiling is at most ONSITE_PAY_MAX_USD, or
- *    b) no ceiling is posted and the company and work were judged not to be high-end tech.
+ * Whether a job is one for practice, and why or why not. It is, when the employer is one the real
+ * search rules out and nothing says it is a job to keep for later:
+ * 1) the employer is on the practice list in profile/employers.yml; or
+ * 2) it is not on the frontier list and was judged an early-stage startup, a non-tech enterprise, an
+ *    IT services firm or consultancy, or government; or
+ * 3) it is a tech company at scale with concrete evidence that it is behind on agent adoption.
+ * A tech company at scale that is agent-native, or not clearly behind, is held for the real search.
  *
  * Never infers eligibility from a low real score or from the absence of evidence.
  */
@@ -144,19 +109,15 @@ export function practiceVerdict(assessment: PracticeAssessment | null): { qualif
   const no = (reason: string) => ({ qualifies: false as const, reason });
   const yes = (reason: string) => ({ qualifies: true as const, reason: `practice: ${reason}` });
   if (!assessment) return no("no usable practice assessment");
-  const { annualBaseMaxUsd: pay, mandatoryNonlocalOnsite: onsite, highEndTech } = assessment;
-  const away = onsite === "yes";
-
-  if (pay !== null) {
-    if (pay <= LOW_PAY_MAX_USD) return yes(`posted base ceiling ${usd(pay)} <= ${usd(LOW_PAY_MAX_USD)}${away ? " and mandatory nonlocal onsite/hybrid" : ""}`);
-    if (pay > ONSITE_PAY_MAX_USD) return no(`posted base ceiling ${usd(pay)} is above the ${usd(ONSITE_PAY_MAX_USD)} practice limit`);
-    if (away) return yes(`mandatory nonlocal onsite/hybrid with posted base ceiling ${usd(pay)} <= ${usd(ONSITE_PAY_MAX_USD)}`);
-    return no(`posted base ceiling ${usd(pay)} is above ${usd(LOW_PAY_MAX_USD)} and attendance elsewhere is not mandatory`);
-  }
-  if (!away) return no("pay is not posted and attendance elsewhere is not mandatory");
-  if (highEndTech === null) return no("pay is not posted and the company and work have not been judged yet");
-  if (highEndTech === "yes") return no(`pay is not posted and this is high-end tech work (${assessment.highEndTechEvidence})`);
-  return yes("mandatory nonlocal onsite/hybrid; pay not posted, and not high-end tech work");
+  if (assessment.listed === "frontier") return no("the employer is on your frontier list");
+  if (assessment.listed === "practice") return yes("the employer is on your practice list");
+  const { employerType, employerEvidence, agentNative, agentNativeEvidence } = assessment;
+  if (employerType === null || agentNative === null) return no("the employer has not been judged under the current practice rules");
+  if (employerType !== "tech_scaled") return yes(`${EMPLOYER_LABELS[employerType]} (${employerEvidence})`);
+  if (agentNative === "no") return yes(`tech company behind on agent adoption (${agentNativeEvidence})`);
+  return no(
+    `a tech company at scale that is ${agentNative === "yes" ? "agent-native" : "not clearly behind on agent adoption"}, kept for the real search (${employerEvidence})`,
+  );
 }
 
 // The qualifying reason, or null if the job does not qualify for practice.
@@ -171,6 +132,5 @@ export function practiceRefusal(assessment: PracticeAssessment | null): string |
   return verdict.qualifies ? null : verdict.reason;
 }
 
-// An assessment that only lacks the judgment a newer rule asks for: assessing the job again settles it.
-export const needsJudgment = (assessment: PracticeAssessment | null) =>
-  !!assessment && assessment.annualBaseMaxUsd === null && assessment.mandatoryNonlocalOnsite === "yes" && assessment.highEndTech === null;
+// An assessment made under older rules, which never judged the employer: assessing the job again settles it.
+export const needsJudgment = (assessment: PracticeAssessment | null) => !!assessment && (assessment.employerType === null || assessment.agentNative === null);

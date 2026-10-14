@@ -7,7 +7,8 @@ import { deferApproval, forgetDeferredApproval } from "./deferred-approvals";
 import { countOne, usedToday } from "./limits";
 import { placeOf } from "./location";
 import { arg, S, schema, type RunWorker } from "./omp";
-import { assessPractice } from "./practice";
+import { employerListing, employersText } from "./employers";
+import { assessPractice, EMPLOYER_TYPES } from "./practice";
 import { changedTemplateFiles, MAIN, pageCount, PDF_NAME, stageResume, stockPages, workingPdf } from "./resume";
 import { checklistText, evaluate, type Verdict } from "./rubric";
 import { to } from "./status";
@@ -49,6 +50,7 @@ export async function prep(job: Job, run: RunWorker) {
         ? `\nThe same role is also listed for: ${[...new Set(elsewhere)].join("; ")}. Those are separate postings. Judge where the job is, its attendance rules and its pay only from the posting above, which is the one the application goes through.\n`
         : "",
       checklist: checklistText(),
+      employers: employersText(),
       notes: readProfile("resume-notes.md"),
       main: MAIN,
       pdfName: PDF_NAME,
@@ -70,25 +72,18 @@ export async function prep(job: Job, run: RunWorker) {
             },
             practice: {
               type: "object",
-              description:
-                "Evidence for practice phase eligibility: annual base ceiling in USD, salary evidence quote, mandatory nonlocal onsite/hybrid requirement, location evidence quote.",
+              description: "Practice phase: what kind of employer this is, and whether its engineering organisation is agent-native.",
               properties: {
-                annualBaseMaxUsd: { type: ["number", "null"], description: "Posted annual base salary ceiling in USD, or null" },
-                salaryEvidence: S.str("Quote of salary evidence from job description, or empty string"),
-                mandatoryNonlocalOnsite: {
+                employerType: { type: "string", enum: [...EMPLOYER_TYPES], description: "What kind of employer this is" },
+                employerEvidence: S.str("One sentence naming what about the company decides its type"),
+                agentNative: {
                   type: "string",
                   enum: ["yes", "no", "unclear"],
-                  description: "Whether mandatory nonlocal onsite/hybrid with no remote/local alternative",
+                  description: "Whether the engineering organisation visibly builds and ships with AI agents",
                 },
-                locationEvidence: S.str("Quote of location evidence from job description"),
-                highEndTech: {
-                  type: "string",
-                  enum: ["yes", "no"],
-                  description: "Whether this is high-end tech: hard distributed or high-scale engineering at a tech or tech-adjacent company",
-                },
-                highEndTechEvidence: S.str("One sentence naming what about the company and the work decides it"),
+                agentNativeEvidence: S.str("The fact that decides a yes or no; empty only if unclear"),
               },
-              required: ["annualBaseMaxUsd", "salaryEvidence", "mandatoryNonlocalOnsite", "locationEvidence", "highEndTech", "highEndTechEvidence"],
+              required: ["employerType", "employerEvidence", "agentNative", "agentNativeEvidence"],
               additionalProperties: false,
             },
           },
@@ -96,18 +91,16 @@ export async function prep(job: Job, run: RunWorker) {
         ),
         handler: args => {
           if (!stillPrepping()) return WITHDRAWN;
-          const answers = args["answers"],
-            practice = args["practice"];
+          const answers = args["answers"];
+          let practice = args["practice"];
           if (config.phase === "practice") {
             if (!practice || typeof practice !== "object" || Array.isArray(practice)) {
-              return "ERROR: 'practice' evidence object is required in the practice phase with annualBaseMaxUsd, salaryEvidence, mandatoryNonlocalOnsite, locationEvidence, highEndTech, and highEndTechEvidence. Call submit_checklist again with practice evidence.";
+              return "ERROR: 'practice' evidence object is required in the practice phase with employerType, employerEvidence, agentNative, and agentNativeEvidence. Call submit_checklist again with practice evidence.";
             }
-            const assessed = assessPractice(practice);
-            // Stored assessments may lack the judgment; a worker's must carry it.
-            if (assessed?.highEndTech === null)
-              return "ERROR: practice.highEndTech must be 'yes' or 'no', with one sentence in highEndTechEvidence saying what about the company and the work decides it. Call submit_checklist again.";
-            if (!assessed) {
-              return "ERROR: malformed practice evidence. Ensure: annualBaseMaxUsd is a positive number or null; salaryEvidence is a non-empty quote when salary is given; mandatoryNonlocalOnsite is 'yes', 'no', or 'unclear'; locationEvidence is a non-empty quote when mandatoryNonlocalOnsite is 'yes'; highEndTech is 'yes' or 'no' with a non-empty highEndTechEvidence. Do not include a version field. Call submit_checklist again.";
+            // Whether the employer is on one of the candidate's lists is the host's to say, not the worker's.
+            practice = { ...practice, listed: employerListing(job.company) };
+            if (!assessPractice(practice)) {
+              return `ERROR: malformed practice evidence. Ensure: employerType is one of ${EMPLOYER_TYPES.join(", ")} with a non-empty employerEvidence; agentNative is 'yes', 'no', or 'unclear', with agentNativeEvidence stating the deciding fact unless unclear. Do not include a version field. Call submit_checklist again.`;
             }
           }
           const result = evaluate(answers, practice);

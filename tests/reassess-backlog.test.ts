@@ -56,7 +56,16 @@ describe("Backlog Reassessment Script - Migration Invariants & Edge Cases", () =
     const { dir, dbPath, db } = setupTestDb();
     try {
       const validPracticeJson = JSON.stringify({
-        version: 1,
+        version: 3,
+        employerType: "it_services",
+        employerEvidence: "Consultancy",
+        agentNative: "unclear",
+        agentNativeEvidence: "",
+        listed: null,
+      });
+      // Made under the pay and location rules, which never judged the employer.
+      const oldRulesJson = JSON.stringify({
+        version: 2,
         annualBaseMaxUsd: 75000,
         salaryEvidence: "$75k base",
         mandatoryNonlocalOnsite: "no",
@@ -73,8 +82,13 @@ describe("Backlog Reassessment Script - Migration Invariants & Edge Cases", () =
         `INSERT INTO jobs (id, url, source, company, title, status, score, checklist, practice_assessment) VALUES (2, 'http://2', 'board', 'Co B', 'Eng 2', 'awaiting_approval', 75, '[{}]', ?)`,
       ).run(validPracticeJson);
 
+      // Job 3: assessed under the old rules (requeued)
+      db.query(
+        `INSERT INTO jobs (id, url, source, company, title, status, score, checklist, practice_assessment) VALUES (3, 'http://3', 'board', 'Co C', 'Eng 3', 'held', 75, '[{}]', ?)`,
+      ).run(oldRulesJson);
+
       const result = runReassessment({ dbPath, apply: false, silent: true });
-      expect(result.eligibleCount).toBe(1);
+      expect(result.eligibleCount).toBe(2);
       expect(result.excludedByReason["already_has_practice_assessment"]).toBe(1);
 
       // Apply
@@ -84,6 +98,7 @@ describe("Backlog Reassessment Script - Migration Invariants & Edge Cases", () =
       const row2 = db.query<{ status: string; practice_assessment: string }, [number]>("SELECT status, practice_assessment FROM jobs WHERE id = ?").get(2);
 
       expect(row1?.status).toBe("triaged");
+      expect(db.query<{ status: string }, [number]>("SELECT status FROM jobs WHERE id = ?").get(3)?.status).toBe("triaged");
       expect(row2?.status).toBe("awaiting_approval");
       expect(row2?.practice_assessment).toBe(validPracticeJson);
     } finally {

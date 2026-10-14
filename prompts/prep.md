@@ -9,25 +9,25 @@ You do not score this job. Answer each statement below about the posting with `y
 
 {{checklist}}
 
-In addition, extract practice evaluation evidence from the posting:
-- `annualBaseMaxUsd`: The posted annual base salary ceiling in USD as a number (e.g. `75000`), or `null`.
-  - A single fixed annual salary counts as the ceiling (e.g. "$75,000/year" -> `75000`).
-  - For salary ranges, extract the highest applicable base salary ceiling even when it exceeds any cutoff (e.g. "$65,000 - $78,000" -> `78000`; "$75,000 - $85,000" -> `85000`). The orchestrator, not you, compares that number with the practice cutoffs.
-  - Must be `null` if: only a starting-at or minimum salary is stated without an explicit ceiling; salary is unknown or not posted; currency is non-USD; or hourly/daily/contract rate without an explicit annual ceiling stated in the posting.
-  - Base salary only: do not guess or include bonus, equity, or total compensation.
-- `salaryEvidence`: Exact quote from the posting showing the salary statement, or empty string `""` if no salary is posted.
-- `mandatoryNonlocalOnsite`: `"yes"`, `"no"`, or `"unclear"`.
-  - `"yes"`: The posting explicitly mandates onsite or hybrid work outside the Houston/Austin, TX commuting area, with NO acceptable remote or Houston-local alternative.
-  - `"no"`: The position is remote, allows remote work, or is located within the Houston/Austin area.
-  - `"unclear"`: The posting does not clearly specify remote eligibility or office location requirements.
-- `locationEvidence`: Exact quote from the posting regarding work location and onsite/remote requirements (must not be empty if mandatoryNonlocalOnsite is "yes").
-- `highEndTech`: `"yes"` or `"no"`. Judge the company and the work, not the pay. It decides the job when no salary ceiling is posted, so always answer it.
-  - `"yes"`: a technology or tech-adjacent company (software, AI, cloud, developer tools, fintech, autonomy, robotics, aerospace or defense tech and the like) **and** work that is hard engineering: distributed systems, high scale or low latency, infrastructure and platforms, ML systems or research, or products whose core is the software. These are roles the candidate wants to keep for later.
-  - `"no"`: everything else. Internal business applications, corporate IT, integrations, reporting, QA, support or consulting delivery; or an employer whose business is not technology (insurance, banking operations, healthcare providers, government, education, manufacturing, retail), even when the role is a real engineering job.
-  - A famous or well-funded tech employer with ordinary-sounding duties is still `"yes"`. An ordinary employer using fashionable words (AI, cloud, scale) for routine work is still `"no"`.
-- `highEndTechEvidence`: one sentence naming what about the company and the work decides it. Never empty.
+Judge the employer as well; statements about the employer and the organisation may draw on what is generally known about the company, not only the posting. The candidate settled some employers by hand, and those lists override your own judgment:
 
-Call `submit_checklist` with an answer for every checklist id and the `practice` evidence object. The orchestrator computes the score from fixed weights and replies either CONTINUE or STOP. On STOP you are finished: do not tailor anything.
+{{employers}}
+
+In the practice phase, also send the `practice` object:
+- `employerType`, one of:
+  - `tech_scaled`: a software or tech-first company past early stage (roughly 300+ people, or a large established product) whose core product is the software. Well-funded, scaled AI-native companies belong here, not under startup.
+  - `startup`: a small or early tech company (roughly under 300 people, or seed to Series B).
+  - `non_tech_enterprise`: the business is not technology (insurance, banking operations, energy, healthcare providers, retail, manufacturing, logistics, media, education), even for an "AI Engineer" role.
+  - `it_services`: IT services, consulting, staffing, outsourcing, systems integrators, agencies.
+  - `government`: government or the public sector, public universities, contractors whose work is for the government.
+- `employerEvidence`: one sentence naming what about the company decides its type. Never empty.
+- `agentNative`: whether the engineering organisation visibly builds and ships with AI agents.
+  - `"yes"`: concrete signs such as agents used in daily engineering, agentic products, internal agent platforms, or public engineering writing about it.
+  - `"no"`: concrete signs it is behind, such as a posting that introduces AI coding tools as new, a legacy stack with no AI work in sight, or a team described as just starting on AI.
+  - `"unclear"`: anything else. Do not guess: for a tech company at scale, `"unclear"` keeps the job back for the real search, which is the safe outcome.
+- `agentNativeEvidence`: the fact that decides a yes or no; empty only when unclear.
+
+Call `submit_checklist` with an answer for every checklist id and, in the practice phase, the `practice` object. The orchestrator computes the score from fixed weights and replies either CONTINUE or STOP. On STOP you are finished: do not tailor anything.
 
 ## Step 2: tailor the resume
 
@@ -47,7 +47,7 @@ Then run `typst compile {{main}} {{pdfName}}` and fix any errors. The output mus
 Call `finish_prep` with:
 
 - `rationale`: at most two short sentences (under 35 words) the candidate reads on a phone: what the role is, then the single strongest reason they fit. No numeric rating, no restating the checklist.
-- `concerns`: at most two short lines, each a real gap or risk about this job the candidate should know before applying (a missing required skill, pay, location, seniority). Empty string if none. Do not flag confirmed low salary or nonlocal onsite requirements as surprise risks or concerns. Never mention the tooling, compilation, PDF warnings or your own process.
+- `concerns`: at most two short lines, each a real gap or risk about this job the candidate should know before applying (a missing required skill, pay, location, seniority). Empty string if none. Do not flag pay or relocation as concerns: the candidate puts experience first and will relocate. Never mention the tooling, compilation, PDF warnings or your own process.
 - `resume_changes`: up to five short bullets, each one change and why. Do not report that it compiled or how many pages it is.
 {{feedback}}
 ## Resume notes (bank of alternative content and guidance)

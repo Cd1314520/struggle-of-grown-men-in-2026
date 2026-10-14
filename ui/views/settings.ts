@@ -1,11 +1,8 @@
 // Settings: the mailbox, the daily digest, adding a posting by hand, and what config.yml currently says.
 import type { DigestStatus } from "../../src/digest";
-import { LOW_PAY_MAX_USD, ONSITE_PAY_MAX_USD } from "../../src/practice";
 import { state, ui } from "../store";
 import { cap, esc, when } from "../util";
 import { notices, title } from "./common";
-
-const usd = (amount: number) => `$${amount.toLocaleString("en-US")}`;
 
 function autoHtml() {
   const S = state(),
@@ -79,7 +76,7 @@ export function settingsHtml() {
       <p class="prose auto-status">${autoHtml()} Change it in <code>config.yml</code>.</p>
       <dl class="kv auto-settings" style="margin-top:12px">
         <dt>Practice gate</dt>
-        <dd class="auto-gate">A job counts as practice only on positive evidence that you would decline it: a posted annual base ceiling of at most ${usd(LOW_PAY_MAX_USD)}; or mandatory onsite/hybrid attendance outside the Austin / Houston area, with either a posted ceiling of at most ${usd(ONSITE_PAY_MAX_USD)} or no posted pay and work judged not to be high-end tech. Anything else is held back to protect roles you may want. A low real score or travel is not practice proof.</dd>
+        <dd class="auto-gate">A job counts as practice only when its employer is one your real search rules out: on your practice list, or judged an early-stage startup, a non-tech enterprise, an IT services firm or consultancy, or government, or a tech company at scale with concrete evidence it is behind on agent adoption. Employers on your frontier list, and tech companies at scale that are agent-native or not clearly behind, are held back for the real search. Pay, location and a low real score are not practice proof.</dd>
         <dt>Caps</dt>
         <dd class="auto-caps">${a.perDay} auto-approvals/day (${a.approvedToday} so far today); ${S.applyPerDay} new applications/day (blocked and failed starts count; resuming one already started does not). Daily quotas reset at midnight UTC.</dd>
         <dt>Safeguards</dt>

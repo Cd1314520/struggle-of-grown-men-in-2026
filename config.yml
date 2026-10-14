@@ -20,7 +20,8 @@ questionDigest:
   time: "09:00"
   timeZone: America/Chicago
 
-# practice = apply only with evidence of a definite decline: base-pay ceiling <= $80k or mandatory nonlocal onsite/hybrid.
+# practice = apply only where the employer is one the real search rules out (startup, non-tech, IT services,
+#            government, or a tech company behind on agents); profile/employers.yml settles employers by hand.
 # real = apply to the roles in the Real phase section of profile/targets.md.
 phase: practice
 
@@ -41,7 +42,7 @@ confirmBeforeSubmit: true
 # Auto apply: let the app give approvals itself. Off = every application waits for you at gate 1.
 # Fresh assessments must prove definite-practice eligibility and clear the interview-fit rubric.
 # Missing/old practice evidence never qualifies. Hand-picked jobs and unclear requirements wait
-# for review; expected low pay/nonlocal work and ordinary concerns do not veto an eligible job.
+# for review; ordinary concerns do not veto an eligible job.
 autoApply:
   enabled: true
   phases: [practice] # phases in which it runs
@@ -71,10 +72,11 @@ feeds:
 # board if it has one, otherwise an agent searching the web) and applied to there. One with no
 # posting of the employer's own is skipped. Neither site permits automated reading, so requests are
 # kept few; a refusal pauses that site for 6 hours. minutes: 0 turns a site off.
+# Nationwide, since relocation is fine; the distance does not narrow a country-wide search.
 boards:
-  location: Houston, TX
+  location: United States
   distance: 25 # miles
-  queries: [software engineer, backend developer, full stack developer]
+  queries: [software engineer, AI engineer, AI agent engineer]
   initialHours: 72 # how far back the first scan looks; later scans ask only for what is new since the last
   linkedin: { minutes: 60, pages: 2 } # newest first, 10 a page, per query: 3 to 6 requests an hour
   indeed: { minutes: 60 } # one request per query, up to 100 postings each
