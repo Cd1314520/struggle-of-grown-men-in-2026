@@ -174,6 +174,10 @@ describe("job queries", () => {
     assert.deepEqual(store.statusCounts(), { approved: 2, found: 1, held: 1, skipped: 1, triaged: 1 });
 
     assert.deepEqual(store.siblingJobs(store.getJob(3)), [{ id: 4, title: "Engineer 4", status: "approved" }]);
+    // Applications to an employer: approved or further along, never triaged, held or skipped ones.
+    assert.equal(store.employerApplications(store.getJob(3)), 1);
+    assert.equal(store.employerApplications(store.getJob(4)), 0);
+    assert.equal(store.employerApplications(store.getJob(6)), 0, "a job without a company key matches no employer");
     assert.deepEqual(ids(store.siblingJobs(store.getJob(4))), [3]);
     // A job without a company key has no siblings, not every other keyless job.
     job(7, { status: "approved", company_key: null });

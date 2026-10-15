@@ -7,7 +7,16 @@ import { employerListing } from "./employers";
 import { needsJudgment, parsePracticeAssessment, practiceReason, practiceRefusal } from "./practice";
 import { evaluate, type Verdict } from "./rubric";
 
-export const autoApply = () => ({ enabled: false, phases: ["practice"], minScore: 80, allowConcerns: false, perDay: 5, submit: false, ...config.autoApply });
+export const autoApply = () => ({
+  enabled: false,
+  phases: ["practice"],
+  minScore: 80,
+  allowConcerns: false,
+  perDay: 5,
+  perEmployer: Infinity,
+  submit: false,
+  ...config.autoApply,
+});
 
 // A stored assessment read against the candidate's employer lists as they stand now: an employer
 // moved onto the frontier list since the job was assessed is no longer spent on practice.
@@ -23,7 +32,10 @@ export interface AutoApprovalResult {
 }
 
 // Whether a freshly prepped job may skip gate 1. `note` says why not, for the job's page.
-export function autoApproval(verdict: Verdict, facts: { concerns: string | null; handPicked: boolean; approvedToday: number }): AutoApprovalResult {
+export function autoApproval(
+  verdict: Verdict,
+  facts: { concerns: string | null; handPicked: boolean; approvedToday: number; employerApplications?: number },
+): AutoApprovalResult {
   const rules = autoApply();
   if (!rules.enabled) return { approve: false, note: null };
   const review = (why: string) => ({ approve: false, note: `needs your review: ${why}` });
@@ -40,6 +52,8 @@ export function autoApproval(verdict: Verdict, facts: { concerns: string | null;
   const unclear = verdict.items.filter(i => i.phase === config.phase && i.required && i.answer === "unclear");
   if (unclear.length) return review(`the posting does not settle: ${unclear.map(i => i.label).join(", ")}`);
   if (!rules.allowConcerns && facts.concerns?.trim()) return review("the assessment raised concerns");
+  const others = facts.employerApplications ?? 0;
+  if (others >= rules.perEmployer) return review(employerCapNote(others));
   if (facts.approvedToday >= rules.perDay) {
     return {
       approve: false,
@@ -50,6 +64,9 @@ export function autoApproval(verdict: Verdict, facts: { concerns: string | null;
   return { approve: true, note: null };
 }
 
+export const employerCapNote = (others: number) =>
+  `already applying to ${others} other role${others === 1 ? "" : "s"} at this employer (auto apply allows ${autoApply().perEmployer})`;
+
 export type ReconsiderJob = Pick<
   Job,
   "status" | "approved_by" | "checklist" | "practice_assessment" | "resume_sha" | "resume_frozen_at" | "submitted_at" | "concerns"
@@ -58,6 +75,7 @@ export type ReconsiderJob = Pick<
 export interface ReconsiderFacts {
   handPicked: boolean;
   approvedToday: number;
+  employerApplications?: number;
   concerns?: string | null;
 }
 
@@ -145,6 +163,7 @@ export function reconsiderAutoApproval(job: ReconsiderJob, facts: ReconsiderFact
     concerns: facts.concerns ?? job.concerns ?? null,
     handPicked: false,
     approvedToday: facts.approvedToday,
+    ...(facts.employerApplications === undefined ? {} : { employerApplications: facts.employerApplications }),
   });
 
   return {

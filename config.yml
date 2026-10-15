@@ -49,6 +49,7 @@ autoApply:
   minScore: 60 # align with the practice interview-fit threshold; score alone never authorizes practice
   allowConcerns: true # expected dealbreakers are the point; hard requirements and evidence gates still apply
   perDay: 100 # auto-approvals a day; limits.applyPerDay still caps new applications
+  perEmployer: 1 # applications per employer, ever (sent or under way); further passing roles there wait for your review
   submit: true # only eligible auto-approved jobs skip gate 2; manual approvals still pause
 
 # Minutes between automatic runs. 0 disables that run (use the UI buttons).

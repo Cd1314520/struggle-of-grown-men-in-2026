@@ -251,6 +251,14 @@ describe("autoApproval and submission safety", () => {
     const capBlockedRes = autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 5 });
     expect(capBlockedRes.approve).toBe(false);
     expect(capBlockedRes.deferred).toBe("daily_cap");
+
+    // One application per employer: a second passing role there waits for review, not for tomorrow.
+    config.autoApply = { ...config.autoApply, perEmployer: 1 };
+    expect(autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 0, employerApplications: 0 }).approve).toBe(true);
+    const employerRes = autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 0, employerApplications: 1 });
+    expect(employerRes.approve).toBe(false);
+    expect(employerRes.deferred).toBeUndefined();
+    expect(employerRes.note).toMatch(/already applying to 1 other role at this employer/);
   });
 
   it("confirmsSubmit fails closed for auto jobs even when confirmBeforeSubmit is false", () => {

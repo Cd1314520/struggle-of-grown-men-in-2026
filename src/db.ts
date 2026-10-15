@@ -146,6 +146,28 @@ export const statusCounts = (): Record<string, number> =>
       .map(r => [r.status, r.n]),
   );
 
+// Statuses that count as an application to the employer: sent, or approved and on its way.
+const APPLICATIONS: readonly Status[] = [
+  "approved",
+  "filling",
+  "needs_input",
+  "awaiting_submit",
+  "needs_manual",
+  "submitted",
+  "interview",
+  "offer",
+  "rejected_by_company",
+];
+// How many applications the job's employer has besides this job, ever.
+export const employerApplications = (job: Pick<Job, "id" | "company_key">) =>
+  job.company_key
+    ? (db
+        .query<{ n: number }, [number, string, string]>(
+          "SELECT count(*) AS n FROM jobs WHERE id != ? AND company_key = ? AND (status IN (SELECT value FROM json_each(?)) OR submitted_at IS NOT NULL)",
+        )
+        .get(job.id, job.company_key, JSON.stringify(APPLICATIONS))?.n ?? 0)
+    : 0;
+
 // Other live jobs at the same employer.
 export const siblingJobs = (job: Pick<Job, "id" | "company_key">, limit = 20) =>
   db

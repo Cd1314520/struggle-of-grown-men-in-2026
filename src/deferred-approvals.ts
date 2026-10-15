@@ -3,7 +3,7 @@
 import { existsSync } from "node:fs";
 import { autoApply, reconsiderAutoApproval } from "./auto";
 import { config } from "./config";
-import { db, getJob, kvDelete, kvEntries, kvGet, kvSet, logEvent, notifyJobChange, updateJob, writeJob } from "./db";
+import { db, employerApplications, getJob, kvDelete, kvEntries, kvGet, kvSet, logEvent, notifyJobChange, updateJob, writeJob } from "./db";
 import { countOne, usedToday } from "./limits";
 import { profileProblems } from "./profile";
 import { workingPdf } from "./resume";
@@ -53,6 +53,7 @@ export function pumpDeferredApprovals() {
       concerns: job.concerns,
       handPicked: false,
       approvedToday: usedToday("auto"),
+      employerApplications: employerApplications(job),
     });
 
     if (result.approved && result.verdict) {

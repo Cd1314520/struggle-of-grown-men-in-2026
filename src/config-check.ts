@@ -85,7 +85,10 @@ const CONFIG = shape(
     publicUrl: orNull(url),
     vncUrl: orNull(url),
     mailbox: orNull(matching(/^\S+@\S+$/, "an email address")),
-    autoApply: shape({}, { enabled: bool, phases: listOf(phase), minScore: amount(), allowConcerns: bool, perDay: count(), submit: bool }),
+    autoApply: shape(
+      {},
+      { enabled: bool, phases: listOf(phase), minScore: amount(), allowConcerns: bool, perDay: count(), perEmployer: count(), submit: bool },
+    ),
     questionDigest: shape({}, { enabled: bool, time: matching(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:mm in 24-hour local time"), timeZone: text }),
     // Each feed and board takes its own extra parameters.
     feeds: shape({}, {}, shape({ minutes: amount() }, {}, anything)),

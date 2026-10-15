@@ -5,6 +5,7 @@ import * as chrome from "./chrome";
 import { browserCount, config } from "./config";
 import {
   dedupeExisting,
+  employerApplications,
   getJob,
   jobsByStatus,
   jobsInStatuses,
@@ -18,7 +19,7 @@ import {
   updateJob,
   type Job,
 } from "./db";
-import { checkAutoApprovedPractice } from "./auto";
+import { autoApply, checkAutoApprovedPractice, employerCapNote } from "./auto";
 import { forgetDeferredApproval, pumpDeferredApprovals } from "./deferred-approvals";
 import { tickQuestionDigest } from "./digest";
 import { errorMessage, isCapacityError } from "./errors";
@@ -152,6 +153,21 @@ export function reviewStandingApprovals() {
       updateJob(job.id, { ...to.held(`needs your review: ${guard.reason ?? "no longer a practice job"}`), approved_by: null });
       logEvent("auto", `Auto-approval withdrawn and job held: ${guard.reason ?? "no longer a practice job"}`, job.id);
     }
+  }
+}
+
+// Auto-approvals not yet started, past the employer's allowance (autoApply.perEmployer), go back to the
+// user. Worst first, so when none has started it is the employer's best-scored role that stays.
+export function trimEmployerApprovals() {
+  const queued = jobsByStatus("approved")
+    .filter(job => job.approved_by === "auto" && !job.resume_sha && !job.fill_checkpoint)
+    .sort((a, b) => (a.score ?? -1) - (b.score ?? -1) || b.id - a.id);
+  for (const job of queued) {
+    const others = employerApplications(job);
+    if (others < autoApply().perEmployer) continue;
+    forgetDeferredApproval(job.id);
+    updateJob(job.id, { ...to.awaitingApproval(`needs your review: ${employerCapNote(others)}`), approved_by: null });
+    logEvent("auto", `Auto-approval withdrawn: ${employerCapNote(others)}`, job.id);
   }
 }
 
@@ -428,6 +444,7 @@ export class Scheduler {
     recoverInterruptedFills();
     recoverCapacityHandoffs();
     reviewStandingApprovals();
+    trimEmployerApprovals();
     const tick = () => {
       pruneOldChatter();
       void tickQuestionDigest().catch((err: unknown) => {

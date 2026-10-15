@@ -2,7 +2,7 @@
 import { existsSync } from "node:fs";
 import { autoApproval } from "./auto";
 import { config, jobDir, readProfile } from "./config";
-import { appliedLocation, getJob, jobSources, kvGet, logEvent, updateJob, type Job } from "./db";
+import { appliedLocation, employerApplications, getJob, jobSources, kvGet, logEvent, updateJob, type Job } from "./db";
 import { deferApproval, forgetDeferredApproval } from "./deferred-approvals";
 import { countOne, uncountOne, usedToday } from "./limits";
 import { placeOf } from "./location";
@@ -146,7 +146,12 @@ export async function prep(job: Job, run: RunWorker) {
           if (maxPages && pages && pages > maxPages)
             return `ERROR: the tailored resume is ${pages} pages; the stock resume is ${maxPages}. Trim it, recompile, then call finish_prep again.`;
           reported = true;
-          const auto = autoApproval(verdict, { concerns, handPicked: !!feedback, approvedToday: usedToday("auto") });
+          const auto = autoApproval(verdict, {
+            concerns,
+            handPicked: !!feedback,
+            approvedToday: usedToday("auto"),
+            employerApplications: employerApplications(job),
+          });
           if (auto.deferred === "daily_cap") {
             deferApproval(job.id);
           } else {

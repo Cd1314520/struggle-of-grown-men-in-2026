@@ -19,7 +19,15 @@ export interface Config {
   phase: "practice" | "real";
   models: Record<"triage" | "discover" | "locate" | "prep" | "fill" | "track", string | null>;
   confirmBeforeSubmit: boolean;
-  autoApply?: { enabled?: boolean; phases?: ("practice" | "real")[]; minScore?: number; allowConcerns?: boolean; perDay?: number; submit?: boolean };
+  autoApply?: {
+    enabled?: boolean;
+    phases?: ("practice" | "real")[];
+    minScore?: number;
+    allowConcerns?: boolean;
+    perDay?: number;
+    perEmployer?: number;
+    submit?: boolean;
+  };
   schedule: { scanMinutes: number; discoverMinutes: number; trackMinutes: number };
   questionDigest?: { enabled: boolean; time: string; timeZone: string };
   feeds?: Record<string, { minutes: number; [param: string]: unknown }>;
