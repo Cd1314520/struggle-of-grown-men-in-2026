@@ -19,7 +19,8 @@ In the practice phase, also send the `practice` object:
   - `startup`: a small or early tech company (roughly under 300 people, or seed to Series B).
   - `non_tech_enterprise`: the business is not technology (insurance, banking operations, energy, healthcare providers, retail, manufacturing, logistics, media, education), even for an "AI Engineer" role.
   - `it_services`: IT services, consulting, staffing, outsourcing, systems integrators, agencies.
-  - `government`: government or the public sector, public universities, contractors whose work is for the government.
+  - `government`: government or the public sector, public universities, and contractors whose business is services to government (staffing, IT and engineering services on government contracts).
+  Who the customers are does not decide the type: a tech company at scale that sells its own software or hardware products to governments or militaries (defense tech, govtech platforms) is `tech_scaled`, and a small one is `startup`.
 - `employerEvidence`: one sentence naming what about the company decides its type. Never empty.
 - `agentNative`: whether the engineering organisation visibly builds and ships with AI agents.
   - `"yes"`: concrete signs such as agents used in daily engineering, agentic products, internal agent platforms, or public engineering writing about it.
