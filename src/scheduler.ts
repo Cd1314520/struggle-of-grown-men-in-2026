@@ -69,6 +69,15 @@ interface FillStart {
 
 const employerOf = (job: Job) => job.company_key ?? job.company;
 
+// New applications are spread over limits.applySpreadHours instead of all starting when the daily
+// cap resets: a posting found mid-day is applied to within the gap, and no site sees a burst.
+// Resumes and verifications are not paced.
+function newApplicationGap(): number {
+  const hours = config.limits.applySpreadHours ?? 24;
+  const cap = config.limits.applyPerDay;
+  return hours > 0 && cap > 0 ? (hours * 3600_000) / cap : 0;
+}
+
 // Employers with an application that is started but not finished: parked on a question, a final
 // review or a handoff, or queued to resume its draft. A new application to one of them waits for that
 // one to finish, so one site's quirk or one unanswered question stalls a single application, not every
@@ -196,6 +205,8 @@ export class Scheduler {
   private readonly filling: (FillSession | null)[];
   private readonly restUntil: number[];
   private nextFillAt: number;
+  // When the next new application may start (see newApplicationGap). Kept across restarts.
+  private nextNewAt: number;
   // Activation is asynchronous; keep ownership even if the gate is resolved meanwhile.
   private readonly manualActivations = new Map<number, number>();
 
@@ -205,6 +216,7 @@ export class Scheduler {
     this.filling = Array.from({ length: browserCount() }, () => null);
     this.restUntil = this.filling.map((_, slot) => Number(kvGet(`fill.rest.${slot}`) ?? 0));
     this.nextFillAt = Number(kvGet("fill.nextAt") ?? 0);
+    this.nextNewAt = Number(kvGet("fill.nextNewAt") ?? 0);
   }
 
   // ---- workers that run one at a time
@@ -366,7 +378,7 @@ export class Scheduler {
       const saved = readCheckpoint(candidate.id);
       // Resuming an application already started finishes work the cap was spent on; it does not wait for tomorrow's.
       const isNew = !verify && !saved && !candidate.resume_sha;
-      if (isNew && (usedToday("fill") >= config.limits.applyPerDay || started.has(employerOf(candidate)))) continue;
+      if (isNew && (usedToday("fill") >= config.limits.applyPerDay || Date.now() < this.nextNewAt || started.has(employerOf(candidate)))) continue;
       if (saved ? saved.slot !== slot : candidate.resume_sha && lastSlot(candidate.id) !== slot) continue;
       return { job: candidate, checkpoint: saved, isNew };
     }
@@ -380,7 +392,11 @@ export class Scheduler {
     this.rt.sessions.set(job.id, session);
     beginAttempt(job.id);
     clearQueuedQuestions(job.id);
-    if (isNew) countOne("fill");
+    if (isNew) {
+      countOne("fill");
+      this.nextNewAt = Date.now() + newApplicationGap();
+      kvSet("fill.nextNewAt", String(this.nextNewAt));
+    }
     this.nextFillAt = Date.now() + min * 1000;
     kvSet("fill.nextAt", String(this.nextFillAt));
     fill(this.rt, job, session)

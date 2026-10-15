@@ -28,7 +28,7 @@ describe("config.yml", () => {
       withChange(c => {
         (c["limits"] ??= {})["applyPerDy"] = 5;
       }),
-    ).toEqual(["limits.applyPerDy: not a setting this app knows (known: prepPerDay, applyPerDay, locatePerDay)"]);
+    ).toEqual(["limits.applyPerDy: not a setting this app knows (known: prepPerDay, applyPerDay, locatePerDay, applySpreadHours)"]);
     expect(
       withChange(c => {
         (c["autoApply"] ??= {})["minscore"] = 70;

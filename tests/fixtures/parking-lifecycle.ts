@@ -20,6 +20,7 @@ config.fillPauseSeconds = [0, 0];
 config.schedule = { scanMinutes: 0, discoverMinutes: 0, trackMinutes: 0 };
 config.autoApply = { enabled: false };
 config.limits.applyPerDay = 50;
+config.limits.applySpreadHours = 0;
 
 if (scenario === "target-isolation") {
   await import("./cdp-isolation"); // Deliberately load real proxy before any worker/browser mocks.
@@ -345,11 +346,23 @@ if (scenario === "recovery-prefix") {
   process.exit(0);
 }
 
+if (scenario === "paced") {
+  config.limits.applySpreadHours = 24;
+  config.limits.applyPerDay = 100;
+}
 addJob(1);
 if (
-  ["release", "manual", "manual-same-employer", "manual-lost-tab", "confirm", "terminal-success", "terminal-closed", "terminal-persistence-failure"].includes(
-    scenario ?? "",
-  )
+  [
+    "paced",
+    "release",
+    "manual",
+    "manual-same-employer",
+    "manual-lost-tab",
+    "confirm",
+    "terminal-success",
+    "terminal-closed",
+    "terminal-persistence-failure",
+  ].includes(scenario ?? "")
 )
   addJob(2);
 if (["manual-same-employer", "terminal-success", "terminal-closed", "terminal-persistence-failure"].includes(scenario ?? ""))
@@ -405,6 +418,15 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.match(await call(workerAt(1), "ask_cover_letter", args), /My exact application letter\./);
   assert.equal(readFileSync(join(jobDir(1), "cover_letter.txt"), "utf8"), "My exact application letter.\n");
   assert.equal(core.getOpenGate(1), null);
+} else if (scenario === "paced") {
+  await call(first, "report_result", { outcome: "submitted", note: "Submitted" });
+  first.exit();
+  await until(() => !scheduler.activeFillSession(1));
+  scheduler.pump();
+  assert.equal(workers.length, 1, "the next new application waits out its share of the day");
+  assert.equal(jobRow(2).status, "approved");
+  const gap = Number(db.query<{ value: string }, []>("SELECT value FROM kv WHERE key = 'fill.nextNewAt'").get()?.value) - Date.now();
+  assert.ok(gap > 14 * 60_000 && gap <= 14.4 * 60_000, `gap ${gap}`);
 } else if (scenario === "capacity") {
   await call(first, "checkpoint", navigation);
   first.fail("Codex error event: Codex is at capacity, please try again later (code=turn_rate_limit_exceeded)");
