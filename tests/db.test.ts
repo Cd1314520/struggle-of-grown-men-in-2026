@@ -169,7 +169,8 @@ describe("job queries", () => {
     const board = store.boardJobs();
     assert.deepEqual(ids(board), [4, 5, 3, 6]);
     assert.deepEqual(Object.keys(board[0]).sort(), ["company", "found_at", "id", "location", "note", "pending", "posted_at", "score", "source", "status", "submitted_at", "title", "updated_at", "url"]);
-    assert.deepEqual(ids(store.boardJobs(2)), [4, 5]);
+    // The limit trims the backlog only: approved jobs are all listed, however old.
+    assert.deepEqual(ids(store.boardJobs(1)), [4, 5, 6]);
     assert.deepEqual(store.statusCounts(), { approved: 2, found: 1, held: 1, skipped: 1, triaged: 1 });
 
     assert.deepEqual(store.siblingJobs(store.getJob(3)), [{ id: 4, title: "Engineer 4", status: "approved" }]);

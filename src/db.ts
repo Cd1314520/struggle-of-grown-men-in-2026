@@ -118,18 +118,25 @@ export type BoardJob = Pick<
   | "updated_at"
   | "submitted_at"
 >;
-// Everything past triage, most recently touched first. Leaves out the long text columns.
+// Lists that grow with every scan: only their most recently touched `limit` reach the board.
+const BACKLOG: readonly Status[] = ["locating", "triaged", "held", "rejected", "failed"];
+// Everything past triage, most recently touched first. Leaves out the long text columns. Jobs under
+// review, in an application or applied to are always all there, however long the backlog behind them.
 export const boardJobs = (limit = 500) =>
   db
-    .query<BoardJob, [string, number]>(
+    .query<BoardJob, [string, string, number]>(
       `
       SELECT id, url, source, company, title, location, status, score, pending, note, found_at, posted_at, updated_at, submitted_at
       FROM jobs
-      WHERE status NOT IN (SELECT value FROM json_each(?))
-      ORDER BY updated_at DESC
-      LIMIT ?`,
+      WHERE status NOT IN (SELECT value FROM json_each(?1)) AND status NOT IN (SELECT value FROM json_each(?2))
+      UNION ALL
+      SELECT * FROM (
+        SELECT id, url, source, company, title, location, status, score, pending, note, found_at, posted_at, updated_at, submitted_at
+        FROM jobs WHERE status IN (SELECT value FROM json_each(?2)) ORDER BY updated_at DESC LIMIT ?3
+      )
+      ORDER BY updated_at DESC`,
     )
-    .all(JSON.stringify(OFF_BOARD), limit);
+    .all(JSON.stringify(OFF_BOARD), JSON.stringify(BACKLOG), limit);
 
 export const statusCounts = (): Record<string, number> =>
   Object.fromEntries(
