@@ -39,9 +39,11 @@ Preconditions:
 ## Gotchas
 
 - "Submitted" is the stand-in worker's report. This proves the app's gate and status handling, not that a form can be filled.
+- Every gate also carries `Hold for later` (`.gate [data-act="hold"]`) beside `Reject`; snapshots list it. The manual hand-off gate also offers `Check status & recover` and `I submitted it`; those paths (recovery, ambiguous submission) are not scripted here.
 - The worker restarts its script from the top on every resume; the question is asked again and answered from storage. Seeing `ask_user` twice in `server.log` is correct.
 - Gate 2 approval is bound to the exact summary text. A proof of "Change something" (`[data-toggle="#chgbox"]`, `#chg`) ends at a second gate 2, not at submitted.
 - Gate screenshots do not exist here: the stand-in browser returns none, so `/api/jobs/<id>/gate.png` is 404 and the gate shows no image.
 - The manual script hands off once per server process. After `ctl.sh reset` it hands off again; after hand-back it does not.
-- One fill runs at a time (one slot). Approving several jobs at once is fine, but they park one after another; wait on each heading separately.
+- One fill runs at a time (one slot). Approving several jobs at once is fine, but they park one after another; wait on each heading separately. The app normally spreads new applications over the day (about 14 minutes apart with `config.yml`'s caps); `serve.ts` turns that off. If a second approved job sits in `approved` ("Queued to apply") while the slot is idle, check that `serve.ts` still sets `config.limits.applySpreadHours = 0`.
+- A real worker can ask several questions on one page and park once, on the first unanswered one (`ask_user` with `more: true`); answering it parks the next instead of resuming. The stand-in asks one question, so this map never drives that; `bun test` covers it.
 - Job 5 after Retry goes to To review, not straight to the fill queue, because its resume PDF exists. That is the app's rule for retry, not a stand-in artifact.

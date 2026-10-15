@@ -18,7 +18,7 @@ auto-apply is a Bun server (`src/server.ts`) with a single-page UI (`ui/`: the p
 | omp agents (model calls) | A **stand-in fill worker** that acts out a fixed script through the real host tools in `src/fill-tools.ts`. Prep, triage, locate and track workers end at once with an error: they need a model. |
 | Chrome over CDP | Stand-in tabs that exist only as ids. No screenshots (`gate.png` is 404). |
 | Network (job boards, LinkedIn/Indeed, Gmail) | Every outbound `fetch` is refused and recorded; `GET /__verify` lists the refused URLs. |
-| `config.local.yml` | Not read (`NODE_ENV=test`). `config.yml` only, then: schedules off, auto apply off, `confirmBeforeSubmit` on, one fill slot, no pause between fills, VNC links off. |
+| `config.local.yml` | Not read (`NODE_ENV=test`). `config.yml` only, then: schedules off, auto apply off, `confirmBeforeSubmit` on, one fill slot, no pause between fills, new applications not spread over the day (`limits.applySpreadHours` 0, so each starts as soon as the slot is free), VNC links off. |
 
 So this instance proves the app's own behaviour between a user action and a recorded state. It does **not** prove anything about scanning, triage, scoring, resume tailoring, real form filling, mail tracking, digest delivery or the Chrome/pacing-proxy layer. Say so when a task touches those; `bun test` covers parts of them.
 
@@ -74,7 +74,7 @@ Stable handles (CSS selectors work as the `target` of `browser_click` / `browser
 | Filter chip | `[role=toolbar][aria-label="Filter"] [data-filter="<key>"]` |
 | Section search (only when a section has more than 8 jobs) | `#q` |
 | Job tabs | `[data-tab="summary"]`, `score`, `resume`, `posting`, `log` |
-| Gate buttons | `.gate [data-act="approve"]`, `reject`, `retry`, `mark_submitted`, `recover`, `confirmed_not_submitted` |
+| Gate buttons | `.gate [data-act="approve"]`, `reject`, `hold` ("Hold for later", on every gate), `retry` (also "Assess now" on a held job), `mark_submitted`, `recover`, `confirmed_not_submitted` |
 | Answer / letter box and its button | `#ans`, then `.gate [data-act="respond"]` |
 | Gate 2 | `.gate [data-act="respond"][data-fixed="approve"]`; changes: `[data-toggle="#chgbox"]`, `#chg` |
 | Change resume (gate 1) | `[data-toggle="#redo"]`, `#fb`, `.gate [data-act="redo"]` |
@@ -84,7 +84,7 @@ Stable handles (CSS selectors work as the `target` of `browser_click` / `browser
 | Profile editor | `[data-pfile="targets.md"]`, `#pmode` (Edit/Cancel), `#ptext`, `#psave` |
 | Toast | `#toast` (role `status`); connection banner `#offline` (role `alert`) |
 
-Keyboard, with focus outside any field: `J`/`K` move, `A` approve, `X` reject, `1`-`5` job tabs, `/` search.
+Keyboard, with focus outside any field: `J`/`K` move, `A` approve, `X` reject, `1`-`5` job tabs, `/` search. `A` and `X` click the gate's buttons, and the gate is part of the Summary tab: on any other tab they do nothing (press `1` first).
 
 Timing: the stand-in worker takes about 0.4 s per tool call, so a gate appears 1-2 s after the action that queues it. Wait on text (`browser_wait_for` with the gate heading), not on a fixed sleep.
 

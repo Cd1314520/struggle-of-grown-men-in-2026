@@ -1,6 +1,6 @@
 # Profile and Settings
 
-Profile lets the user read and edit the files the agents work from (targets, rubric, resume source, answers, personal details, companies). Settings reports how the app is configured: mailbox, digest, phase, auto apply and browsers. Until the profile is filled in, the app says so and refuses to scan.
+Profile lets the user read and edit the files the agents work from (targets, rubric, resume source, resume notes, answers, personal details, companies). Settings reports how the app is configured: mailbox, digest, phase, auto apply and browsers. Until the profile is filled in, the app says so and refuses to scan.
 
 ## Sub-features
 
@@ -8,7 +8,7 @@ Profile lets the user read and edit the files the agents work from (targets, rub
 - `profile-edit` Edit, change, Save writes the file; Ctrl+S saves too.
 - `profile-unsaved` leaving with unsaved edits asks first.
 - `profile-incomplete` empty or placeholder profile files are named in a notice, and Scan is refused until targets are filled in.
-- `settings-report` Settings shows mailbox status, digest state, phase and auto-apply rules from the running configuration.
+- `settings-report` Settings shows mailbox status, digest state, phase, and auto-apply status, practice gate, caps and safeguards from the running configuration. (Its Add a posting section is [add-posting](./add-posting.md).)
 
 ## How to get to it (user POV)
 
@@ -22,12 +22,13 @@ Preconditions:
 
 - Fresh seed, doctor passes. The seeded profile directory is empty: `curl -s $B/api/state` has `profileProblems` naming `targets.md`, `rubric.yml`, `personal.yml` and `answers.md`.
 
-- **Scan is refused.** `browser_navigate $B/#activity`, `browser_click` `[data-run="scan"]`. Toast `fill in profile/targets.md first`. `curl -s $B/__verify` still has `"refusedOutbound":[]`.
-- **Open a profile file.** `browser_navigate $B/#profile`, `browser_click` `[data-pfile="targets.md"]`. The file is empty; an `Edit` button (`#pmode`) and the file name are shown.
+- **Scan is refused.** `browser_navigate $B/#activity`, `browser_click` `.actions [data-run="scan"]` (at desktop width the nav's "Scan now" is a second `[data-run="scan"]`). Toast `fill in profile/targets.md first`. `curl -s $B/__verify` still has `"refusedOutbound":[]`.
+- **Open a profile file.** `browser_navigate $B/#profile`: the notice `Setup isn't finished: targets.md, rubric.yml, personal.yml, answers.md. …` and seven tabs, Targets, Rubric, Resume, Resume notes, Answers, Personal, Companies. `browser_click` `[data-pfile="targets.md"]`. The file is empty; an `Edit` button (`#pmode`) and the file name are shown.
 - **Edit and save.** `browser_click` `#pmode`, `browser_type` `#ptext` with `Backend roles, remote or Houston.`, `browser_click` `#psave`. Toast `Saved targets.md`; the rendered view returns.
 - **Confirm.** `cat $VERIFY_HOME/state/profile/targets.md` prints the text; `curl -s $B/api/profile/targets.md` returns it; `profileProblems` in `/api/state` no longer names `targets.md`; Activity (`#activity`) lists `edited profile/targets.md`.
 - **Non-Markdown file.** `browser_click` `[data-pfile="personal.yml"]`: opens directly in the editor (`#ptext`) with `Save`, no rendered view.
-- **Settings.** `browser_navigate $B/#settings`, `browser_snapshot`. Mailbox `Not connected`; `[data-digest-state]` reads `not_connected` and `#digest-send` is disabled; Phase `Practice`; `#settings-auto-apply` describes auto apply as off; no "Open browser" buttons.
+- **Unsaved edits.** Type into `#ptext` (`slowly: true`, so input events fire), then `browser_click` `[data-pfile="targets.md"]`: a `confirm` dialog `Discard your unsaved changes to personal.yml?`. `browser_handle_dialog` with `accept: true`.
+- **Settings.** `browser_navigate $B/#settings`, `browser_snapshot`. Mailbox `Not connected`; `[data-digest-state]` reads `not_connected` and `#digest-send` is disabled; Phase `Practice`; `#settings-auto-apply` reads `Off. Every application waits for your approval in To review.`, and its Caps line `5 auto-approvals/day (0 so far today); 100 new applications/day …` (the 5 is the code default, since `serve.ts` replaces `autoApply`); no "Open browser" buttons.
 - **Proof.** Snapshot of the profile tab before and after saving, the file on disk, `profileProblems` before and after, a snapshot of Settings, and `/__verify`.
 
 ## Gotchas

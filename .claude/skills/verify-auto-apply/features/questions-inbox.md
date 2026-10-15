@@ -30,7 +30,7 @@ Preconditions:
 
 ## Gotchas
 
-- Standing answers ("Explicitly approve a standing answer") appear only when a group allows them and raise a browser `confirm()` dialog; handle it with `browser_handle_dialog`. The seeded question's scope label is "This application only"; check `standingAllowed` in `/api/questions` before claiming the standing path was driven.
+- The seeded salary question allows a standing answer (`standingAllowed` true in `/api/questions`): its form offers a second radio, "Explicitly approve a standing answer", limited to Verify Co B and the exact prompt. Choosing it raises a browser `confirm()` dialog; handle it with `browser_handle_dialog`. The cover-letter group never allows one (scope "This application only"). The recipe above drives the application-only path; say so if the standing path was not driven.
 - Each seeded company is distinct, so the seed never produces a group with two applications. Grouping across applications is covered by `tests/questions.test.ts`, not by this map.
 - The Settings digest shows `Delivery state: not_connected` and a disabled "Send digest now": no mailbox is connected here. Digest delivery is not verifiable.
 - Answering from the job page (`#ans`) and from the inbox are two entry points to the same gate; a proof of one does not cover the other.
