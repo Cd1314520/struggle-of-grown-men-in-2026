@@ -1,11 +1,8 @@
 node_modules/
 data/
-profile/gmail-client.json
 
-# Personal details and answers used to fill forms, and the resume itself
-profile/personal.yml
-profile/answers.md
-profile/resume-notes.md
+# The owner's profile (targets, rubric, answers, personal details, employers, Gmail client) and the resume itself
+profile/
 basic-resume/main.typ
 basic-resume/*.pdf
 
