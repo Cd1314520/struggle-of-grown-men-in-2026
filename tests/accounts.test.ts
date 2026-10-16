@@ -83,7 +83,7 @@ describe("account resolution behavioral semantics", () => {
     const created = JSON.parse(await resolveAccount("acrisure.wd5.myworkdayjobs.com", "app@example.com", true));
     assert.equal(created.existing, false);
     assert.equal(created.email, "app@example.com");
-    assert.ok(typeof created.password === "string" && created.password.length >= 12);
+    assert.ok(typeof created.password === "string" && created.password.length === 14);
 
     // Verify stored in DB under normalized key
     const row = db.query("SELECT email, password FROM accounts WHERE domain = ?").get("acrisure.wd5.myworkdayjobs.com");

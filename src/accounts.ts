@@ -131,8 +131,8 @@ export function resolveAccount(domain: string, mailbox: string, allowCreate: boo
     });
   }
 
-  // 4. Generate compliant password and persist
-  const password = `${randomBytes(12).toString("base64url")}aA1!`;
+  // 4. Generate a compliant 14-character password and persist. Some portals (SAP SuccessFactors) refuse longer ones.
+  const password = `${randomBytes(7).toString("base64url")}aA1!`;
   db.query("INSERT INTO accounts (domain, email, password) VALUES (?, ?, ?)").run(key, cleanMailbox, password);
   return JSON.stringify({ email: cleanMailbox, password, existing: false });
 }
