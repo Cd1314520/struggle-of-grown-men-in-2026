@@ -445,11 +445,18 @@ export class Scheduler {
     recoverCapacityHandoffs();
     reviewStandingApprovals();
     trimEmployerApprovals();
+    // A digest that keeps failing the same way is logged once, not once a tick; Settings shows its last error.
+    let digestError: string | null = null;
     const tick = () => {
       pruneOldChatter();
-      void tickQuestionDigest().catch((err: unknown) => {
-        logEvent("error", `Question digest: ${errorMessage(err)}`);
-      });
+      void tickQuestionDigest().then(
+        () => (digestError = null),
+        (err: unknown) => {
+          const msg = `Question digest: ${errorMessage(err)}`;
+          if (msg !== digestError) logEvent("error", msg);
+          digestError = msg;
+        },
+      );
       // Scans end in triage, and tracking is an agent too: both wait out a capacity pause.
       if (backedOff()) return;
       if (due("last.scan", config.schedule.scanMinutes) && !profileProblems(["targets.md"]).length)

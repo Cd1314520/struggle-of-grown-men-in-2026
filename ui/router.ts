@@ -4,7 +4,7 @@ import { ordered } from "./layout";
 import { render } from "./render";
 import { hasState, setState, ui } from "./store";
 import { blur, shell, wide } from "./util";
-import { isView, VIEWS, type ViewKey } from "./views";
+import { ARCHIVE, isView, VIEWS, type ViewKey } from "./views";
 
 export const go = (v: ViewKey, id?: number | null, replace?: boolean) => {
   const h = `#${v}${id ? `/${id}` : ""}`;
@@ -22,12 +22,14 @@ export async function route() {
     nextJob = Number(id) || null;
   if (nextView !== ui.view) {
     ui.tab = "summary";
+    if (ui.view === "settings") ui.addResult = null; // the last add's result belongs to that visit
     blur();
   }
   ui.view = nextView;
   if (nextJob !== ui.selected && !ui.profileDirty) blur();
   ui.selected = nextJob;
-  if (!nextJob && hasState() && wide() && VIEWS[ui.view].statuses) {
+  // Desktop opens the first job of a queue; the archives wait to be asked.
+  if (!nextJob && hasState() && wide() && VIEWS[ui.view].statuses && !ARCHIVE.includes(ui.view)) {
     const first = ordered()[0];
     if (first) {
       go(ui.view, first.id, true);

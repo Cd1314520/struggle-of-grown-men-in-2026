@@ -20,12 +20,12 @@ Preconditions:
 - Fresh seed, doctor passes. `curl -s $B/api/state` counts nine jobs and none `triaged`.
 
 - **Open Settings.** `browser_navigate $B/#settings`. A section labelled `Add a posting` with textbox `Job URL` (`#addurl`) and button `Add` (`#addbtn`).
-- **Add.** `browser_type` `#addurl` with `https://ats.verify.invalid/question/new-1`, `browser_click` `#addbtn`. Toast `Added. It will be assessed shortly.`; the field empties.
+- **Add.** `browser_type` `#addurl` with `https://ats.verify.invalid/question/new-1`, `browser_click` `#addbtn`. Toast `Added. It will be assessed shortly.`; the field empties and `#add-result` reads `Added: <company> — <title>. It will be assessed shortly.` with a link to the job.
 - **Confirm.** `browser_navigate $B/#progress`: a row `(untitled posting)` for company `ats.verify.invalid`; opening it shows gate heading `Not assessed yet`. `curl -s $B/api/jobs/10`: `"status":"triaged"`, `"source":"manual"`, `url` as typed.
 - **Enter key.** Type `https://other.verify.invalid/straight/new-2` into `#addurl` with `submit: true`. Same toast; job 11 exists with company `other.verify.invalid`.
-- **Same role, other URL.** Type `https://ats.verify.invalid/straight/new-2` with `submit: true`. Toast `already known`; no new job, and `curl -s $B/api/jobs/10` lists that URL under `sources`.
-- **Duplicate.** Add `https://ats.verify.invalid/question/new-1` again. Toast `already known`; `curl -s $B/api/state` still counts two `triaged`.
-- **Invalid.** Type `not a url`, click `#addbtn`. Toast `a posting URL is required`; nothing added.
+- **Same role, other URL.** Type `https://ats.verify.invalid/straight/new-2` with `submit: true`. Toast `already known`; `#add-result` reads `Already tracked: <company> — <title>.` (linked) and the URL stays in the box; the route answers 409 `{"error":"already known","id":<job>}`. No new job, and `curl -s $B/api/jobs/10` lists that URL under `sources`.
+- **Duplicate.** Add `https://ats.verify.invalid/question/new-1` again. Toast `already known` and `#add-result` names the job; `curl -s $B/api/state` still counts two `triaged`.
+- **Invalid.** Type `not a url`, click `#addbtn`. Toast `a posting URL is required`; `#add-result` reads `A posting URL is required.` in red; nothing added.
 - **Proof.** Screenshot of Settings before and after, the toast text for each case, `curl -s $B/api/jobs/10`, and the `counts` object from `/api/state` before and after.
 
 ## Gotchas

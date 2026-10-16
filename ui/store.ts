@@ -27,6 +27,11 @@ interface Ui {
   profileDirty: boolean; // the editor holds changes that have not been saved
   digestBusy: boolean;
   digestResult: string;
+  addResult: { ok: boolean; html: string } | null; // what the last Add a posting did, shown under the box
+  addDraft: string;
+  openHow: Set<string>; // disclosures the owner opened (Settings' "How this works", the job pane's folds), kept open across repaints
+  openQuestion: string | null; // the Questions group shown open; null means the oldest, "" means none
+  questionDrafts: Map<string, string>; // typed answers by group, kept while another group is open
 }
 export const ui: Ui = {
   view: "review",
@@ -42,6 +47,11 @@ export const ui: Ui = {
   profileDirty: false,
   digestBusy: false,
   digestResult: "",
+  addResult: null,
+  addDraft: "",
+  openHow: new Set(),
+  openQuestion: null,
+  questionDrafts: new Map(),
 };
 try {
   ui.filt = JSON.parse(localStorage.getItem("filters") ?? "{}") as Ui["filt"];

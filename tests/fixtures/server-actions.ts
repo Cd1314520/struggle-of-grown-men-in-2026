@@ -136,6 +136,25 @@ if (scenario === "action-guards") {
   await allowed({ origin: "http://localhost:9999", "sec-fetch-site": "same-origin" }, "http://localhost:9999");
   await allowed({});
   assert.equal((await handle(new Request(`${BASE}/api/state`))).status, 200);
+} else if (scenario === "add-posting") {
+  const add = async (url: string) => {
+    const res = await handle(
+      new Request(`${BASE}/api/jobs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) }),
+    );
+    return { status: res.status, body: (await res.json()) as { id?: number | null; error?: string } };
+  };
+  const first = await add("https://boards.example/acme/123?utm_source=x");
+  assert.equal(first.status, 200);
+  assert.equal(typeof first.body.id, "number");
+  // The same posting again, under other tracking parameters: refused, naming the job it already is.
+  const again = await add("https://boards.example/acme/123?utm_campaign=y");
+  assert.equal(again.status, 409);
+  assert.deepEqual(again.body, { error: "already known", id: first.body.id });
+} else if (scenario === "profile-poll") {
+  // The profile has no rubric here. Every state poll checks it; the error is logged once, not per poll.
+  const errors = () => db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events WHERE kind = 'error'").get()?.n ?? 0;
+  for (let i = 0; i < 3; i++) assert.equal((await handle(new Request(`${BASE}/api/state`))).status, 200);
+  assert.equal(errors(), 1);
 } else if (scenario === "standing-approvals") {
   config.phase = "practice";
   const practice = {

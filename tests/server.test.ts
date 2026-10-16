@@ -31,7 +31,12 @@ describe("auto-approvals waiting for a browser", () => {
   it("are held to the practice rules as they stand at start", () => runScenario("standing-approvals"));
 });
 
+describe("state polls", () => {
+  it("log a broken profile file once, not once per poll", () => runScenario("profile-poll"));
+});
+
 describe("job actions over HTTP", () => {
   it("refuses an action the job's status does not allow, and changes nothing", () => runScenario("action-guards"));
+  it("refuses a posting it already has, naming the job it matched", () => runScenario("add-posting"));
   it("refuses requests that come from another site or arrive under another host name", () => runScenario("other-sites"));
 });

@@ -8,6 +8,7 @@ export const SENT: readonly Status[] = ["submitted", "interview", "offer"];
 export type ViewKey = "review" | "progress" | "questions" | "applied" | "held" | "rejected" | "activity" | "profile" | "settings" | "more";
 interface View {
   label: string;
+  short?: string; // the label in the phone's tab bar, where five tabs share 360px
   group?: string; // heading above it in the sidebar
   primary?: boolean; // gets its own tab on a phone; the rest sit under "More"
   hidden?: boolean;
@@ -15,22 +16,24 @@ interface View {
   empty?: string;
 }
 export const VIEWS: Record<ViewKey, View> = {
-  review: { label: "To review", group: "Applications", primary: true, statuses: ["awaiting_approval"], empty: "Nothing to review." },
+  review: { label: "To review", short: "Review", group: "Applications", primary: true, statuses: ["awaiting_approval"], empty: "Nothing to review." },
   progress: {
     label: "In progress",
+    short: "Progress",
     primary: true,
     statuses: [...STUCK, "filling", "approved", "prepping", "locating", "triaged"],
     empty: "Nothing is being worked on.",
   },
   questions: { label: "Questions", primary: true },
   applied: { label: "Applied", primary: true, statuses: ["offer", "interview", "submitted", "rejected_by_company"], empty: "No applications sent yet." },
-  held: { label: "Held", statuses: ["held"], empty: "No jobs are being held back." },
+  held: { label: "Held", group: "Archive", statuses: ["held"], empty: "No jobs are being held back." },
   rejected: { label: "Rejected", statuses: ["rejected"], empty: "You haven't rejected anything." },
   activity: { label: "Activity", group: "System" },
   profile: { label: "Profile" },
   settings: { label: "Settings" },
   more: { label: "More", hidden: true },
 };
+export const ARCHIVE: readonly ViewKey[] = ["held", "rejected"];
 export const VIEW_KEYS = Object.keys(VIEWS) as ViewKey[];
 export const isView = (key: string | undefined): key is ViewKey => key !== undefined && Object.hasOwn(VIEWS, key);
 // The section a job in this status is listed in.
@@ -41,7 +44,7 @@ export const STATUS: Partial<Record<Status, readonly [cls: string, label: string
   awaiting_approval: ["need", "Review"],
   needs_input: ["need", "Question"],
   awaiting_submit: ["need", "Confirm submit"],
-  needs_manual: ["need", "Needs your help"],
+  needs_manual: ["need", "Browser hand-off"],
   failed: ["bad", "Failed"],
   triaged: ["idle", "Not assessed yet"],
   locating: ["run", "Finding the posting"],

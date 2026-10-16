@@ -1,9 +1,10 @@
-// Activity: the counts, the manual runs, and the feed of what the agents and the user did.
+// Activity: is the pipeline healthy and what happened since the last look. The runs the owner can start by
+// hand, what has gone out, and the feed of what the agents and the owner did, by day.
 import type { Highlight } from "../../src/api-types";
 import { ACTIVITY_FILTERS, activeTest, filterBar } from "../filters";
 import { state, ui } from "../store";
-import { cap, esc, linkify, when } from "../util";
-import { eventRow, notices, title } from "./common";
+import { cap, clock, dayLabel, esc, linkify, parseAt, when } from "../util";
+import { notices, title } from "./common";
 
 const USER_ACTS: Record<string, (note: string) => string> = {
   approve: () => "You approved it.",
@@ -38,21 +39,38 @@ type Triage = [kept: number, held: number, of: number];
 interface FeedItem extends Highlight {
   text: string;
   triage: Triage | null;
+  n: number; // how many entries this row stands for
 }
-// Collapse a run of triage batches into one line.
+// Paths in error text become their file name: "ENOENT … '/home/…/rubric.yml'" reads as "… rubric.yml".
+const shorten = (s: string) => s.replace(/'?\/[^\s']+\/([^/\s']+)'?/g, "$1");
+// Errors repeat with only a number or a path changed: those count as the same error.
+const sameKey = (e: { kind: string; job_id: number | null; text: string; at: string }) =>
+  `${dayLabel(e.at)}|${e.kind}|${e.job_id ?? ""}|${e.kind === "error" ? e.text.toLowerCase().replace(/\d+/g, "#") : e.text}`;
+
+// Collapse a run of triage batches into one line, and the same entry repeated within a day into one row
+// with a count, so one noisy error cannot push everything else out of the window.
 function feed(): FeedItem[] {
-  const out: FeedItem[] = [];
+  const out: FeedItem[] = [],
+    seen = new Map<string, FeedItem>();
   for (const e of state().highlights) {
     const t = /^Triage: kept (\d+), held (\d+) of (\d+)/.exec(e.message),
       prev = out.at(-1);
     const triage: Triage | null = t && [Number(t[1]), Number(t[2]), Number(t[3])];
-    if (triage && prev?.triage) {
+    if (triage && prev?.triage && dayLabel(prev.at) === dayLabel(e.at)) {
       prev.triage = [prev.triage[0] + triage[0], prev.triage[1] + triage[1], prev.triage[2] + triage[2]];
       continue;
     }
-    const text = triage ? "" : plain(e);
-    if (text === null) continue;
-    out.push({ ...e, text, triage });
+    const said = triage ? "" : plain(e);
+    if (said === null) continue;
+    const item: FeedItem = { ...e, text: e.kind === "error" ? shorten(said) : said, triage, n: 1 };
+    const key = triage ? null : sameKey(item),
+      twin = key ? seen.get(key) : undefined;
+    if (twin) {
+      twin.n++; // highlights come newest first, so the row keeps the latest time
+      continue;
+    }
+    if (key) seen.set(key, item);
+    out.push(item);
   }
   return out.map(e => {
     if (!e.triage) return e;
@@ -61,32 +79,59 @@ function feed(): FeedItem[] {
   });
 }
 
+// Rows under a header per local day, each with its clock time; the relative age stays in the tooltip.
+function byDay<T extends { at: string }>(items: readonly T[], row: (e: T, time: string) => string) {
+  let day = "";
+  return items
+    .map(e => {
+      const d = dayLabel(e.at),
+        head = d === day ? "" : `<div class="group feedday"><b>${esc(d)}</b></div>`;
+      day = d;
+      return head + row(e, `<time datetime="${esc(new Date(parseAt(e.at)).toISOString())}" title="${esc(when(e.at))}">${clock(e.at)}</time>`);
+    })
+    .join("");
+}
+
+const num = (n: number) => n.toLocaleString();
+
 export function activityHtml() {
-  const S = state(),
-    c = S.counts,
-    n = (...ks: string[]) => ks.reduce((t, k) => t + (c[k] ?? 0), 0);
-  const stats: [label: string, value: number][] = [
-    ["Postings seen", Object.values(c).reduce((a, b) => a + b, 0)],
-    ["Skipped", n("skipped")],
-    ["Applied", n("submitted", "interview", "offer", "rejected_by_company")],
-    ["Interviews", n("interview", "offer")],
+  const S = state();
+  const seen = Object.values(S.counts).reduce((a, b) => a + b, 0);
+  const run = (what: string, label: string, busy: boolean, busyLabel = label, quiet = false) =>
+    `<button class="btn sm ${quiet ? "quiet" : ""}" data-run="${what}" ${busy ? "disabled" : ""}>${busy ? busyLabel : label}</button>`;
+  const runs = [
+    [
+      "Scan",
+      `${S.running.scan ? "Scanning now" : S.lastScan ? `Last ${when(S.lastScan)}` : "Not scanned yet"}${S.scanMinutes ? ` · every ${S.scanMinutes} min · ${num(S.boards)} sources` : ""} · ${num(seen)} postings seen`,
+      run("scan", "Scan now", S.running.scan, "Scanning…"),
+    ],
+    [
+      "Mail",
+      S.running.track ? "Checking now" : S.lastTrack ? `Checked ${when(S.lastTrack)}` : "Not checked yet",
+      run("track", "Check mail", S.running.track, "Checking…"),
+    ],
+    ["Discovery", "Find new companies to watch", run("discover", "Find companies", S.running.scan, "Find companies", true)],
   ];
+
   const items = feed(),
     keep = activeTest(ACTIVITY_FILTERS, "activity") ?? (() => true);
   const rows = ui.feedAll
-    ? S.events.map(eventRow)
-    : items
-        .filter(keep)
-        .map(
-          e =>
-            `<div class="ev k-${esc(e.kind)}"><time>${when(e.at)}</time><div>${e.company ? `<a href="#" data-open="${e.job_id ?? ""}" class="who">${esc(e.company)}</a> ` : ""}<span class="msg" data-clamp="1">${linkify(esc(e.text))}</span></div></div>`,
-        );
+    ? byDay(
+        S.events,
+        (e, time) =>
+          `<div class="ev k-${esc(e.kind)}">${time}<div><span class="who">${esc(cap(e.worker ?? e.kind))}</span> <span class="msg" data-clamp="1">${linkify(esc(e.message))}</span></div></div>`,
+      )
+    : byDay(
+        items.filter(keep),
+        (e, time) =>
+          `<div class="ev k-${esc(e.kind)}">${time}<div>${e.company ? `<a href="#" data-open="${e.job_id ?? ""}" class="who">${esc(e.company)}</a>${e.title ? ` <span class="sub">· ${esc(e.title)}</span>` : ""} ` : ""}<span class="msg" data-clamp="1">${linkify(esc(e.text))}</span></div>${e.n > 1 ? `<span class="chip" title="${e.n} times this day">×${e.n}</span>` : ""}</div>`,
+      );
+  const seg = (all: boolean, label: string) =>
+    `<button class="fchip ${ui.feedAll === all ? "on" : ""}" data-feed="${all ? "all" : "highlights"}" aria-pressed="${String(ui.feedAll === all)}">${label}</button>`;
   return `<div class="doc page">${title("Activity")}${notices()}
-    <div class="stats">${stats.map(([l, v]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("")}</div>
-    <div class="actions"><button class="btn" data-run="scan" ${S.running.scan ? "disabled" : ""}>${S.running.scan ? "Scanning…" : "Scan"}</button><button class="btn" data-run="discover" ${S.running.scan ? "disabled" : ""}>Find companies</button><button class="btn" data-run="track" ${S.running.track ? "disabled" : ""}>Check mail</button></div>
-    <p class="hint" style="margin-top:8px">${S.lastScan ? `Scanned ${when(S.lastScan)}` : "Not scanned yet"}${S.scanMinutes ? `, every ${S.scanMinutes} min across ${S.boards} sources` : ""} · ${S.lastTrack ? `mail checked ${when(S.lastTrack)}` : "mail not checked yet"}</p>
-    <div class="section"><div class="label" style="display:flex;justify-content:space-between;align-items:center">Recent<button class="btn sm quiet" data-feed="1">${ui.feedAll ? "Highlights only" : "Every agent step"}</button></div>
+    <div class="runs">${runs.map(([name, info, btn]) => `<div class="runline"><b>${name}</b><span class="hint">${info}</span>${btn}</div>`).join("")}</div>
+    <div class="section"><div class="feedhead"><div class="label" style="margin:0">Recent</div><div class="seg" role="group" aria-label="Feed">${seg(false, "Highlights")}${seg(true, "Full log")}</div></div>
       ${ui.feedAll ? "" : filterBar(items, ACTIVITY_FILTERS, "activity")}
-      ${rows.join("") || `<div class="empty">${items.length && !ui.feedAll ? "Nothing matches this filter." : "No activity yet."}</div>`}</div>
+      ${rows || `<div class="empty">${items.length && !ui.feedAll ? "Nothing matches this filter." : "No activity yet."}</div>`}</div>
   </div>`;
 }

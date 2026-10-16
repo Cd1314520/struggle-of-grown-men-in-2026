@@ -7,14 +7,20 @@ import { loadRubric } from "./rubric";
 
 // Profile files ship as templates; refuse to act on them until they are filled in.
 const PLACEHOLDER = "TODO-FILL";
+// Every state poll checks the profile: log a broken rubric once per distinct error, not once per poll.
+let lastRubricError: string | null = null;
 export function profileProblems(files = ["targets.md", "resume", "rubric.yml", "personal.yml", "answers.md"]) {
   return files.filter(f => {
     if (f === "resume") return !existsSync(STOCK_MAIN);
     if (f === "rubric.yml") {
       try {
-        return (loadRubric(), false);
+        loadRubric();
+        lastRubricError = null;
+        return false;
       } catch (err) {
-        logEvent("error", errorMessage(err));
+        const message = errorMessage(err);
+        if (message !== lastRubricError) logEvent("error", message);
+        lastRubricError = message;
         return true;
       }
     }

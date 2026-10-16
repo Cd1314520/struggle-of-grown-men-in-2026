@@ -1,12 +1,13 @@
 // Everything the user does: clicks, keys, typing and form submits, delegated from the document.
 import * as api from "./api";
-import { ordered, toggleFold } from "./layout";
+import { ordered, showMore, toggleFold, togglePart } from "./layout";
 import { render } from "./render";
 import { go, refresh } from "./router";
 import { rememberFilters, setState, state, ui } from "./store";
-import { $, blur, formValue, painted, setDisabled, shell, textBox, toast, wide } from "./util";
+import { $, blur, cap, esc, formValue, painted, setDisabled, shell, textBox, toast, wide } from "./util";
 import { isTab, isView, TAB_KEYS, viewOf, VIEWS } from "./views";
 import { gateIdOf } from "./views/gate";
+import { answerable, openKey } from "./views/questions";
 
 // The repaint that follows a failed request must not fail the handler too.
 const refreshQuietly = () => refresh().catch(() => undefined);
@@ -31,11 +32,41 @@ async function saveProfile() {
 
 // ---- the Questions inbox
 
-async function answerQuestion(form: HTMLFormElement) {
+// Opens a group ("" closes them all) and puts the cursor where the user acts next.
+// "next" follows a save: a typed question gets the cursor in its box, but one-click options stay on the row and
+// ignore picks for a moment, so a second press meant for the last question cannot answer this one.
+function openQuestion(key: string, focus: "row" | "answer" | "next" | null) {
+  ui.openQuestion = key;
+  blur(); // a focused draft holds off repaints; its text is kept in ui.questionDrafts
+  render();
+  const item = key ? document.querySelector(`[data-question-group="${CSS.escape(key)}"]`) : null;
+  if (!item) return;
+  item.scrollIntoView({ block: "nearest" });
+  const opts = $(".qopts", item);
+  if (focus === "next" && opts) {
+    opts.classList.add("hold");
+    setTimeout(() => {
+      opts.classList.remove("hold");
+    }, 600);
+  }
+  if (focus === "row" || (focus === "next" && opts)) $("[data-question-row]", item)?.focus();
+  else if (focus) ($("[data-question-option]", item) ?? $("textarea", item))?.focus();
+}
+// J/K: the next or previous group to answer, from the open one.
+function stepQuestion(by: 1 | -1) {
+  const keys = answerable().map(g => g.key),
+    at = keys.indexOf(openKey());
+  const next = keys[at < 0 ? 0 : Math.min(keys.length - 1, Math.max(0, at + by))];
+  if (next) openQuestion(next, "row");
+}
+
+// `picked` is the option button that submitted the form, if one did.
+async function answerQuestion(form: HTMLFormElement, picked?: string) {
   if (form.dataset["sending"]) return;
+  const box = $("input[type=checkbox][name=scope]", form);
   const gateId = formValue(form, "job"),
-    answer = formValue(form, "answer").trim(),
-    scope = formValue(form, "scope");
+    answer = (picked ?? formValue(form, "answer")).trim(),
+    scope = box instanceof HTMLInputElement ? (box.checked ? "standing" : "application") : formValue(form, "scope");
   if (!answer) {
     $("[name=answer]", form)?.focus();
     toast("Type an answer first.");
@@ -55,20 +86,60 @@ async function answerQuestion(form: HTMLFormElement) {
     )
   )
     return;
+  const before = answerable().map(g => g.key),
+    at = before.indexOf(group.key);
   form.dataset["sending"] = "true";
   const controls = [...form.elements];
   for (const el of controls) setDisabled(el, true);
   try {
     const result = await api.answerQuestion(gateId, answer, scope);
+    ui.questionDrafts.delete(group.key);
     blur();
-    toast(`Answer saved · queued applications: ${result.jobIds.map(id => `#${id}`).join(", ")}`);
-    await refresh();
+    setState(await api.loadState());
+    // Working down the queue: this question while other applications still ask it, then the next question
+    // the same application asks (it is still blocked), then the next oldest.
+    const left = answerable(),
+      jobs = new Set(group.jobs.map(j => j.id)),
+      next =
+        left.find(g => g.key === group.key) ??
+        left.find(g => !before.includes(g.key) && g.jobs.some(j => jobs.has(j.id))) ??
+        left.find(g => before.indexOf(g.key) > at) ??
+        left[0];
+    const queued = result.jobIds.length > 1 ? ` · ${result.jobIds.length} applications queued` : "";
+    toast(`Answered${queued} · ${next ? `next: ${next.text}` : "nothing left to answer"}`);
+    openQuestion(next?.key ?? "", "next");
   } catch {
     await refreshQuietly();
   } finally {
     delete form.dataset["sending"];
     for (const el of controls) setDisabled(el, false);
   }
+}
+
+// Keys on the Questions page. True when the key was handled.
+function questionKey(ev: KeyboardEvent, el: HTMLElement): boolean {
+  const form = el.closest<HTMLFormElement>("form[data-question-form]"),
+    row = el.closest<HTMLElement>("[data-question-row]");
+  if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey) && form) {
+    form.requestSubmit($("[data-question-answer]", form) ?? undefined);
+    return true;
+  }
+  if (ev.key === "Escape" && (form || row)) {
+    const key = (form ?? row)?.closest<HTMLElement>("[data-question-group]")?.dataset["questionGroup"] ?? "";
+    openQuestion("", null);
+    $(`[data-question-row="${CSS.escape(key)}"]`)?.focus();
+    return true;
+  }
+  // Enter on a row opens it ready to answer, rather than toggling it shut.
+  if (ev.key === "Enter" && row) {
+    openQuestion(row.dataset["questionRow"] ?? "", "answer");
+    return true;
+  }
+  if (el.matches("textarea, input, select") || ev.metaKey || ev.ctrlKey || ev.altKey) return false;
+  if (ev.key === "j" || ev.key === "k") stepQuestion(ev.key === "j" ? 1 : -1);
+  else if (/^[1-8]$/.test(ev.key) && !ev.repeat) $(`.qitem.open .qopts:not(.hold) [data-question-option]:nth-child(${ev.key})`)?.click();
+  else return false;
+  return true;
 }
 
 // ---- Settings
@@ -81,7 +152,7 @@ async function digest(send: boolean) {
     if (send) {
       const result = await api.sendDigest();
       ui.digestResult = result.sent
-        ? `Sent ${result.groups} group${result.groups === 1 ? "" : "s"}${result.messageId ? ` · ${result.messageId}` : ""}`
+        ? `Sent ${result.groups} item${result.groups === 1 ? "" : "s"}${result.messageId ? ` · ${result.messageId}` : ""}`
         : `Not sent: ${result.reason ?? "No new undelivered groups"}`;
       toast(ui.digestResult);
     }
@@ -98,16 +169,45 @@ async function digest(send: boolean) {
   }
 }
 
+// The outcome stays under the box (with a link to the job) rather than only in a passing toast.
 async function addPosting() {
   const box = textBox("#addurl");
   if (!box) return;
-  if (!box.value.trim()) {
+  const url = box.value.trim();
+  if (!url) {
     box.focus();
     return;
   }
-  await api.addPosting(box.value.trim());
-  box.value = "";
-  toast("Added. It will be assessed shortly.");
+  const named = (id: number, fallback: string) => {
+    const j = state().jobs.find(x => x.id === id);
+    return `<a href="#" data-open="${id}">${esc(j ? `${j.company} — ${j.title}` : fallback)}</a>`;
+  };
+  try {
+    const { id } = await api.addPosting(url);
+    ui.addDraft = "";
+    ui.addResult = { ok: true, html: `Added: ${named(id, "the new posting")}. It will be assessed shortly.` };
+    box.value = "";
+    toast("Added. It will be assessed shortly.");
+  } catch (err) {
+    const known = err instanceof api.ApiError && err.status === 409,
+      body = err instanceof api.ApiError && typeof err.body === "object" && err.body ? (err.body as { id?: unknown }) : {};
+    ui.addDraft = url;
+    ui.addResult = {
+      ok: false,
+      html:
+        known && typeof body.id === "number"
+          ? `Already tracked: ${named(body.id, `job ${body.id}`)}.`
+          : esc(err instanceof Error && err.message ? cap(err.message) + "." : "Could not add it."),
+    };
+  }
+  // The box may keep focus, and render leaves a page with a focused draft alone: write the line directly.
+  const line = $("#add-result"),
+    result = ui.addResult;
+  if (line) {
+    line.innerHTML = result.html;
+    line.classList.toggle("bad", !result.ok);
+  }
+  render();
   void refresh();
 }
 
@@ -240,7 +340,7 @@ async function jobAction(t: HTMLElement, id: number) {
 // ---- dispatch
 
 const CLICKABLE =
-  "[data-view],[data-job],[data-act],[data-run],[data-pfile],[data-back],[data-tab],[data-toggle],[data-feed],[data-open],[data-filter],[data-clamp],[data-more],[data-fold],[data-browser-action],#psave,#pmode,#addbtn,#digest-send,#digest-refresh";
+  "[data-question-row],[data-view],[data-job],[data-act],[data-run],[data-pfile],[data-back],[data-tab],[data-toggle],[data-feed],[data-open],[data-filter],[data-clamp],[data-more],[data-fold],[data-part],[data-cap],[data-browser-action],[data-jump],[data-fill],#psave,#pmode,#addbtn,#digest-send,#digest-refresh";
 
 async function onClick(ev: MouseEvent) {
   const t = ev.target instanceof Element ? ev.target.closest<HTMLElement>(CLICKABLE) : null;
@@ -254,7 +354,15 @@ async function onClick(ev: MouseEvent) {
   if (leavesEditor) ui.profileDirty = false;
   if (d["run"] === "release_held" && !confirm(`Send all ${state().counts["held"] ?? 0} held jobs back through triage? Each one is assessed again.`)) return;
 
-  if (d["view"]) {
+  if (d["questionRow"] !== undefined) {
+    const key = d["questionRow"];
+    openQuestion(key === openKey() ? "" : key, key === openKey() ? null : "answer");
+  } else if (d["jump"] !== undefined) {
+    // An in-page anchor: the hash is the route, so scroll instead of following it.
+    ev.preventDefault();
+    $(t.getAttribute("href") ?? "")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  } else if (d["view"]) {
+    ev.preventDefault(); // a link styled as text, e.g. in a notice
     if (!isView(d["view"])) return;
     go(d["view"]);
     scrollTo(0, 0);
@@ -272,9 +380,22 @@ async function onClick(ev: MouseEvent) {
     el?.classList.toggle("open");
     if (el) $("textarea", el)?.focus();
   } else if (d["clamp"]) t.classList.toggle("open");
-  else if (d["more"]) t.previousElementSibling?.classList.add("open");
+  else if (d["fill"] !== undefined) {
+    // A question's fixed option, picked from the gate: it fills the answer box rather than saving, so it can still be edited.
+    const box = textBox("#ans");
+    if (box) {
+      box.value = d["fill"];
+      box.focus();
+    }
+  } else if (d["more"]) t.previousElementSibling?.classList.add("open");
   else if (d["fold"]) {
     toggleFold(d["fold"]);
+    render();
+  } else if (d["part"]) {
+    togglePart(d["part"]);
+    render();
+  } else if (d["cap"]) {
+    showMore(d["cap"]);
     render();
   } else if (d["filter"]) {
     ui.filt[ui.view] = d["filter"];
@@ -283,7 +404,7 @@ async function onClick(ev: MouseEvent) {
     if (VIEWS[ui.view].statuses && !ordered().some(j => j.id === ui.selected)) go(ui.view, wide() ? (ordered()[0]?.id ?? null) : null, true);
     else render();
   } else if (d["feed"]) {
-    ui.feedAll = !ui.feedAll;
+    ui.feedAll = d["feed"] === "all";
     render();
   } else if (d["pfile"]) {
     ui.profileFile = d["pfile"];
@@ -310,7 +431,8 @@ function onKeydown(ev: KeyboardEvent) {
   const el = ev.target instanceof HTMLElement ? ev.target : null,
     mod = ev.metaKey || ev.ctrlKey;
   if (!el) return;
-  if (mod && ev.key === "s" && el.id === "ptext") {
+  if (ui.view === "questions" && questionKey(ev, el)) ev.preventDefault();
+  else if (mod && ev.key === "s" && el.id === "ptext") {
     ev.preventDefault();
     void saveProfile();
   } else if ((ev.key === "Enter" || ev.key === " ") && el.matches(".row")) {
@@ -331,7 +453,9 @@ function onKeydown(ev: KeyboardEvent) {
     if (n) go(ui.view, n.id, true);
   } else if (ev.repeat)
     return; // a held key must not decide the next job too
-  else if (ev.key === "a") $('.gate [data-act="approve"]')?.click();
+  // A presses the gate's one primary button (Approve, Retry, Reserve browser…), never one that needs words typed
+  // first, and never Approve submission: sending an application cannot be undone, so it takes a click.
+  else if (ev.key === "a") $('.gate > .actions > .btn.primary:not([data-text]):not([data-fixed="approve"]):not([disabled])')?.click();
   else if (ev.key === "x") $('.gate [data-act="reject"]')?.click();
   else if (/^[1-5]$/.test(ev.key) && ui.job) {
     ui.tab = TAB_KEYS[Number(ev.key) - 1] ?? ui.tab;
@@ -343,7 +467,10 @@ function onInput(ev: Event) {
   const el = ev.target;
   if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return;
   if (el.id === "ptext") ui.profileDirty = true;
-  else if (el.id === "q") {
+  else if (el.name === "answer" && el.form?.matches("[data-question-form]")) {
+    const key = el.closest<HTMLElement>("[data-question-group]")?.dataset["questionGroup"];
+    if (key) ui.questionDrafts.set(key, el.value);
+  } else if (el.id === "q") {
     ui.query[ui.view] = el.value;
     render();
   }
@@ -354,9 +481,22 @@ export function listen() {
     const form = ev.target instanceof Element ? ev.target.closest<HTMLFormElement>("form[data-question-form]") : null;
     if (!form) return;
     ev.preventDefault();
-    void answerQuestion(form);
+    const by = ev.submitter instanceof HTMLElement ? ev.submitter.dataset["questionOption"] : undefined;
+    void answerQuestion(form, by);
   });
   document.addEventListener("click", ev => void onClick(ev));
+  // Remember which "How this works" sections are open, so a repaint from a state poll keeps them open.
+  document.addEventListener(
+    "toggle",
+    ev => {
+      const el = ev.target;
+      if (el instanceof HTMLDetailsElement && el.dataset["how"]) {
+        if (el.open) ui.openHow.add(el.dataset["how"]);
+        else ui.openHow.delete(el.dataset["how"]);
+      }
+    },
+    true,
+  );
   document.addEventListener("keydown", onKeydown);
   document.addEventListener("input", onInput);
   addEventListener("beforeunload", ev => {

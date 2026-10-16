@@ -55,7 +55,9 @@ export interface QuestionGroup {
   options: string[];
   scopeLabel: string;
   standingAllowed: boolean;
-  jobs: { id: number; company: string; title: string; gateId: string }[];
+  // askedAt: when this application asked. queuedAfter: questions it found on the same page that are still
+  // unanswered, so answering this one opens the next instead of resuming the application.
+  jobs: { id: number; company: string; title: string; gateId: string; askedAt: string; queuedAfter: number }[];
   createdAt: string;
 }
 export interface HandoffRecord {
@@ -324,6 +326,17 @@ export function nextQueuedQuestion(jobId: number): GateInput | null {
 export function clearQueuedQuestions(jobId: number) {
   db.query("DELETE FROM queued_questions WHERE job_id = ?").run(jobId);
 }
+// The queued questions still unanswered besides the one this gate asks.
+function queuedAfter(row: GateRow): number {
+  if (row.kind !== "question") return 0;
+  return db
+    .query<{ text: string; context: string; options: string }, [number, string]>(
+      "SELECT text, context, options FROM queued_questions WHERE job_id = ? AND match_key != ?",
+    )
+    .all(row.job_id, row.match_key)
+    .filter(q => findStoredAnswer(row.job_id, { kind: "question", text: q.text, context: q.context, options: JSON.parse(q.options) as string[] }) === null)
+    .length;
+}
 export function listQuestionGroups(): QuestionGroup[] {
   const groups = new Map<string, QuestionGroup>();
   for (const row of db.query<GateRow, []>("SELECT * FROM question_gates WHERE state = 'open' ORDER BY created_at, id").all()) {
@@ -344,7 +357,7 @@ export function listQuestionGroups(): QuestionGroup[] {
       };
       groups.set(row.group_key, group);
     }
-    group.jobs.push({ id: job.id, company: job.company, title: job.title, gateId: row.id });
+    group.jobs.push({ id: job.id, company: job.company, title: job.title, gateId: row.id, askedAt: row.created_at, queuedAfter: queuedAfter(row) });
   }
   return [...groups.values()];
 }

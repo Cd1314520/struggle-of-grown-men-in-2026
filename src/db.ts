@@ -272,13 +272,17 @@ function shingles(text: string) {
 
 type Twinnable = Pick<Job, "company" | "title" | "description">;
 // The existing job this posting duplicates, if any.
+// The title a posting added by hand without one gets. Two of them say nothing about being the same role.
+export const UNTITLED = "(untitled posting)";
 export function findTwin(j: Twinnable, candidates?: Job[]): Job | null {
+  if (j.title === UNTITLED) return null;
   const pool = candidates ?? db.query<Job, [string]>("SELECT * FROM jobs WHERE company_key = ? ORDER BY id").all(companyKey(j.company));
   if (!pool.length) return null;
   const tokens = new Set(titleTokens(j.title)),
     key = [...tokens].join(" ");
   let text: Set<string> | null = null;
   for (const c of pool) {
+    if (c.title === UNTITLED) continue;
     const theirs = new Set(titleTokens(c.title));
     if ([...theirs].join(" ") === key) return c;
     const overlap = jaccard(tokens, theirs);
@@ -312,7 +316,8 @@ export function normalizeUrl(raw: string) {
 // The job a (normalized) URL belongs to, as its own posting or as another listing of it.
 const jobIdForUrl = (url: string) =>
   db.query<{ id: number }, [string, string]>("SELECT id FROM jobs WHERE url = ? UNION SELECT job_id FROM job_sources WHERE url = ?").get(url, url)?.id ?? null;
-export const knownUrl = (raw: string) => jobIdForUrl(normalizeUrl(raw)) !== null;
+export const knownJobId = (raw: string) => jobIdForUrl(normalizeUrl(raw));
+export const knownUrl = (raw: string) => knownJobId(raw) !== null;
 
 const addSource = (jobId: number, url: string, source: string, location: string | null) =>
   db.query("INSERT OR IGNORE INTO job_sources (job_id, url, source, location) VALUES (?, ?, ?, ?)").run(jobId, url, source, location);

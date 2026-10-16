@@ -3,6 +3,16 @@ import type { AnswerResult, AppState, DigestResult, JobDetail } from "../src/api
 import type { DigestStatus } from "../src/digest";
 import { toast } from "./util";
 
+// A refusal from the server, with its status and whatever else the body said (e.g. the job a posting matched).
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body: unknown,
+  ) {
+    super(message);
+  }
+}
 async function request(path: string, send?: { method: string; body: unknown }): Promise<unknown> {
   const res = await fetch(path, send && { method: send.method, headers: { "content-type": "application/json" }, body: JSON.stringify(send.body) }).catch(
     (err: unknown) => {
@@ -14,7 +24,7 @@ async function request(path: string, send?: { method: string; body: unknown }): 
   if (!res.ok) {
     const error = typeof data === "object" && data && "error" in data && typeof data.error === "string" ? data.error : undefined;
     toast(error ?? "Request failed");
-    throw new Error(error);
+    throw new ApiError(error ?? "Request failed", res.status, data);
   }
   return data;
 }
@@ -33,7 +43,7 @@ export const loadDigestStatus = async () => (await request("/api/digest/status")
 export const jobAction = (id: number, body: { action: string; text: string; gateId?: string | undefined }) => post(`/api/jobs/${id}/action`, body);
 export const browserAction = (id: number, body: { action: string; gateId: string }) => post(`/api/jobs/${id}/browser`, body);
 export const recoverJob = (id: number, gateId: string) => post(`/api/jobs/${id}/recover`, { gateId });
-export const addPosting = (url: string) => post("/api/jobs", { url });
+export const addPosting = async (url: string) => (await post("/api/jobs", { url })) as { id: number };
 export const run = (what: string) => post("/api/run", { what });
 export const answerQuestion = async (gateId: string, answer: string, scope: string) =>
   (await post(`/api/questions/${encodeURIComponent(gateId)}/answer`, { answer, scope })) as AnswerResult;

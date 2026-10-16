@@ -9,7 +9,7 @@ To review lists every assessed job waiting for the user's first decision. Openin
 - `review-reject` Reject moves it to Rejected; the toast offers Undo, and Rejected offers a way back.
 - `review-hold` "Hold for later" moves it to Held; Held's "Assess now" brings it back.
 - `review-redo` "Change resume" takes feedback text and sends the job back to be assessed again.
-- `review-keys` `J`/`K` move through the list, `A` approves, `X` rejects, `1`-`5` switch job tabs.
+- `review-keys` `J`/`K` move through the list, `A` approves (on any gate it presses the primary button, except Approve submission, which takes a click), `X` rejects, `1`-`5` switch job tabs.
 - `review-tabs` Summary, Score, Resume, Posting and Log for the open job.
 
 ## How to get to it (user POV)
@@ -32,7 +32,7 @@ Preconditions:
 - **Undo.** `browser_click` `#toast button`. Job 6 is back in To review (`"status":"awaiting_approval"`).
 - **Hold.** `browser_click` `.gate [data-act="hold"]`. The UI moves to the next job; `curl -s $B/api/jobs/6` has `"status":"held"`, `note` `held by you`. `browser_navigate $B/#held/6`: gate heading `Held for later`, text `Held by you`. `browser_click` `.gate [data-act="retry"]` ("Assess now"): toast `Back in the queue · next: …`, and job 6 is `awaiting_approval` again.
 - **Approve.** `browser_navigate $B/#review/1`, `browser_click` `.gate [data-act="approve"]`. Toast `Approved · next: …`; nav badge drops by one. `curl -s $B/api/jobs/1`: `approved_by` `user`, and within 2 s `status` `awaiting_submit` (the straight script goes directly to gate 2; see [fill-gates](./fill-gates.md)).
-- **Change resume.** `browser_navigate $B/#review/3`, `browser_click` `[data-toggle="#redo"]`, `browser_type` `#fb` with `Lead with the data work`, `browser_click` `.gate [data-act="redo"]` ("Redo with this note"). Toast `Redo requested · next: …`; `curl -s $B/api/jobs/3` has `"status":"triaged"` and `note` `redo requested`; the job shows in In progress as "Not assessed yet".
+- **Change resume.** `browser_navigate $B/#review/3`, `browser_click` `[data-toggle="#redo"]`, `browser_type` `#fb` with `Lead with the data work`, `browser_click` `.gate [data-act="redo"]` ("Redo with this note"). Toast `Redo requested · next: …`; `curl -s $B/api/jobs/3` has `"status":"triaged"` and `note` `redo requested`; the job is in In progress under "Waiting to be assessed", which starts collapsed (`browser_click` `[data-part="progress|Waiting to be assessed"]` to open it).
 - **Keyboard.** At 1280 px width, `browser_navigate $B/#review`, `browser_press_key` `j` (selection and URL move to the next job), `2` (Score tab), `1` (back to Summary), `x` (rejects it; same result as the Reject step).
 - **Proof.** Before/after screenshots for each decision, the `curl` body for each job touched, `history` from `/api/jobs/<id>` showing the status sequence.
 

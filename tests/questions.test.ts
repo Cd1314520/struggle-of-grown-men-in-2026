@@ -152,9 +152,14 @@ describe("durable questions", () => {
     queueQuestion(1, prompt); queueQuestion(1, second); queueQuestion(1, third);
     assert.deepEqual(nextQueuedQuestion(1), prompt);
     const first = parkGate(1, nextQueuedQuestion(1), checkpoint);
+    // The inbox says how many more this application will ask, and when it asked this one.
+    const asking = () => listQuestionGroups().flatMap(g => g.jobs).find(j => j.id === 1);
+    assert.equal(asking().queuedAfter, 2);
+    assert.equal(asking().askedAt, first.createdAt);
     assert.deepEqual(answerGate(first.id, "No", "application"), { jobIds: [1] });
     assert.equal(getJob(1).status, "needs_input");
     assert.equal(getOpenGate(1).text, second.text);
+    assert.equal(asking().queuedAfter, 1);
     assert.deepEqual(readCheckpoint(1), checkpoint);
     answerGate(getOpenGate(1).id, "No", "application");
     assert.equal(getOpenGate(1).text, third.text);

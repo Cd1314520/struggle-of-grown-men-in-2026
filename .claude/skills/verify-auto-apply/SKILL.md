@@ -71,20 +71,25 @@ Stable handles (CSS selectors work as the `target` of `browser_click` / `browser
 |---|---|
 | Section nav | `nav[aria-label="Sections"] [data-view="review"]` (also `progress`, `questions`, `applied`, `more`; the rest are desktop-only or under More) |
 | Job row | `[data-job="<id>"]` (role `link`, name starts with the title) |
-| Filter chip | `[role=toolbar][aria-label="Filter"] [data-filter="<key>"]` |
+| Filter chip (To review: `all`, `top`, `near`, `remote`; Held: `all`, `near`, `remote`; no other list has chips) | `[role=toolbar][aria-label="Filter"] [data-filter="<key>"]` |
+| List part header that folds (`aria-expanded`) | `[data-part="<view>\|<label>"]`, e.g. `progress\|Waiting to be assessed`, `progress\|Queued to apply`, `applied\|Declined`, `held\|Everything else` (these start collapsed); `[data-cap="<view>\|<label>"]` shows the next 50 rows of a part |
+| Release held jobs (Held page, also Settings) | `[data-run="release_held"]` (asks to confirm) |
 | Section search (only when a section has more than 8 jobs) | `#q` |
 | Job tabs | `[data-tab="summary"]`, `score`, `resume`, `posting`, `log` |
-| Gate buttons | `.gate [data-act="approve"]`, `reject`, `hold` ("Hold for later", on every gate), `retry` (also "Assess now" on a held job), `mark_submitted`, `recover`, `confirmed_not_submitted` |
+| Gate buttons | `.gate [data-act="approve"]`, `reject` ("Stop & reject" on a queued or running job), `hold` ("Hold for later": every gate except Held, running jobs and ambiguous submissions), `retry` (also "Assess now" on a held job), `mark_submitted`, `recover`, `confirmed_not_submitted`. Each gate has one `.btn.primary`; Hold, Reject, Mark submitted / I submitted it sit in `.acts-end` (on a phone behind `[data-toggle="#gmore"]` "More actions", still in the DOM so clicks and A/X work). Policy text folds into `details.gate-why` ("How this works"); the saved page and checkpoint into one `details[data-how="gate-evidence"]` |
+| Job header | `.facts`: a state pill (gate kind for a stuck job: Question, Cover letter, Browser hand-off, Confirm submit, Outcome unknown), `button.score-pill` "Fit N" (opens Score), the practice pill, location, "Found …" or "Applied …" |
 | Answer / letter box and its button | `#ans`, then `.gate [data-act="respond"]` |
 | Gate 2 | `.gate [data-act="respond"][data-fixed="approve"]`; changes: `[data-toggle="#chgbox"]`, `#chg` |
 | Change resume (gate 1) | `[data-toggle="#redo"]`, `#fb`, `.gate [data-act="redo"]` |
 | Manual hand-off | `[data-browser-action="reserve"]`, `[data-browser-action="release"]`, `.gate [data-act="respond"][data-fixed="done"]` |
-| Questions inbox form | `[data-question-group] [data-question-form]` (question groups only), fields `select[name=job]`, `textarea[name=answer]`, `[name=scope]`, button `[data-question-answer]` |
-| Add a posting (Settings) | `#addurl`, `#addbtn` |
-| Profile editor | `[data-pfile="targets.md"]`, `#pmode` (Edit/Cancel), `#ptext`, `#psave` |
+| Questions inbox | Row (expand toggle) `[data-question-row="<group key>"]`; only the open group renders its form, and the oldest is open by default. Form `[data-question-group] [data-question-form]` (question groups only), fields `[name=job]` (hidden input for one application, `select` for several), `textarea[name=answer]`, `[name=scope]` (hidden `application`, or a `standing` checkbox when standing is allowed), one-click option buttons `[data-question-option="<option>"]` (up to 8 fixed options), button `[data-question-answer]`. Other gates are not listed here: one line `.qelse` counts them ("Also waiting on you: 1 submit to confirm, …") and links to In progress |
+| Add a posting (Settings, first on the page) | `#addurl`, `#addbtn` (Enter adds too); the outcome line `#add-result` (role `status`) |
+| Profile editor | `[data-pfile="targets.md"]` (`.tab.need` marks a file still to fill in), `#pmode` (Edit, "Write it" on an empty file, Cancel), `#ptext`, `#psave` |
+| Activity | Feed `[data-feed="highlights"]` / `[data-feed="all"]` ("Highlights" / "Full log"); filter chips `[role=toolbar][aria-label="Filter"] [data-filter="gate\|user\|error\|system"]`; runs `[data-run="scan"]`, `track`, `discover` |
+| Settings | Overview rows `.ovrow` (name links jump to `#settings-mailbox`, `#settings-digest`, `#settings-auto-apply`, `#settings-phase`, `#settings-browser`); explanations fold into `details[data-how]` ("How this works") |
 | Toast | `#toast` (role `status`); connection banner `#offline` (role `alert`) |
 
-Keyboard, with focus outside any field: `J`/`K` move, `A` approve, `X` reject, `1`-`5` job tabs, `/` search. `A` and `X` click the gate's buttons, and the gate is part of the Summary tab: on any other tab they do nothing (press `1` first).
+Keyboard, with focus outside any field: `J`/`K` move, `A` presses the gate's primary button (Approve, Retry, Assess now, Reserve browser…; never one that needs text first, and never Approve submission, which takes a click), `X` reject, `1`-`5` job tabs, `/` search. On `#questions`: `J`/`K` move the open question, `Enter` on a row focuses its answer, `1`-`8` pick an option, `Ctrl`+`Enter` in the form saves, `Esc` closes. `A` and `X` click the gate's buttons, and the gate is part of the Summary tab: on any other tab they do nothing (press `1` first).
 
 Timing: the stand-in worker takes about 0.4 s per tool call, so a gate appears 1-2 s after the action that queues it. Wait on text (`browser_wait_for` with the gate heading), not on a fixed sleep.
 

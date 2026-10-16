@@ -10,6 +10,7 @@ import {
   getJob,
   highlightEvents,
   insertJob,
+  knownJobId,
   jobEvents,
   jobSources,
   kvGet,
@@ -23,6 +24,7 @@ import {
   statusCounts,
   statusHistory,
   updateJob,
+  UNTITLED,
   type Job,
 } from "./db";
 import * as gmail from "./gmail";
@@ -348,13 +350,14 @@ export function createHandler(scheduler: Scheduler) {
           url: jobUrl,
           source: "manual",
           company: text(company) || new URL(jobUrl).hostname,
-          title: text(title) || "(untitled posting)",
+          title: text(title) || UNTITLED,
           location: null,
           description: null,
         },
         "triaged",
       );
-      if (!id) return fail("already known");
+      // Name the job it matched, so the page can link to it instead of only saying no.
+      if (!id) return json({ error: "already known", id: knownJobId(jobUrl) }, 409);
       scheduler.pump();
       return json({ id });
     }

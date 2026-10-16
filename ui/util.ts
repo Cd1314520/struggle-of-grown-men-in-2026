@@ -33,12 +33,30 @@ export const unent = (s: string) =>
 // For already-escaped text: make the URLs in it clickable.
 export const linkify = (html: string) => html.replace(/https?:\/\/[^\s<"]*[^\s<".,;:)]/g, u => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
 
-// "3h ago" for a time the server wrote, as ISO or as SQLite's "YYYY-MM-DD HH:MM:SS" in UTC.
+// A time the server wrote, as ISO or as SQLite's "YYYY-MM-DD HH:MM:SS" in UTC, in ms.
+export const parseAt = (iso: string) => Date.parse(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z");
+// "3h ago" for a time the server wrote.
 export const when = (iso: string | null | undefined) => {
   if (!iso) return "";
-  const m = (Date.now() - Date.parse(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z")) / 60000;
+  const m = (Date.now() - parseAt(iso)) / 60000;
   return m < 1 ? "just now" : m < 60 ? `${Math.trunc(m)}m ago` : m < 1440 ? `${Math.trunc(m / 60)}h ago` : `${Math.trunc(m / 1440)}d ago`;
 };
+
+// A span of time as a list column shows it: "40m", "5h", "3d", "2w", "4mo".
+export const span = (ms: number) => {
+  const m = Math.max(1, Math.trunc(ms / 6e4)),
+    d = Math.trunc(m / 1440);
+  return m < 60 ? `${m}m` : m < 1440 ? `${Math.trunc(m / 60)}h` : d < 14 ? `${d}d` : d < 60 ? `${Math.trunc(d / 7)}w` : `${Math.trunc(d / 30)}mo`;
+};
+// "14:05" on the local clock, for rows already grouped under their day.
+export const clock = (iso: string) => new Date(parseAt(iso)).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+// The local day a time falls on, as a group header: "Today", "Yesterday", "Mon, 12 Oct".
+export const dayLabel = (iso: string) => {
+  const d = new Date(parseAt(iso)),
+    days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 864e5);
+  return days === 0 ? "Today" : days === 1 ? "Yesterday" : d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+};
+export const dateTime = (ms: number) => new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 // What each region currently shows, so an unchanged repaint leaves the DOM (and the user's place in it) alone.
 export const painted = new Map<Element, string>();

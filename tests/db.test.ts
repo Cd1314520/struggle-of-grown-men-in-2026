@@ -405,6 +405,18 @@ describe("postings, duplicates and sources", () => {
   `);
   });
 
+  it("never takes two untitled postings added by hand for the same role", () => {
+    scenario(`
+    const add = n => store.insertJob({ url: "https://ats.example/p/" + n, source: "manual", company: "ats.example", title: store.UNTITLED, location: null, description: null }, "triaged");
+    const a = add(1), b = add(2);
+    assert.equal(typeof a, "number");
+    assert.equal(typeof b, "number");
+    assert.notEqual(a, b);
+    store.dedupeExisting();
+    assert.equal(db.query("SELECT count(*) AS n FROM jobs").get().n, 2);
+  `);
+  });
+
   it("moves a job first seen on an aggregator to the employer's own listing", () => {
     scenario(`
     const id = store.insertJob({ url: "https://www.linkedin.com/jobs/view/1", source: "linkedin", company: "Acme", title: "Data Engineer", location: "Houston", description: null });
