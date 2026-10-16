@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
 import { config, PROFILE } from "./config";
-import { assessPractice, practiceVerdict, type PracticeAssessment } from "./practice";
+import { assessPractice, practiceVerdict, type Listed, type PracticeAssessment } from "./practice";
 
 type Phase = "practice" | "real";
 export type Answer = "yes" | "no" | "unclear";
@@ -15,6 +15,7 @@ interface Criterion {
   statement: string;
   required?: boolean;
   weight?: number;
+  screen?: boolean; // false: a requirement the screen leaves to the full assessment
 }
 interface PhaseRubric {
   threshold: number;
@@ -67,6 +68,47 @@ export function checklistText(r = loadRubric()) {
   return phasesToAsk()
     .flatMap(phase => r[phase].criteria.map(c => `- \`${phase}.${c.id}\`: ${c.statement}`))
     .join("\n");
+}
+
+// ---- the screen: a cheap read of the posting before the full assessment
+
+// The rubrics that can decide a job. In practice, whether it is a practice job is the full
+// assessment's judgment unless the employer is listed, so a job is only ruled out when it fails both.
+function decidingPhases(listed: Listed | null): Phase[] {
+  if (config.phase === "real" || listed === "frontier") return ["real"];
+  return listed === "practice" ? ["practice"] : ["practice", "real"];
+}
+
+const screened = (r: Rubric, phase: Phase) => r[phase].criteria.filter(c => c.required && c.screen !== false);
+
+export function screenChecklistText(listed: Listed | null, r = loadRubric()) {
+  return decidingPhases(listed)
+    .flatMap(phase => screened(r, phase).map(c => `- \`${phase}.${c.id}\`: ${c.statement}`))
+    .join("\n");
+}
+
+// Why the screen rules the job out, null when the full assessment should read it, or an error
+// string when the answers are incomplete. Only a "no" rules out, as with requirements in evaluate.
+export function screenVerdict(raw: unknown, listed: Listed | null): { out: string | null } | string {
+  const r = loadRubric();
+  const answers = new Map<string, Answer>();
+  for (const a of Array.isArray(raw) ? (raw as unknown[]) : []) {
+    if (!a || typeof a !== "object" || !("id" in a) || typeof a.id !== "string") return "every answer needs an id";
+    const answer = "answer" in a ? ANSWERS.find(x => x === a.answer) : undefined;
+    if (!answer) return `answer for ${a.id} must be yes, no or unclear`;
+    answers.set(a.id, answer);
+  }
+  const phases = decidingPhases(listed);
+  const missing = phases.flatMap(phase => screened(r, phase).map(c => `${phase}.${c.id}`)).filter(k => !answers.has(k));
+  if (missing.length) return `missing answers for: ${missing.join(", ")}`;
+  const failed = phases.map(phase => ({
+    phase,
+    ids: screened(r, phase)
+      .filter(c => answers.get(`${phase}.${c.id}`) === "no")
+      .map(c => c.id),
+  }));
+  if (failed.some(f => !f.ids.length)) return { out: null };
+  return { out: `screened out: failed ${failed.map(f => `${f.phase} requirement: ${f.ids.join(", ")}`).join("; ")}` };
 }
 
 function scorePhase(r: Rubric, phase: Phase, answers: Map<string, { answer: Answer; evidence: string }>) {

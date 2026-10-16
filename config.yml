@@ -30,6 +30,7 @@ models:
   triage: openai-codex/gpt-6-luna # pass over raw titles
   discover: openai-codex/gpt-6.1-sol # web search for companies and postings
   locate: openai-codex/gpt-6.1-sol # web search for the employer's own posting of a LinkedIn/Indeed job
+  screen: openai-codex/gpt-6-luna # reads each posting for plain dealbreakers before prep
   prep: openai-codex/gpt-6.1-sol # scoring + resume tailoring
   fill: openai-codex/gpt-6.1-sol # form filling in the browser
   track: openai-codex/gpt-6.1-sol

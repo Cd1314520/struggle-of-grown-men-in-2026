@@ -1,6 +1,6 @@
 // Prep: score one job against the rubric and, when it clears, tailor the resume for it.
 import { existsSync } from "node:fs";
-import { autoApproval } from "./auto";
+import { autoApply, autoApproval, employerCapNote } from "./auto";
 import { config, jobDir, readProfile } from "./config";
 import { appliedLocation, employerApplications, getJob, jobSources, kvGet, logEvent, updateJob, type Job } from "./db";
 import { deferApproval, forgetDeferredApproval } from "./deferred-approvals";
@@ -11,7 +11,7 @@ import { employerListing, employersText } from "./employers";
 import { isCapacityError } from "./errors";
 import { assessPractice, EMPLOYER_TYPES } from "./practice";
 import { changedTemplateFiles, MAIN, pageCount, PDF_NAME, stageResume, stockPages, workingPdf } from "./resume";
-import { checklistText, evaluate, type Verdict } from "./rubric";
+import { checklistText, evaluate, screenChecklistText, screenVerdict, type Verdict } from "./rubric";
 import { to } from "./status";
 import { render } from "./worker-tools";
 
@@ -22,6 +22,21 @@ export async function prep(job: Job, run: RunWorker) {
   if (!feedback && placeOf(location) === "abroad") {
     updateJob(job.id, to.skipped("the listing is for a position outside the United States"));
     return;
+  }
+  // Auto apply could not take it whatever the assessment said: not worth one.
+  const capped = feedback ? null : employerCapped(job);
+  if (capped) {
+    uncountOne("prep");
+    updateJob(job.id, to.skipped(capped));
+    return;
+  }
+  if (!feedback && job.description) {
+    const screened = await screen(job, location, run);
+    if (screened !== "pass") {
+      uncountOne("prep");
+      if (screened === "capacity") updateJob(job.id, to.triaged("assessing again: the model provider was at capacity"));
+      return;
+    }
   }
   const elsewhere = jobSources(job.id)
     .filter(listing => listing.url !== job.url && listing.location && listing.location !== location)
@@ -180,4 +195,63 @@ export async function prep(job: Job, run: RunWorker) {
     uncountOne("prep");
     updateJob(job.id, to.triaged("assessing again: the model provider was at capacity"));
   } else updateJob(job.id, to.failed(`prep did not finish: ${res.error ?? "no report"}`));
+}
+
+// Why auto apply would never take this job: its employer already has autoApply.perEmployer applications.
+function employerCapped(job: Job): string | null {
+  const rules = autoApply();
+  if (!rules.enabled || !rules.phases.includes(config.phase)) return null;
+  const others = employerApplications(job);
+  return others >= rules.perEmployer ? employerCapNote(others) : null;
+}
+
+// A cheap model reads the posting for the requirements it settles on its own, and a job that plainly
+// fails them is skipped without the full assessment. Anything else, including a screen that does not
+// finish, goes on to prep: the screen can only rule a job out.
+async function screen(job: Job, location: string | null | undefined, run: RunWorker): Promise<"pass" | "stop" | "capacity"> {
+  const listed = employerListing(job.company);
+  let out = null as string | null; // set from the tool callback
+  const { done } = run({
+    name: "screen",
+    builtins: [],
+    jobId: job.id,
+    model: config.models.screen,
+    cwd: jobDir(job.id),
+    maxTime: "5m",
+    prompt: render("screen", {
+      ...job,
+      location: location ?? "location not stated",
+      checklist: screenChecklistText(listed),
+    }),
+    tools: {
+      screen_result: {
+        description: "Submit your answer to every statement.",
+        parameters: schema({
+          answers: {
+            type: "array",
+            items: schema({
+              id: S.str("Statement id exactly as given, e.g. practice.not_senior"),
+              answer: { type: "string", enum: ["yes", "no", "unclear"] },
+              evidence: S.str("Short quote or fact from the posting that decides it; empty if unclear"),
+            }),
+          },
+        }),
+        handler: args => {
+          if (getJob(job.id)?.status !== "prepping") return "ERROR: this job was taken out of prep while you were working; nothing was recorded. Stop.";
+          const result = screenVerdict(args["answers"], listed);
+          if (typeof result === "string") return `ERROR: ${result}. Call screen_result again with every statement answered.`;
+          out = result.out;
+          return "Recorded.";
+        },
+      },
+    },
+  });
+  const res = await done;
+  // Taken out of prep while it ran: whatever the user did with it stands.
+  if (getJob(job.id)?.status !== "prepping") return "stop";
+  if (out) {
+    updateJob(job.id, to.skipped(out));
+    return "stop";
+  }
+  return isCapacityError(res.error) ? "capacity" : "pass";
 }

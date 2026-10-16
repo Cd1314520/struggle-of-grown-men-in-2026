@@ -28,11 +28,14 @@ Side exits: `needs_input` (agent asked a question), `needs_manual` (agent could 
 
 Triage first drops, without a model, postings abroad and senior-level titles (senior, staff, principal, lead, manager and above; `src/screen.ts`), then uses the model named in `models.triage`, up to 50 postings per call, in sequential batches until the found backlog is drained.
 
+Before the full assessment, prep skips without a model a job whose employer already has `autoApply.perEmployer` applications (while auto apply runs in this phase), then has the cheaper `models.screen` read the posting for the required statements in `rubric.yml` that it settles on its own (those not marked `screen: false`). A job is screened out only when it fails a requirement under every rubric that could decide it; anything else, or a screen that does not finish, goes on to the full assessment. Neither counts against `limits.prepPerDay`.
+
 | Worker | Built-in omp tools | Host tools |
 |---|---|---|
 | triage | read, write | `triage_result` |
 | discover | + web_search | `add_company`, `save_job` |
-| prep | + edit, bash (typst) | `finish_prep` |
+| screen | none | `screen_result` |
+| prep | + edit, bash (typst) | `submit_checklist`, `finish_prep` |
 | fill | read, write, eval (browser) | `get_account`, `gmail_*`, `ask_user`, `confirm_submit`, `need_manual`, `verify_status`, `report_result` |
 | track | read, write | `gmail_*`, `update_application`, `note` |
 

@@ -72,7 +72,7 @@ const CONFIG = shape(
   {
     port,
     phase,
-    models: shape({ triage: model, discover: model, locate: model, prep: model, fill: model, track: model }),
+    models: shape({ triage: model, discover: model, locate: model, screen: model, prep: model, fill: model, track: model }),
     confirmBeforeSubmit: bool,
     schedule: shape({ scanMinutes: amount(), discoverMinutes: amount(), trackMinutes: amount() }),
     concurrency: shape({ prep: count() }, { fill: count(1) }),

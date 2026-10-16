@@ -62,7 +62,7 @@ If you reach the app under another name, set `publicUrl` to it.
 
 1. **Profile** (Profile tab, or edit `profile/` directly). Nothing is assessed or applied while a file still contains `TODO-FILL`.
    - `targets.md`: what you want, in plain language; drives triage and discovery.
-   - `rubric.yml`: the scoring checklist. The agent answers each statement yes / no / unclear with evidence; the app computes the score from the weights, applies the required items and threshold, and decides apply / hold / skip.
+   - `rubric.yml`: the scoring checklist. The agent answers each statement yes / no / unclear with evidence; the app computes the score from the weights, applies the required items and threshold, and decides apply / hold / skip. A required item marked `screen: false` is left out of the cheap pre-read that comes before the full assessment: use it for judgments, such as what kind of employer it is, and for items the cheap model gets wrong.
    - `basic-resume/`: the stock resume (Typst). `main.typ` is yours and not tracked; `main.example.typ` shows the shape. The agent tailors a per-job copy of `main.typ` and never edits the template `resume.typ`.
    - `resume-notes.md` (not tracked): optional bank of extra bullets/skills/examples the agent may swap in. Empty means reorder and trim only.
    - `personal.yml`, `answers.md`: form details and deliberately maintained standard answers. Inbox answers are application-local by default; they are never automatically appended to `answers.md`.

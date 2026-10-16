@@ -142,8 +142,7 @@ export function runWorker(opts: WorkerOptions): WorkerHandle {
     opts.cwd,
     "--append-system-prompt",
     join(PROMPTS, "system.md"),
-    "--tools",
-    opts.builtins.join(","),
+    ...(opts.builtins.length ? ["--tools", opts.builtins.join(",")] : ["--no-tools"]),
   ];
   if (opts.model) args.push("--model", opts.model);
   if (opts.maxTime) args.push("--max-time", opts.maxTime);
