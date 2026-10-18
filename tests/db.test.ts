@@ -540,6 +540,19 @@ describe("postings, duplicates and sources", () => {
     assert.equal(store.getJob(3).company_key, "acme");
   `);
   });
+
+  it("folds a duplicate whose listing is the better one to apply through", () => {
+    scenario(`
+    job(1, { company: "Acme", title: "Data Engineer", source: "linkedin", url: "https://www.linkedin.com/jobs/view/1", status: "triaged" });
+    job(2, { company: "Acme", title: "Data Engineer", source: "greenhouse", url: "https://boards.example/acme/de", status: "found" });
+
+    store.dedupeExisting();
+
+    assert.equal(store.getJob(2), null);
+    assert.deepEqual([store.getJob(1).url, store.getJob(1).source], ["https://boards.example/acme/de", "greenhouse"]);
+    assert.deepEqual(store.jobSources(1).map(s => s.url), ["https://www.linkedin.com/jobs/view/1"]);
+  `);
+  });
 });
 
 describe("where SQL lives", () => {

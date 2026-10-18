@@ -443,9 +443,10 @@ export function dedupeExisting() {
         kept.push(r);
         continue;
       }
-      fold(twin, r.url, r.source, r.location, r.description);
+      // Gone before the fold, which may make its URL the one the twin applies through.
       moveSources(r.id, twin.id);
       deleteJob(r.id);
+      fold(twin, r.url, r.source, r.location, r.description);
       merged++;
     }
   }
