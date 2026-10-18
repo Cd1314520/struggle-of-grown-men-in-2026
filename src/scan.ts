@@ -77,7 +77,7 @@ function screen(batch: Job[]): Job[] {
       dropped++;
     } else left.push(job);
   }
-  if (dropped) logEvent("system", `Triage: screened out ${dropped} of ${batch.length} abroad or senior-level before reading`);
+  if (dropped) logEvent("system", `Triage: screened out ${dropped} of ${batch.length} abroad, senior-level or hardware before reading`);
   return left;
 }
 

@@ -29,6 +29,28 @@ describe("screening postings before triage", () => {
     ])
       expect(screenOut(title, "Remote - US")).toBeNull();
   });
+  it("drops hardware, embedded and FPGA titles", () => {
+    for (const title of [
+      "Embedded Software Engineer",
+      "Embedded Systems Engineer",
+      "Embedded Firmware Engineer",
+      "FPGA Design Engineer",
+      "Internal Acceleration, Engineer (ASIC)",
+      "Hardware Test Engineer I, Testbeds & EGSE",
+      "Electrical Engineer, Hardware Platform, 2+ years of experience",
+      "Firmware Engineer, Manufacturing Test",
+    ])
+      expect(screenOut(title, "Austin, TX")).toMatch(/hardware or embedded/);
+  });
+  it("keeps software and data titles that only mention hardware", () => {
+    for (const title of [
+      "Data Engineer, Hardware & Consumer Devices",
+      "Analytics Engineer, Hardware Test",
+      "Data Scientist - Embedded Insights",
+      "Embedded AI Engineer, On-Device Models",
+    ])
+      expect(screenOut(title, "Austin, TX")).toBeNull();
+  });
   it("drops listings abroad and keeps US or unstated ones", () => {
     expect(screenOut("Software Engineer", "Bengaluru")).toMatch(/outside the United States/);
     expect(screenOut("Software Engineer", "UK-Bristol")).toMatch(/outside the United States/);
