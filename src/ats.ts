@@ -43,13 +43,65 @@ export function addCompany(c: Company): boolean {
   return true;
 }
 
+// Elements a reader never sees, and the attributes that hide one. Postings use hidden text to plant
+// instructions for AI applicants. White or tiny text is kept: boards also tuck recruiter tags away
+// that way, and the prompts say what to do with instructions in it.
+const UNSEEN = new Set(["script", "style", "template"]);
+const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
+const hiddenStyle = (style: string) =>
+  style.split(";").some(d => {
+    const i = d.indexOf(":");
+    const prop = d.slice(0, i).trim().toLowerCase();
+    const value = d
+      .slice(i + 1)
+      .replace(/!important/i, "")
+      .trim()
+      .toLowerCase();
+    if (prop === "display") return value === "none";
+    if (prop === "visibility") return value === "hidden" || value === "collapse";
+    if (prop === "opacity" || prop === "font-size") return parseFloat(value) === 0;
+    return false;
+  });
+function hides(name: string, attrs: string): boolean {
+  if (UNSEEN.has(name)) return true;
+  for (const [, key = "", a, b, c] of attrs.matchAll(/([^\s"'=/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) {
+    const k = key.toLowerCase();
+    if (k === "hidden" || (k === "style" && hiddenStyle(a ?? b ?? c ?? ""))) return true;
+  }
+  return false;
+}
+// Removes hidden elements with everything inside them. One left unclosed loses only its tag.
+export function dropHidden(html: string): string {
+  const tag = /<(\/?)([a-z][\w-]*)\b([^>]*)>/gi;
+  let out = "",
+    from = 0;
+  for (let m; (m = tag.exec(html));) {
+    const name = (m[2] ?? "").toLowerCase(),
+      attrs = m[3] ?? "";
+    if (m[1] || !hides(name, attrs)) continue;
+    out += html.slice(from, m.index);
+    from = tag.lastIndex;
+    if (VOID.has(name) || attrs.endsWith("/")) continue;
+    let depth = 1;
+    for (let n; depth && (n = tag.exec(html));) {
+      if ((n[2] ?? "").toLowerCase() !== name || (n[3] ?? "").endsWith("/")) continue;
+      depth += n[1] ? -1 : 1;
+      if (!depth) from = tag.lastIndex;
+    }
+    if (depth) tag.lastIndex = from;
+  }
+  return out + html.slice(from);
+}
+
 export const htmlToText = (html: string) =>
-  html
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, "&")
+  dropHidden(
+    html
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, "&"),
+  )
     .replace(/<\/(p|div|li|h[1-6]|ul|ol)>|<br\s*\/?>/gi, "\n")
     .replace(/<li[^>]*>/gi, "- ")
     .replace(/<[^>]+>/g, "")
