@@ -10,7 +10,7 @@
   phone: "",
   personal-site: "",
   accent-color: "#000000",
-  font: "New Computer Modern",
+  font: "Liberation Sans",
   paper: "us-letter",
   author-font-size: 20pt,
   font-size: 10pt,
@@ -23,13 +23,17 @@
   set document(author: author, title: author)
 
   // Document-wide formatting, including font and margins
+  // Plain text for ATS parsers: no ligatures, no hyphenation and no kerning. Position-based
+  // extractors (pypdf, several ATS importers) read a kerned pair as a word break ("Da vid",
+  // "T ypeScript") and a hyphenated line break as two words ("autho- rization"), so keywords
+  // stop matching. A font with modest kerning (Liberation Sans) keeps the page compact without it.
   set text(
-    // LaTeX style font
     font: font,
     size: font-size,
     lang: lang,
-    // Disable ligatures so ATS systems do not get confused when parsing fonts.
-    ligatures: false
+    ligatures: false,
+    hyphenate: false,
+    kerning: false,
   )
 
   // Disable smart quotes so apostrophes stay as ASCII U+0027 — ATS keyword
@@ -106,8 +110,8 @@
     ],
   )
 
-  // Main body.
-  set par(justify: true)
+  // Main body. Ragged right: justified text needs hyphenation to look even, and hyphenation is off.
+  set par(justify: false)
 
   body
 }
@@ -135,7 +139,8 @@
   ]
 }
 
-// Cannot just use normal --- ligature because ligatures are disabled for good reasons
+// An en dash between the dates: date-range parsers in ATS importers expect "-" or "–", and the
+// --- ligature is unavailable anyway because ligatures are disabled.
 #let dates-helper(
   start-date: "",
   end-date: "",
@@ -143,7 +148,7 @@
   if start-date == "" {
     end-date
   } else {
-    start-date + " " + sym.dash.em + " " + end-date
+    start-date + " " + sym.dash.en + " " + end-date
   }
 }
 
