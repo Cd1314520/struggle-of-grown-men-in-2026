@@ -1,4 +1,4 @@
-// The Questions inbox: the blockers the pipeline parked on the user, worked down oldest first.
+// The Questions inbox: the blockers the pipeline parked on the user, worked down newest posting first.
 // Questions are answered here, one open at a time; the other gates only link to their application.
 import type { QuestionGroup } from "../../src/questions";
 import { state, ui } from "../store";
@@ -24,16 +24,17 @@ const LATER: Partial<Record<QuestionGroup["kind"], [one: string, many: string]>>
 };
 
 export const answerable = () => state().questionGroups.filter(g => g.kind === "question");
-// The group shown open: the one the user chose, else the oldest. An empty string means they closed it.
+// The group shown open: the one the user chose, else the posting opened most recently. An empty string means they closed it.
 export const openKey = () => {
   if (ui.openQuestion === "") return "";
   const groups = answerable();
   return groups.some(g => g.key === ui.openQuestion) ? (ui.openQuestion ?? "") : (groups[0]?.key ?? "");
 };
 
+// How long the posting has been open.
 const BUCKETS: [label: string, olderThan: number][] = [
-  ["Older than a week", 7 * DAY],
-  ["This week", DAY],
+  ["Opened over a week ago", 7 * DAY],
+  ["Opened this week", DAY],
 ];
 
 function rowHtml(g: QuestionGroup, open: boolean, n: number) {
@@ -95,11 +96,11 @@ export function questionsHtml() {
     })
     .filter(Boolean)
     .join(", ");
-  // Oldest first, under a heading for each age: the server sends them in the order they were asked.
+  // Newest posting first, under a heading for how long it has been open: the server sends them in that order.
   let bucket = "";
   const answerRows = answer
     .map((g, n) => {
-      const label = BUCKETS.find(([, ms]) => ageMs(g.createdAt) > ms)?.[0] ?? "Today",
+      const label = BUCKETS.find(([, ms]) => Date.now() - g.openedAt > ms)?.[0] ?? "Opened today",
         head = label === bucket ? "" : `<div class="qbucket">${label}</div>`;
       bucket = label;
       return head + itemHtml(g, open, n);

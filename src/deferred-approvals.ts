@@ -1,9 +1,9 @@
 // Jobs that only missed auto-approval because the day's allowance was used up. They are reconsidered,
-// oldest first, when there is allowance again.
+// most recently opened first, when there is allowance again.
 import { existsSync } from "node:fs";
 import { autoApply, reconsiderAutoApproval } from "./auto";
 import { config } from "./config";
-import { db, employerApplications, getJob, kvDelete, kvEntries, kvGet, kvSet, logEvent, notifyJobChange, updateJob, writeJob } from "./db";
+import { db, employerApplications, getJob, openedAt, kvDelete, kvEntries, kvGet, kvSet, logEvent, notifyJobChange, updateJob, writeJob } from "./db";
 import { countOne, usedToday } from "./limits";
 import { profileProblems } from "./profile";
 import { workingPdf } from "./resume";
@@ -21,7 +21,11 @@ export function pumpDeferredApprovals() {
   const limit = rules.perDay;
   if (usedToday("auto") >= limit) return;
 
-  const rows = kvEntries(DEFERRED_PREFIX);
+  const opened = (key: string) => {
+    const job = getJob(Number(key.slice(DEFERRED_PREFIX.length)) || 0);
+    return job ? openedAt(job) : 0;
+  };
+  const rows = kvEntries(DEFERRED_PREFIX).sort((a, b) => opened(b.key) - opened(a.key));
 
   for (const row of rows) {
     if (usedToday("auto") >= limit) break;

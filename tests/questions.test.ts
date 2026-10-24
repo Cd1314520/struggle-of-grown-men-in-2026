@@ -56,6 +56,16 @@ describe("parked browser tabs", () => {
 });
 
 describe("durable questions", () => {
+  it("lists the question whose posting opened most recently first, whenever it was asked", () => {
+    scenario(`
+    const daysAgo = n => new Date(Date.now() - n * 864e5).toISOString();
+    job(1, "Old Co"); job(2, "New Co"); job(3, "Middle Co");
+    updateJob(1, { posted_at: daysAgo(40) });
+    updateJob(3, { posted_at: daysAgo(3) });
+    for (const id of [1, 2, 3]) parkGate(id, { ...prompt, text: "Question " + id }, null);
+    assert.deepEqual(listQuestionGroups().map(g => g.jobs[0].company), ["New Co", "Middle Co", "Old Co"]);
+    `);
+  });
   it("groups only exact structured employer questions and isolates sensitive wording, choices, and context", () => {
     scenario(`
     job(1); job(2, "Acme, Inc.", "Analyst"); job(3, "Acme Inc");

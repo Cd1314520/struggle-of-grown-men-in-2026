@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { db, getJob, notifyJobChange, writeJob, type Job } from "./db";
+import { db, getJob, notifyJobChange, openedAt, writeJob, type Job } from "./db";
 import {
   clearFillFlags,
   clearManualLease,
@@ -59,6 +59,8 @@ export interface QuestionGroup {
   // unanswered, so answering this one opens the next instead of resuming the application.
   jobs: { id: number; company: string; title: string; gateId: string; askedAt: string; queuedAfter: number }[];
   createdAt: string;
+  // When the most recently opened of those postings opened, in ms (see openedAt).
+  openedAt: number;
 }
 export interface HandoffRecord {
   kind: "manual" | "submission_ambiguous";
@@ -337,6 +339,8 @@ function queuedAfter(row: GateRow): number {
     .filter(q => findStoredAnswer(row.job_id, { kind: "question", text: q.text, context: q.context, options: JSON.parse(q.options) as string[] }) === null)
     .length;
 }
+// Open gates grouped by what they ask, the group with the most recently opened posting first: an
+// answer is worth most to an application while its posting is new.
 export function listQuestionGroups(): QuestionGroup[] {
   const groups = new Map<string, QuestionGroup>();
   for (const row of db.query<GateRow, []>("SELECT * FROM question_gates WHERE state = 'open' ORDER BY created_at, id").all()) {
@@ -354,12 +358,14 @@ export function listQuestionGroups(): QuestionGroup[] {
         standingAllowed: !!row.standing_allowed,
         jobs: [],
         createdAt: row.created_at,
+        openedAt: 0,
       };
       groups.set(row.group_key, group);
     }
     group.jobs.push({ id: job.id, company: job.company, title: job.title, gateId: row.id, askedAt: row.created_at, queuedAfter: queuedAfter(row) });
+    group.openedAt = Math.max(group.openedAt, openedAt(job));
   }
-  return [...groups.values()];
+  return [...groups.values()].sort((a, b) => b.openedAt - a.openedAt);
 }
 function saveAnswer(row: GateRow, answer: string, scope: AnswerScope, at: string) {
   if (row.kind === "question" || row.kind === "cover_letter") {

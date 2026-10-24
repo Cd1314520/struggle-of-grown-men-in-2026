@@ -13,6 +13,7 @@ import {
   kvSet,
   logEvent,
   nextToPrep,
+  openedAt,
   notifyJobChange,
   pruneChatter,
   requeueInterruptedPrep,
@@ -72,7 +73,11 @@ const employerOf = (job: Job) => job.company_key ?? job.company;
 
 // New applications are spread over limits.applySpreadHours instead of all starting when the daily
 // cap resets: a posting found mid-day is applied to within the gap, and no site sees a burst.
-// Resumes and verifications are not paced.
+// Resumes and verifications are not paced, and neither is a posting opened within FRESH_MS: the first
+// hours are when an application counts, and the gap would hold a scan's batch of new ones for hours.
+// Such a start still restarts the gap for the older postings behind it.
+const FRESH_MS = 24 * 3600_000;
+const isFresh = (job: Job) => Date.now() - openedAt(job) < FRESH_MS;
 function newApplicationGap(): number {
   const hours = config.limits.applySpreadHours ?? 24;
   const cap = config.limits.applyPerDay;
@@ -127,13 +132,14 @@ function recoverCapacityHandoffs() {
 }
 
 // Jobs a fill worker could be started for, in the order they should be tried: verification of an
-// ambiguous submit first, then draft recovery, then jobs with a saved draft, then oldest.
+// ambiguous submit first, then draft recovery, then jobs with a saved draft, then the most recently
+// opened posting, as prep takes them: applying in its first hours matters most.
 function fillQueue(): FillCandidate[] {
   const rank = (c: FillCandidate) => (c.verify ? 4 : 0) + (c.recovering ? 2 : 0) + (c.job.fill_checkpoint === null ? 0 : 1);
   return jobsInStatuses(["approved", "needs_manual"])
     .map(job => ({ job, verify: isVerifying(job.id), recovering: isRecovering(job.id) }))
     .filter(c => c.job.status === "approved" || c.verify)
-    .sort((a, b) => rank(b) - rank(a) || a.job.id - b.job.id);
+    .sort((a, b) => rank(b) - rank(a) || openedAt(b.job) - openedAt(a.job) || a.job.id - b.job.id);
 }
 
 // Auto-approvals waiting for a browser are held to the rules as they stand now, before one is spent
@@ -394,7 +400,11 @@ export class Scheduler {
       const saved = readCheckpoint(candidate.id);
       // Resuming an application already started finishes work the cap was spent on; it does not wait for tomorrow's.
       const isNew = !verify && !saved && !candidate.resume_sha;
-      if (isNew && (usedToday("fill") >= config.limits.applyPerDay || Date.now() < this.nextNewAt || started.has(employerOf(candidate)))) continue;
+      if (
+        isNew &&
+        (usedToday("fill") >= config.limits.applyPerDay || (Date.now() < this.nextNewAt && !isFresh(candidate)) || started.has(employerOf(candidate)))
+      )
+        continue;
       if (saved ? saved.slot !== slot : candidate.resume_sha && lastSlot(candidate.id) !== slot) continue;
       return { job: candidate, checkpoint: saved, isNew };
     }

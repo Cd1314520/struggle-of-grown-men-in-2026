@@ -176,13 +176,17 @@ function must<T>(value: T | null | undefined, what: string): T {
 const jobRow = (id: number) => must(getJob(id), `job ${id}`);
 const openGate = (jobId: number) => must(core.getOpenGate(jobId), `open gate for job ${jobId}`);
 const workerAt = (index: number) => must(workers[index], `worker ${index}`);
+// One sighting time for every job: the fill queue takes the most recently opened first, so jobs found
+// a second apart would otherwise start in an order that depends on the clock.
+const FOUND_AT = new Date().toISOString().slice(0, 19).replace("T", " ");
 function addJob(id: number) {
-  db.query("INSERT INTO jobs (id,url,source,company,title,status,approved_by) VALUES (?,?,?, ?,?,'approved','user')").run(
+  db.query("INSERT INTO jobs (id,url,source,company,title,status,approved_by,found_at) VALUES (?,?,?, ?,?,'approved','user',?)").run(
     id,
     `https://fixture.invalid/job/${id}`,
     "fixture",
     `Employer ${id}`,
     `Requisition ${id}`,
+    FOUND_AT,
   );
   const dir = jobDir(id);
   writeFileSync(join(dir, resume.PDF_NAME), `PDF for job ${id}`);
@@ -346,6 +350,16 @@ if (scenario === "recovery-prefix") {
   process.exit(0);
 }
 
+if (scenario === "freshest-first") {
+  addJob(1);
+  addJob(2);
+  db.query("UPDATE jobs SET posted_at = ? WHERE id = 1").run(new Date(Date.now() - 30 * 864e5).toISOString());
+  scheduler.pump();
+  await until(() => workers.length === 1);
+  assert.equal(workerAt(0).options.jobId, 2, "the posting opened most recently is applied to first, whatever was found first");
+  process.exit(0);
+}
+
 if (scenario === "paced") {
   config.limits.applySpreadHours = 24;
   config.limits.applyPerDay = 100;
@@ -365,6 +379,8 @@ if (
   ].includes(scenario ?? "")
 )
   addJob(2);
+// Opened well before the first sighting: old enough to be paced.
+if (scenario === "paced") db.query("UPDATE jobs SET posted_at = ? WHERE id = 2").run(new Date(Date.now() - 3 * 864e5).toISOString());
 if (["manual-same-employer", "terminal-success", "terminal-closed", "terminal-persistence-failure"].includes(scenario ?? ""))
   updateJob(2, { company: jobRow(1).company, company_key: jobRow(1).company_key });
 scheduler.pump();
@@ -427,6 +443,11 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(jobRow(2).status, "approved");
   const gap = Number(db.query<{ value: string }, []>("SELECT value FROM kv WHERE key = 'fill.nextNewAt'").get()?.value) - Date.now();
   assert.ok(gap > 14 * 60_000 && gap <= 14.4 * 60_000, `gap ${gap}`);
+  addJob(3);
+  scheduler.pump();
+  await until(() => workers.length === 2);
+  assert.equal(workerAt(1).options.jobId, 3, "a posting opened today does not wait out the gap");
+  assert.equal(jobRow(2).status, "approved");
 } else if (scenario === "capacity") {
   await call(first, "checkpoint", navigation);
   first.fail("Codex error event: Codex is at capacity, please try again later (code=turn_rate_limit_exceeded)");
