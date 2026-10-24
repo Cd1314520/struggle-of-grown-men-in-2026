@@ -34,6 +34,7 @@ import { runWorker, type RunWorker } from "./omp";
 import { needsJudgment, parsePracticeAssessment } from "./practice";
 import { prep } from "./prep";
 import { profileProblems } from "./profile";
+import { recheckDue, recheckOpenQuestions } from "./recheck";
 import {
   cancelJobGates,
   clearQueuedQuestions,
@@ -277,6 +278,13 @@ export class Scheduler {
     return this.exclusive("track", () => trackMailbox(this.run));
   }
 
+  recheck() {
+    return this.exclusive("recheck", async () => {
+      await recheckOpenQuestions(this.run);
+      this.pump();
+    });
+  }
+
   // ---- fill sessions and the browsers they hold
 
   abortFill(jobId: number) {
@@ -475,6 +483,7 @@ export class Scheduler {
         kvSet("last.track.attempt", new Date().toISOString());
         void this.track();
       }
+      if (!this.isRunning("recheck") && !profileProblems().length && recheckDue()) void this.recheck();
       this.pump();
     };
     setInterval(tick, 30_000);

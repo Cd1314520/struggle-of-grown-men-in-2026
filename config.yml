@@ -34,6 +34,7 @@ models:
   prep: openai-codex/gpt-6.1-sol # scoring + resume tailoring
   fill: openai-codex/gpt-6.1-sol # form filling in the browser
   track: openai-codex/gpt-6.1-sol
+  recheck: openai-codex/gpt-6.1-sol # answers parked questions the profile now settles
 
 # Scoring weights and thresholds live in profile/rubric.yml.
 

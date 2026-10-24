@@ -9,8 +9,13 @@ import * as gmail from "./gmail";
 import { arg, S, schema, type HostTool } from "./omp";
 import { fillTemplate } from "./template";
 
+export const readPrompt = (name: string) => readFileSync(join(PROMPTS, `${name}.md`), "utf8");
+
 export const render = (name: string, vars: Record<string, string | number | null>) =>
-  `Application phase: ${config.phase.toUpperCase()}\n\n` + fillTemplate(readFileSync(join(PROMPTS, `${name}.md`), "utf8"), vars, `prompts/${name}.md`);
+  `Application phase: ${config.phase.toUpperCase()}\n\n` + fillTemplate(readPrompt(name), vars, `prompts/${name}.md`);
+
+// What the fill and recheck agents may answer for the candidate without asking (prompts/low-stakes.md).
+export const lowStakesRule = () => readPrompt("low-stakes").trim();
 
 export const workDir = () => {
   const dir = join(DATA, "work");

@@ -17,7 +17,7 @@ export interface Config {
   vncUrl: string | null;
   mailbox: string | null;
   phase: "practice" | "real";
-  models: Record<"triage" | "discover" | "locate" | "screen" | "prep" | "fill" | "track", string | null>;
+  models: Record<"triage" | "discover" | "locate" | "screen" | "prep" | "fill" | "track" | "recheck", string | null>;
   confirmBeforeSubmit: boolean;
   autoApply?: {
     enabled?: boolean;

@@ -12,7 +12,7 @@ import * as gmail from "./gmail";
 import { getOpenGate, parkGate, readCheckpoint, recordCheckpoint, resumeContext } from "./questions";
 import { freezeResume, frozenResume } from "./resume";
 import { isSettled, to, wasSent } from "./status";
-import { render } from "./worker-tools";
+import { lowStakesRule, render } from "./worker-tools";
 
 // What the worker is told about where this application stands.
 const VERIFY_BRIEF =
@@ -129,6 +129,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
       mailbox,
       personal: readProfile("personal.yml"),
       answers: readProfile("answers.md"),
+      lowStakes: lowStakesRule(),
       resumeContext: JSON.stringify(context, null, 2),
       browserTabId: session.browser.tabId,
       continuationNote: job.note ?? "(none)",
