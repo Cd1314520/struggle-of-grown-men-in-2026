@@ -4,6 +4,7 @@ import { db, kvGet, kvSet } from "./db";
 import { digestDeliveryReference, findSentSelfMessage, gmailStatus, GmailSendError, sendSelfMessage } from "./gmail";
 import { listQuestionGroups } from "./questions";
 import type { QuestionGroup } from "./questions";
+import { dueSoon, type DueStep } from "./steps";
 
 export interface DigestStatus {
   enabled: boolean;
@@ -90,15 +91,38 @@ function unnotifiedGroups(): { group: QuestionGroup; fingerprint: string }[] {
   return groups.filter(item => !notified.has(item.fingerprint));
 }
 
-function plaintext(groups: QuestionGroup[], deliveryId: string): string {
+// Steps still to do whose deadline is within two days, each mentioned once per deadline. Kept in the
+// same ledger as the question groups, so one daily message carries both.
+const DUE_WITHIN_HOURS = 48;
+function unnotifiedSteps(now: number): { step: DueStep; fingerprint: string }[] {
+  const notified = db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM question_digest_notified WHERE fingerprint = ?");
+  return dueSoon(DUE_WITHIN_HOURS, now)
+    .map(step => ({
+      step,
+      fingerprint: createHash("sha256")
+        .update(JSON.stringify(["step", step.id, step.due_at]))
+        .digest("hex"),
+    }))
+    .filter(item => !notified.get(item.fingerprint)?.n);
+}
+
+function subjectOf(groups: number, steps: number) {
+  return `Auto Apply: ${[groups ? `${groups} new question group${groups === 1 ? "" : "s"}` : "", steps ? `${steps} step${steps === 1 ? "" : "s"} due soon` : ""]
+    .filter(Boolean)
+    .join(", ")}`;
+}
+
+function plaintext(groups: QuestionGroup[], steps: DueStep[], deliveryId: string): string {
   const totalJobs = new Set(groups.flatMap(group => group.jobs.map(job => job.id))).size;
-  const lines = [
-    `Auto Apply: ${groups.length} new question group${groups.length === 1 ? "" : "s"} across ${totalJobs} application${totalJobs === 1 ? "" : "s"}.`,
-    "",
-    `Questions inbox: ${publicUrl()}/#questions`,
-    "Answer in the app. Application-only is the default; standing answers require explicit approval.",
-    "",
-  ];
+  const lines = groups.length
+    ? [
+        `Auto Apply: ${groups.length} new question group${groups.length === 1 ? "" : "s"} across ${totalJobs} application${totalJobs === 1 ? "" : "s"}.`,
+        "",
+        `Questions inbox: ${publicUrl()}/#questions`,
+        "Answer in the app. Application-only is the default; standing answers require explicit approval.",
+        "",
+      ]
+    : [];
   const labels: Record<QuestionGroup["kind"], string> = {
     question: "Question",
     cover_letter: "Cover letter requested",
@@ -117,6 +141,11 @@ function plaintext(groups: QuestionGroup[], deliveryId: string): string {
     for (const job of group.jobs) lines.push(`  ${job.company} — ${job.title}: ${publicUrl()}/#progress/${job.id}`);
     lines.push("");
   }
+  if (steps.length) {
+    lines.push(`Due within ${DUE_WITHIN_HOURS} hours: ${steps.length} step${steps.length === 1 ? "" : "s"} from employers.`, "");
+    for (const step of steps)
+      lines.push(`${step.title} — due ${step.due_at ?? "?"}`, `  ${step.company} — ${step.title_of_job}: ${publicUrl()}/#applied/${step.job_id}`, "");
+  }
   lines.push(`Auto-Apply delivery reference: ${digestDeliveryReference(deliveryId)}`);
   return lines.join("\n");
 }
@@ -125,7 +154,7 @@ export function digestStatus(): DigestStatus {
   const cfg = settings();
   const latest = db.query<Delivery, []>("SELECT * FROM question_digest_deliveries ORDER BY created_at DESC, rowid DESC LIMIT 1").get();
   const sent = lastSent();
-  const undeliveredGroups = unnotifiedGroups().length;
+  const undeliveredGroups = unnotifiedGroups().length + unnotifiedSteps(Date.now()).length;
   const address = recipient();
   return {
     ...cfg,
@@ -179,19 +208,21 @@ async function deliver(options: { force?: boolean; now?: Date }): Promise<Result
         const last = lastSent();
         if (last && localClock(new Date(last.sent_at), cfg.timeZone).date >= clock.date) return { sent: false, groups: 0, reason: "already_sent_today" };
       }
-      const groups = unnotifiedGroups();
-      if (!groups.length) return { sent: false, groups: 0, reason: "no_new_groups" };
+      const groups = unnotifiedGroups(),
+        steps = unnotifiedSteps(now.getTime());
+      if (!groups.length && !steps.length) return { sent: false, groups: 0, reason: "no_new_groups" };
       const address = recipient();
       if (!address) throw new Error("Digest requires the configured mailbox to be connected with a matching Gmail identity");
       const id = `<auto-apply.questions.${randomUUID()}@${address.split("@")[1]}>`;
       const delivery: Delivery = {
         id,
         recipient: address,
-        fingerprints: JSON.stringify(groups.map(item => item.fingerprint)),
-        group_count: groups.length,
-        subject: `Auto Apply: ${groups.length} new question group${groups.length === 1 ? "" : "s"}`,
+        fingerprints: JSON.stringify([...groups, ...steps].map(item => item.fingerprint)),
+        group_count: groups.length + steps.length,
+        subject: subjectOf(groups.length, steps.length),
         body: plaintext(
           groups.map(item => item.group),
+          steps.map(item => item.step),
           id,
         ),
         state: "sending",

@@ -35,6 +35,7 @@ Each feature file has an H1, one paragraph on the user-visible behaviour, then e
 - [Fill gates](./fill-gates.md): what an approved application stops on: a question, a cover letter, the final-submit confirmation, a manual hand-off, a failure; and how each is cleared.
 - [Questions inbox](./questions-inbox.md): open questions grouped across applications, answered from one page.
 - [Add a posting](./add-posting.md): hand-picking a job by URL.
+- [Applied: next steps](./applied-steps.md): the steps an employer asked for after an application was sent, marking them done or booked, and recording an outcome.
 - [Profile and Settings](./profile-settings.md): editing profile files, the profile-incomplete notice, and what Settings reports.
 
 ## Not in the map (not verifiable in this instance)

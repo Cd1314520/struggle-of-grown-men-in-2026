@@ -126,7 +126,7 @@ export function settingsHtml() {
       <p class="hint" id="digest-result" role="status">${esc(ui.digestResult)}</p>
       ${how(
         "digest",
-        `<p class="hint">Configure <code>questionDigest.enabled</code>, <code>questionDigest.time</code> (HH:mm) and <code>questionDigest.timeZone</code> in <code>config.yml</code>. Each send holds only groups not delivered before. Delivery goes only to the verified configured/connected Gmail mailbox, never an arbitrary recipient. The message contains grouped prompts, counts and links, not answer values or credentials.</p>
+        `<p class="hint">Configure <code>questionDigest.enabled</code>, <code>questionDigest.time</code> (HH:mm) and <code>questionDigest.timeZone</code> in <code>config.yml</code>. Each send holds only groups not delivered before, and the employers' steps still to do that fall due within 48 hours (each once per deadline). Delivery goes only to the verified configured/connected Gmail mailbox, never an arbitrary recipient. The message contains grouped prompts, counts and links, not answer values or credentials.</p>
       <p class="hint" style="margin-top:6px">Send now bypasses the daily schedule, not delivery deduplication. Adding another application to an unchanged notified group does not send it again. An uncertain send is reconciled with Sent mail before any retry.</p>`,
       )}
     </div>

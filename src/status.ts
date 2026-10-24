@@ -15,7 +15,9 @@ import type { Job, JobFields } from "./db";
  * awaiting_submit   gate 2: form filled, waiting for the user
  * needs_manual      parked on something a person must do or inspect (captcha, odd flow, ambiguous submit)
  * submitted         application sent
- * interview / offer / rejected_by_company   outcomes seen in mail
+ * interview         the employer came back with a next step (see steps.ts); shown as "In process"
+ * offer / rejected_by_company   outcomes seen in mail, or recorded by the user
+ * withdrawn         the user pulled out of an application that was sent
  * held              good match set aside during the practice phase; released later
  * skipped           triage or score said no
  * rejected          user said no
@@ -36,6 +38,7 @@ export type Status =
   | "interview"
   | "offer"
   | "rejected_by_company"
+  | "withdrawn"
   | "held"
   | "skipped"
   | "rejected"
@@ -53,7 +56,7 @@ export const PARKED: readonly Status[] = ["needs_input", "awaiting_submit", "nee
 // Everything between gate 1 and a recorded outcome, plus failures that may have left a draft behind.
 export const FILL_STAGE: readonly Status[] = ["approved", "filling", ...PARKED, "failed"];
 // No fill worker will run for it again unless the user brings it back.
-const SETTLED: readonly Status[] = ["submitted", "interview", "offer", "rejected_by_company", "rejected", "skipped", "held"];
+const SETTLED: readonly Status[] = ["submitted", "interview", "offer", "rejected_by_company", "withdrawn", "rejected", "skipped", "held"];
 // What the user may send back into the pipeline.
 export const RETRYABLE: readonly Status[] = ["failed", "rejected", "skipped", "held"];
 // Sent, with more still to hear: what the mailbox is watched for.
@@ -62,6 +65,9 @@ export const AWAITING_OUTCOME: readonly Status[] = ["submitted", "interview"];
 export const OFF_BOARD: readonly Status[] = ["found", "skipped"];
 // What a message in the mailbox can say about an application that was sent.
 export const MAIL_OUTCOMES = ["submitted", "interview", "offer", "rejected_by_company"] as const satisfies readonly Status[];
+
+// What the user may record about an application that was sent, from its page.
+export const USER_OUTCOMES = ["interview", "offer", "rejected_by_company", "withdrawn"] as const satisfies readonly Status[];
 
 // The application went out: its status is an outcome, or it was sent before the user set it aside.
 export const wasSent = (job: Pick<Job, "status" | "submitted_at">) => (MAIL_OUTCOMES as readonly Status[]).includes(job.status) || !!job.submitted_at;
@@ -95,5 +101,5 @@ export const to = {
   // The application was sent, by a worker or by hand. The one place submitted_at is written.
   submitted: (note: string): JobFields => ({ ...settle("submitted", note), submitted_at: new Date().toISOString() }),
   // What the mailbox says happened to an application that was already sent.
-  outcome: (status: (typeof MAIL_OUTCOMES)[number], note: string): JobFields => ({ status, note }),
+  outcome: (status: (typeof MAIL_OUTCOMES)[number] | (typeof USER_OUTCOMES)[number], note: string): JobFields => ({ status, note }),
 };

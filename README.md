@@ -16,13 +16,15 @@ systemctl --user status auto-apply
 | [docs/operations.md](docs/operations.md) | auto apply, parked applications and Questions, the daily digest, the observation journal, Workday recovery |
 | [docs/pipeline.md](docs/pipeline.md) | sources and scanning, duplicates, freshness, resumes |
 | [docs/browser.md](docs/browser.md) | the browsers, the pacing proxy, and the fingerprint audit |
-| [docs/database.md](docs/database.md) | schema and migrations, backups, status history, fill state, retention |
+| [docs/database.md](docs/database.md) | schema and migrations, backups, status history, fill state, application steps, retention |
 
 Settings live in [`config.yml`](config.yml), with what identifies you or this machine in an untracked `config.local.yml` laid over it; both are checked when the app starts. The documentation names the keys and leaves the values to the file.
 
 ## Flow
 
-`found → triaged → prepping → awaiting_approval (gate 1) → approved → filling → awaiting_submit (gate 2) → submitted → interview / offer / rejected_by_company`
+`found → triaged → prepping → awaiting_approval (gate 1) → approved → filling → awaiting_submit (gate 2) → submitted → interview / offer / rejected_by_company / withdrawn`
+
+Once an application is sent, each thing the employer asks for (a questionnaire, an assessment, a time to book, an interview) is a step on it (`src/steps.ts`). The mailbox agent adds steps from mail and moves them on; you mark them done or booked on the job's page, and the Applied list is grouped by whose move it is. A step you mark done stays in the agent's brief as waiting on the employer, so the reply that follows (the next round, or a rejection) is attached to it.
 
 Side exits: `needs_input` (agent asked a question), `needs_manual` (agent could not get past a CAPTCHA or block), `failed`, `skipped`, `rejected`.
 
@@ -37,7 +39,7 @@ Before the full assessment, prep skips without a model a job whose employer alre
 | screen | none | `screen_result` |
 | prep | + edit, bash (typst) | `submit_checklist`, `finish_prep` |
 | fill | read, write, eval (browser) | `get_account`, `gmail_*`, `ask_user`, `confirm_submit`, `need_manual`, `verify_status`, `report_result` |
-| track | read, write | `gmail_*`, `update_application`, `note` |
+| track | read, write | `gmail_*`, `add_step`, `update_step`, `record_outcome`, `note` |
 
 ## Checks
 

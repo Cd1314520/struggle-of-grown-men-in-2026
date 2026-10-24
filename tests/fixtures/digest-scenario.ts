@@ -425,6 +425,43 @@ switch (process.argv[2]) {
       assert.equal(text.includes(secret), false);
     break;
   }
+  case "steps": {
+    const { addStep } = await import("../../src/steps");
+    const sentJob = (title: string) => {
+      const id = nextJob++;
+      db.query("INSERT INTO jobs (id, url, source, company, company_key, title, status, submitted_at) VALUES (?, ?, 'test', 'Acme', ?, ?, 'submitted', ?)").run(
+        id,
+        `https://jobs.example.com/${id}`,
+        companyKey("Acme"),
+        title,
+        "2026-10-01T00:00:00Z",
+      );
+      return { id, status: "submitted" as const };
+    };
+    // Due within two days: in the daily mail once; later, or with no deadline: not yet.
+    addStep(sentJob("Backend Engineer"), { kind: "assessment", title: "Codility OA", due_at: "2026-10-11", source: "mail" });
+    addStep(sentJob("Data Engineer"), { kind: "questionnaire", title: "Later form", due_at: "2026-10-20", source: "mail" });
+    addStep(sentJob("SRE"), { kind: "schedule", title: "Book a call", source: "mail" });
+    const first = await sendQuestionDigest({ now });
+    assert.equal(first.sent, true);
+    assert.equal(first.groups, 1);
+    const text = must(sent[0], "sent message 0").text;
+    const subject = () => db.query<{ subject: string }, []>("SELECT subject FROM question_digest_deliveries ORDER BY rowid DESC LIMIT 1").get()?.subject;
+    assert.equal(subject(), "Auto Apply: 1 step due soon");
+    assert.ok(text.includes("Codility OA — due 2026-10-11"));
+    assert.ok(text.includes("Acme — Backend Engineer: https://auto-apply.example.com/#applied/1"));
+    assert.equal(text.includes("Later form"), false);
+    assert.equal(text.includes("Questions inbox"), false);
+    // Already mentioned; the later one comes due two days before its deadline.
+    assert.equal((await sendQuestionDigest({ force: true, now })).reason, "no_new_groups");
+    gate("Are you authorized to work?");
+    const next = await sendQuestionDigest({ force: true, now: new Date("2026-10-19T14:00:00Z") });
+    assert.equal(next.groups, 2);
+    const both = must(sent[1], "sent message 1").text;
+    assert.equal(subject(), "Auto Apply: 1 new question group, 1 step due soon");
+    assert.ok(both.includes("Later form"));
+    break;
+  }
   default:
     throw new Error(`Unknown scenario: ${process.argv[2]}`);
 }

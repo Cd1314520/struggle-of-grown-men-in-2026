@@ -12,7 +12,7 @@ bun run migrate --db <path>           # the same for another file, such as a res
 
 The journal and reassessment scripts open a database by path and never change its schema: they stop with a message naming `bun run migrate` if it is not at the version the code expects.
 
-SQL lives with the module that owns the table: `jobs`, `job_sources`, `status_changes`, `events` and `kv` in `src/db.ts`, `accounts` in `src/accounts.ts`, gates and answers in `src/questions.ts`, `fill_state` in `src/fill-state.ts`, the digest ledger in `src/digest.ts`. Other modules call their functions. Values are always bound as parameters; a list is bound as one JSON array and read with `json_each`. `tests/db.test.ts` checks both by scanning the source: it catches statements outside the owning modules and values spliced into SQL template strings, not SQL assembled by string concatenation.
+SQL lives with the module that owns the table: `jobs`, `job_sources`, `status_changes`, `events` and `kv` in `src/db.ts`, `accounts` in `src/accounts.ts`, gates and answers in `src/questions.ts`, `fill_state` in `src/fill-state.ts`, `application_steps` in `src/steps.ts`, the digest ledger in `src/digest.ts`. Other modules call their functions. Values are always bound as parameters; a list is bound as one JSON array and read with `json_each`. `tests/db.test.ts` checks both by scanning the source: it catches statements outside the owning modules and values spliced into SQL template strings, not SQL assembled by string concatenation.
 
 The current schema in full is recorded in `tests/__snapshots__/schema.test.ts.snap`. Adding a migration changes it deliberately (`bun test -u`); a change without a new migration means a shipped migration was edited.
 
@@ -33,6 +33,10 @@ SELECT at, from_status, to_status, approved_by, note FROM status_changes WHERE j
 ## Fill state
 
 `fill_state` has one row per application that has reached a browser: whether its final submit was authorized and has no recorded outcome (`submitting`), whether a verification-only worker is queued for it (`verifying`), whether its next attempt resumes a draft (`recovering`), the browser that last held it (`slot`), and the gate under which you reserved that browser (`manual_gate`). `verifying` cannot be set without `submitting`. Everything that reads or changes it is in `src/fill-state.ts`.
+
+## Application steps
+
+`application_steps` has one row per thing an employer asked for after an application was sent: its kind (`questionnaire`, `assessment`, `schedule`, `interview`, `info_request`, `other`), a title, the deadline (`due_at`, a day or a time), the booked time (`scheduled_at`), the link from the mail, and where it came from (`mail` with its Gmail message id, or `user`). Its `state` says whose move it is: `todo` is yours, `done` and a `scheduled` time that has passed wait on the employer, a future `scheduled` time is upcoming, and `closed`, `expired` and `cancelled` are settled. Adding the first step moves an application from `submitted` to `interview`; an offer or a rejection closes the open steps, a withdrawal cancels them. A message read twice adds nothing: `(job_id, message_id, kind)` is unique. Version 5 turned each application then in `interview` into one `todo` step titled with its note.
 
 ## What is kept, and for how long
 

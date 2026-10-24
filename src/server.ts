@@ -42,6 +42,7 @@ import { digestStatus, sendQuestionDigest } from "./digest";
 import { errorMessage } from "./errors";
 import { isSubmitting, recoveryMode } from "./fill-state";
 import { RETRYABLE, to, wasSent } from "./status";
+import { addStep, changeStep, jobSteps, nextStepOf, nextSteps, recordOutcome, removeStep, STEP_KINDS, stepOf } from "./steps";
 import { serveUi } from "./ui";
 
 const PROFILE_FILES = ["targets.md", "rubric.yml", MAIN, "resume-notes.md", "answers.md", "personal.yml", "companies.yml"];
@@ -87,7 +88,8 @@ function resumeDiff(job: Job) {
 }
 
 function state(scheduler: Scheduler): AppState {
-  const jobs = boardJobs().map(j => ({ ...j, opened_at: openedAt(j) }));
+  const next = nextSteps();
+  const jobs = boardJobs().map(j => ({ ...j, opened_at: openedAt(j), next: next.get(j.id) ?? null }));
   const counts = statusCounts();
   const events = recentEvents();
   const highlights = highlightEvents();
@@ -124,6 +126,7 @@ function jobDetail(scheduler: Scheduler, job: Job): JobDetail {
   const gate = getOpenGate(job.id);
   // Historical slot assignments are not ownership: ordinary parked browsers are reused.
   const slot = scheduler.fillSlot(job.id);
+  const steps = jobSteps(job.id);
   return {
     ...job,
     opened_at: openedAt(job),
@@ -131,6 +134,8 @@ function jobDetail(scheduler: Scheduler, job: Job): JobDetail {
     history: statusHistory(job.id),
     sources: jobSources(job.id),
     siblings: siblingJobs(job),
+    steps,
+    next: ["submitted", "interview", "offer"].includes(job.status) ? nextStepOf(steps) : null,
     gate,
     checkpoint: readCheckpoint(job.id),
     browserReserved: slot !== null,
@@ -190,6 +195,20 @@ function jobAction(scheduler: Scheduler, job: Job, action: string, text: string)
       scheduler.abortFill(job.id);
       updateJob(job.id, to.submitted(text || "submitted manually"));
       break;
+    // What happened after it was sent, as the user knows it: mail the agent never saw, or a correction.
+    case "mark_offer":
+    case "mark_declined":
+    case "withdraw": {
+      if (!wasSent(job) || job.status === "rejected") return "only an application that was sent can have an outcome";
+      const outcome = action === "mark_offer" ? "offer" : action === "mark_declined" ? "rejected_by_company" : "withdrawn";
+      if (job.status === outcome) return "already recorded";
+      recordOutcome(job.id, outcome, text || (outcome === "withdrawn" ? "withdrawn by you" : "marked by you"));
+      break;
+    }
+    case "reopen_application": // back in process after an outcome recorded by mistake
+      if (!["offer", "rejected_by_company", "withdrawn"].includes(job.status)) return "this application has no outcome to undo";
+      recordOutcome(job.id, "reopen", text || "reopened by you");
+      break;
     case "confirmed_not_submitted":
       if (!ambiguous) return "submission is not ambiguous";
       resolveAmbiguous(job.id, "not_submitted");
@@ -204,6 +223,55 @@ function jobAction(scheduler: Scheduler, job: Job, action: string, text: string)
   forgetDeferredApproval(job.id);
   logEvent("user", `${action}${text ? `: ${text}` : ""}`, job.id);
   scheduler.pump();
+  return null;
+}
+
+// The user's changes to the steps of an application that was sent. `op` names the change; `step` the
+// step it applies to (all but add).
+const STEP_DONE: Record<string, string> = {
+  add: "added",
+  done: "done",
+  book: "booked",
+  edit: "edited",
+  todo: "reopened",
+  cancel: "cancelled",
+  remove: "removed",
+};
+function stepAction(job: Job, b: Record<string, unknown>) {
+  const str = (key: string) => (typeof b[key] === "string" ? b[key].trim() : undefined);
+  const op = str("op") ?? "";
+  if (!Object.hasOwn(STEP_DONE, op)) return "unknown step change";
+  if (!wasSent(job)) return "this application was not sent";
+  const kind = STEP_KINDS.find(k => k === b["kind"]);
+  if (op === "add") {
+    const title = str("title") ?? "";
+    if (!kind || !title) return "a step needs a kind and a title";
+    addStep(job, { kind, title, due_at: str("due") || null, link: str("link") || null, detail: str("detail") || null, source: "user" });
+    logEvent("user", `step added: ${title}`, job.id);
+    return null;
+  }
+  const step = typeof b["step"] === "number" ? stepOf(job.id, b["step"]) : null;
+  if (!step) return "no such step on this application";
+  if (op === "remove") removeStep(step.id);
+  else if (op === "done") changeStep(step.id, { state: "done", note: str("note") ?? null });
+  else if (op === "book") {
+    const at = str("at");
+    if (!at) return "the booked time is required";
+    changeStep(step.id, { state: "scheduled", scheduled_at: at });
+  } else if (op === "todo") changeStep(step.id, { state: "todo" });
+  else if (op === "cancel") changeStep(step.id, { state: "cancelled" });
+  else {
+    const title = str("title");
+    if (title === "") return "a step needs a title";
+    changeStep(step.id, {
+      ...(kind ? { kind } : {}),
+      ...(title ? { title } : {}),
+      ...(b["due"] !== undefined ? { due_at: str("due") || null } : {}),
+      ...(b["link"] !== undefined ? { link: str("link") || null } : {}),
+      ...(b["detail"] !== undefined ? { detail: str("detail") || null } : {}),
+    });
+  }
+  logEvent("user", `step ${STEP_DONE[op]}: ${step.title}`, job.id);
   return null;
 }
 
@@ -309,6 +377,14 @@ export function createHandler(scheduler: Scheduler) {
           return err ? fail(err, 409) : json({ ok: true });
         } catch (err) {
           return fail(err instanceof Error ? err.message : "job action failed", 409);
+        }
+      }
+      if (sub === "/steps" && req.method === "POST") {
+        try {
+          const err = stepAction(job, await body());
+          return err ? fail(err, 409) : json({ ok: true });
+        } catch (err) {
+          return fail(err instanceof Error ? err.message : "step change failed", 409);
         }
       }
       if (sub === "/browser" && req.method === "POST") {

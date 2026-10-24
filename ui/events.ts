@@ -4,7 +4,7 @@ import { ordered, showMore, toggleFold, togglePart } from "./layout";
 import { render } from "./render";
 import { go, refresh } from "./router";
 import { rememberFilters, setState, state, ui } from "./store";
-import { $, blur, cap, esc, formValue, painted, setDisabled, shell, textBox, toast, wide } from "./util";
+import { $, blur, cap, esc, formValue, isField, painted, setDisabled, shell, textBox, toast, wide } from "./util";
 import { isTab, isView, TAB_KEYS, viewOf, VIEWS } from "./views";
 import { gateIdOf } from "./views/gate";
 import { answerable, openKey } from "./views/questions";
@@ -271,7 +271,61 @@ const DONE: Record<string, string> = {
   respond: "Response saved · queued to resume",
   mark_submitted: "Marked as submitted",
   confirmed_not_submitted: "Verified not submitted · queued to resume",
+  mark_offer: "Marked as an offer",
+  mark_declined: "Marked as declined",
+  withdraw: "Withdrawn",
+  reopen_application: "Back in process",
 };
+
+// A change to one of a sent application's steps. The fields come from the box the button sits in: the
+// step's own row, or the new-step form.
+const STEP_DONE: Record<string, string> = {
+  add: "Step added",
+  done: "Marked done · watching for their reply",
+  book: "Time saved",
+  edit: "Step saved",
+  todo: "Back to to-do",
+  cancel: "Step cancelled",
+  remove: "Step removed",
+};
+async function stepAction(t: HTMLElement, id: number) {
+  const op = t.dataset["stepOp"] ?? "",
+    step = Number(t.dataset["step"]) || undefined,
+    box = t.closest<HTMLElement>("[data-step-box]");
+  const field = (name: string) => {
+    const el = box?.querySelector(`[name="${name}"]`);
+    return isField(el) ? el.value.trim() : undefined;
+  };
+  const body: Record<string, unknown> = { op, ...(step ? { step } : {}) };
+  if (op === "add" || op === "edit") for (const name of ["kind", "title", "due", "link", "detail"]) body[name] = field(name) ?? "";
+  if (op === "done") body["note"] = field("note") ?? "";
+  if (op === "book") {
+    const at = field("at");
+    if (!at) {
+      box?.querySelector<HTMLElement>("[name=at]")?.focus();
+      toast("Pick the time first.");
+      return;
+    }
+    body["at"] = new Date(at).toISOString();
+  }
+  if ((op === "add" || op === "edit") && !body["title"]) {
+    box?.querySelector<HTMLElement>("[name=title]")?.focus();
+    toast("Say what the step is first.");
+    return;
+  }
+  if (op === "remove" && !confirm("Remove this step? Use this for a step entered by mistake; Cancel keeps it in the record.")) return;
+  setDisabled(t, true);
+  try {
+    await api.stepAction(id, body);
+    blur();
+    toast(STEP_DONE[op] ?? "");
+  } catch {
+    // The request already displayed the server's error.
+  } finally {
+    setDisabled(t, false);
+    await refreshQuietly();
+  }
+}
 async function jobAction(t: HTMLElement, id: number) {
   const d = t.dataset,
     act = d["act"] ?? "";
@@ -340,7 +394,7 @@ async function jobAction(t: HTMLElement, id: number) {
 // ---- dispatch
 
 const CLICKABLE =
-  "[data-question-row],[data-view],[data-job],[data-act],[data-run],[data-pfile],[data-back],[data-tab],[data-toggle],[data-feed],[data-open],[data-filter],[data-clamp],[data-more],[data-fold],[data-part],[data-cap],[data-browser-action],[data-jump],[data-fill],#psave,#pmode,#addbtn,#digest-send,#digest-refresh";
+  "[data-question-row],[data-view],[data-job],[data-act],[data-run],[data-pfile],[data-back],[data-tab],[data-toggle],[data-feed],[data-open],[data-filter],[data-clamp],[data-more],[data-fold],[data-part],[data-cap],[data-browser-action],[data-step-op],[data-jump],[data-fill],#psave,#pmode,#addbtn,#digest-send,#digest-refresh";
 
 async function onClick(ev: MouseEvent) {
   const t = ev.target instanceof Element ? ev.target.closest<HTMLElement>(CLICKABLE) : null;
@@ -424,7 +478,8 @@ async function onClick(ev: MouseEvent) {
   else if (d["browserAction"]) {
     ev.preventDefault();
     await browserAction(t, ui.selected);
-  } else if (d["act"]) await jobAction(t, ui.selected);
+  } else if (d["stepOp"]) await stepAction(t, ui.selected);
+  else if (d["act"]) await jobAction(t, ui.selected);
 }
 
 function onKeydown(ev: KeyboardEvent) {

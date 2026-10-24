@@ -41,6 +41,7 @@ export const loadProfile = async (file: string) => (await request(`/api/profile/
 export const loadDigestStatus = async () => (await request("/api/digest/status")) as DigestStatus;
 
 export const jobAction = (id: number, body: { action: string; text: string; gateId?: string | undefined }) => post(`/api/jobs/${id}/action`, body);
+export const stepAction = (id: number, body: Record<string, unknown>) => post(`/api/jobs/${id}/steps`, body);
 export const browserAction = (id: number, body: { action: string; gateId: string }) => post(`/api/jobs/${id}/browser`, body);
 export const recoverJob = (id: number, gateId: string) => post(`/api/jobs/${id}/recover`, { gateId });
 export const addPosting = async (url: string) => (await post("/api/jobs", { url })) as { id: number };

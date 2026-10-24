@@ -28,8 +28,8 @@ const BANDS: readonly (readonly [label: string, hours: number, hint?: string])[]
   ["This week", 168],
   ["Older", Infinity],
 ];
-// A time the server wrote, as ISO or as SQLite's "YYYY-MM-DD HH:MM:SS" in UTC, in ms.
-export const stamp = (s: string | null | undefined) => (s ? Date.parse(s.includes("T") ? s : s.replace(" ", "T") + "Z") : 0);
+// A time the server wrote, as ISO or as SQLite's "YYYY-MM-DD HH:MM:SS" in UTC, in ms. A bare day (a step's deadline) is its start.
+export const stamp = (s: string | null | undefined) => (s ? Date.parse(s.length === 10 || s.includes("T") ? s : s.replace(" ", "T") + "Z") : 0);
 export const sentAt = (j: ListedJob) => stamp(j.submitted_at ?? j.updated_at);
 
 // What a stuck job waits for, from its open gate: a needs_input job may want a letter rather than an answer.
@@ -85,14 +85,30 @@ const SECTIONS: Partial<Record<ViewKey, Section>> = {
     // Stuck: longest waiting first. Queued: best first. Not assessed yet: newest posting first.
     key: j => (QUEUED.includes(j.status) ? (j.score ?? -1) : UNASSESSED.includes(j.status) ? j.opened_at : -stamp(j.updated_at)),
   },
+  // Sent applications by whose move it is (from their steps): the user's first, then what is booked, then
+  // what waits on the employer, the longest quiet first.
   applied: {
     parts: [
-      { label: "Interviews and offers", cls: "hot" },
-      { label: "Awaiting reply", hint: "newest first" },
-      { label: "Declined", collapsed: true, statuses: ["rejected_by_company"] },
+      { label: "Offers", cls: "hot", statuses: ["offer"] },
+      { label: "Your move", cls: "hot", hint: "soonest due first" },
+      { label: "Upcoming", hint: "soonest first" },
+      { label: "Waiting on them", hint: "longest quiet first" },
+      { label: "Awaiting first reply", hint: "newest first" },
+      { label: "Declined or withdrawn", collapsed: true, statuses: ["rejected_by_company", "withdrawn"] },
     ],
-    of: j => (["offer", "interview"].includes(j.status) ? 0 : j.status === "submitted" ? 1 : 2),
-    key: j => (j.status === "rejected_by_company" ? stamp(j.updated_at) : sentAt(j)),
+    of: j =>
+      j.status === "offer"
+        ? 0
+        : j.status === "rejected_by_company" || j.status === "withdrawn"
+          ? 5
+          : j.next?.whose === "you"
+            ? 1
+            : j.next?.whose === "upcoming"
+              ? 2
+              : j.next || j.status === "interview"
+                ? 3
+                : 4,
+    key: j => (j.status === "rejected_by_company" || j.status === "withdrawn" ? stamp(j.updated_at) : j.next ? -stamp(j.next.at) : sentAt(j)),
   },
   // An archive: the strong matches are worth a look, the rest stay folded away.
   held: {

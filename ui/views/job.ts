@@ -7,6 +7,7 @@ import { SENT, statusOf, TAB_KEYS, TABS, VIEWS, type Tab } from "../views";
 import { eventRow, fold } from "./common";
 import { gateHtml } from "./gate";
 import { practiceEvidenceHtml, practiceLineHtml, practicePill } from "./practice";
+import { processHtml } from "./process";
 
 const NOISE = /compil|pdfinfo|typst|page count|one page|metadata/i; // build chatter that older assessments wrote into "concerns"
 
@@ -41,17 +42,16 @@ function summaryHtml(j: JobDetail) {
     : changes
       ? `${plural(changes, "change")} from your base resume`
       : "";
-  const outcome =
-    (SENT.includes(j.status) || j.status === "rejected_by_company") && j.note ? `<div class="section"><p class="prose">${esc(j.note)}</p></div>` : "";
   const fit = `${verdictHtml(j)}
     ${j.rationale ? `<p class="prose clamp" style="margin-top:12px">${esc(j.rationale)}</p>${j.rationale.length > 190 ? `<button class="morebtn" data-more="1">More</button>` : ""}` : ""}
     ${risks.length ? `<div class="section"><div class="label">Watch out</div><ul class="risks">${risks.map(r => `<li>${esc(r)}</li>`).join("")}</ul></div>` : ""}
     ${j.hasPdf ? `<div class="section inline"><a href="/api/jobs/${j.id}/resume.pdf" target="_blank" rel="noopener">Open resume ↗</a>${resumeNote ? `<span>${resumeNote}</span>` : ""}</div>` : ""}
     ${practiceLineHtml(j)}`;
-  const gate = gateHtml(j);
+  // A sent application's next steps take the gate's place: they are what the user acts on now.
+  const gate = gateHtml(j) || processHtml(j);
   // Approving, and taking a job off hold, are judgements on the fit, so the fit comes first. Every other
   // decision is about what the agent just did, so that comes first and the fit folds away.
-  if (j.status === "awaiting_approval" || j.status === "held" || !gate) return outcome + fit + gate;
+  if (j.status === "awaiting_approval" || j.status === "held" || !gate) return fit + gate;
   const folded =
     j.score == null
       ? ""

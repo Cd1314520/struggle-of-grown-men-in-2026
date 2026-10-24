@@ -219,6 +219,54 @@ if (scenario === "action-guards") {
   const real = approved({ ...practice, employerType: "tech_scaled" });
   reviewStandingApprovals();
   assert.equal(statusOf(real), "approved");
+} else if (scenario === "steps") {
+  const { jobSteps } = await import("../../src/steps");
+  const steps = async (id: number, change: Record<string, unknown>) => {
+    const res = await handle(
+      new Request(`${BASE}/api/jobs/${id}/steps`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(change) }),
+    );
+    return { status: res.status, body: (await res.json()) as { ok?: boolean; error?: string } };
+  };
+  const detail = async (id: number) => (await (await handle(new Request(`${BASE}/api/jobs/${id}`))).json()) as { steps: { id: number; state: string }[] };
+
+  // Steps belong to applications that were sent.
+  const draft = job("awaiting_approval");
+  assert.equal((await steps(draft, { op: "add", kind: "assessment", title: "OA" })).status, 409);
+
+  const sent = job("submitted", { submitted_at: "2026-10-01T00:00:00Z" });
+  assert.equal((await steps(sent, { op: "add", kind: "phone", title: "OA" })).status, 409, "an unknown kind is refused");
+  assert.equal((await steps(sent, { op: "add", kind: "assessment", title: "Codility OA", due: "2026-10-27", link: "https://codility.example/t" })).status, 200);
+  assert.equal(statusOf(sent), "interview");
+  const [oa] = (await detail(sent)).steps;
+  assert.ok(oa);
+  assert.equal((await steps(sent, { op: "done", step: oa.id, note: "2 of 3" })).status, 200);
+  assert.equal(jobSteps(sent)[0]?.done_note, "2 of 3");
+  assert.equal((await steps(sent, { op: "book", step: oa.id })).status, 409, "booking needs a time");
+  assert.equal((await steps(sent, { op: "book", step: oa.id, at: "2026-10-30T15:00:00.000Z" })).status, 200);
+  assert.equal(jobSteps(sent)[0]?.scheduled_at, "2026-10-30T15:00:00.000Z");
+  assert.equal((await steps(sent, { op: "edit", step: oa.id, title: "Onsite", due: "" })).status, 200);
+  assert.equal(jobSteps(sent)[0]?.title, "Onsite");
+  assert.equal(jobSteps(sent)[0]?.due_at, null);
+
+  // A step is only changed through its own application.
+  const other = job("submitted", { submitted_at: "2026-10-01T00:00:00Z" });
+  assert.equal((await steps(other, { op: "remove", step: oa.id })).status, 409);
+  assert.equal(jobSteps(sent).length, 1);
+
+  // Outcomes the user records, and undoing one.
+  assert.equal((await act(draft, "withdraw")).status, 409);
+  assert.equal((await act(sent, "mark_declined")).status, 200);
+  assert.equal(statusOf(sent), "rejected_by_company");
+  assert.equal(jobSteps(sent)[0]?.state, "closed");
+  assert.equal((await act(sent, "mark_declined")).status, 409);
+  assert.equal((await act(sent, "reopen_application")).status, 200);
+  assert.equal(statusOf(sent), "interview");
+  assert.equal((await act(other, "withdraw", "took another offer")).status, 200);
+  assert.equal(getJob(other)?.note, "took another offer");
+  assert.equal((await act(other, "reopen_application")).status, 200);
+  assert.equal(statusOf(other), "submitted");
+  assert.equal((await steps(sent, { op: "remove", step: oa.id })).status, 200);
+  assert.deepEqual(jobSteps(sent), []);
 } else {
   throw new Error(`unknown scenario: ${String(scenario)}`);
 }

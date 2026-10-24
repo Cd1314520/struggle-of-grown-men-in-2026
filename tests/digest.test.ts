@@ -28,6 +28,9 @@ async function scenario(name: string, phases = [name]) {
 }
 
 describe("question digest delivery", () => {
+  it("mentions steps due within two days once per deadline, alone or beside questions", async () => {
+    await scenario("steps");
+  });
   it("honors Chicago 09:00, one scheduled message per local day, and forced dedup", async () => {
     await scenario("schedule");
   });

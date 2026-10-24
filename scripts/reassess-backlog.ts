@@ -32,6 +32,7 @@ interface JobRow {
 const PROTECTED_STATUSES: Record<string, true> = {
   rejected: true,
   rejected_by_company: true,
+  withdrawn: true,
   submitted: true,
   interview: true,
   offer: true,

@@ -4,9 +4,10 @@
 import type { BoardJob, EventRow, Job, StatusChange } from "./db";
 import type { DigestStatus } from "./digest";
 import type { FillCheckpoint, Gate, QuestionGroup } from "./questions";
+import type { NextStep, Step } from "./steps";
 
-// A job as the lists show it.
-export type ListedJob = BoardJob & { opened_at: number };
+// A job as the lists show it. `next`: whose move it is, for an application in process with steps.
+export type ListedJob = BoardJob & { opened_at: number; next: NextStep | null };
 
 // A decision or an outcome in the feed, with the job it belongs to.
 export type Highlight = Omit<EventRow, "worker"> & { company: string | null; title: string | null };
@@ -54,6 +55,8 @@ export interface JobDetail extends Job {
   history: StatusChange[];
   sources: { url: string; source: string; location: string | null }[];
   siblings: Pick<Job, "id" | "title" | "status">[];
+  steps: Step[];
+  next: NextStep | null; // whose move it is, while the application is in process
   gate: Gate | null;
   checkpoint: FillCheckpoint | null;
   browserReserved: boolean;

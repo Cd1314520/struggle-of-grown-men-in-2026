@@ -130,7 +130,7 @@ export function gateHtml(j: JobDetail) {
       evidence,
     });
   }
-  if (j.submissionAmbiguous && !["submitted", "interview", "offer", "rejected_by_company", "rejected"].includes(j.status)) {
+  if (j.submissionAmbiguous && !["submitted", "interview", "offer", "rejected_by_company", "withdrawn", "rejected"].includes(j.status)) {
     const context = (p?.context || parsePending(j.pending)?.context || "").trim();
     const reason = context && context !== p?.text ? context : (p?.text ?? j.note ?? "");
     const recoverBtn = gateId ? `<button class="btn primary" data-act="recover" data-gate-id="${esc(gateId)}">Check status & recover</button>` : "";

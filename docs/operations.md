@@ -54,7 +54,7 @@ When a worker is refused because the model provider is at capacity or rate limit
 
 ## Daily question digest
 
-`questionDigest` in `config.yml` defaults to enabled at **09:00 America/Chicago** (including daylight-saving changes). The scheduler sends new or changed question groups to the verified configured/connected Gmail mailbox. It does not send unchanged unanswered groups again, including when another application joins an already-notified group. There is no email when nothing new needs attention.
+`questionDigest` in `config.yml` defaults to enabled at **09:00 America/Chicago** (including daylight-saving changes). The scheduler sends new or changed question groups to the verified configured/connected Gmail mailbox. It does not send unchanged unanswered groups again, including when another application joins an already-notified group. The same message lists employers' steps still to do whose deadline falls within 48 hours (or has passed), each once per deadline, with a link to the application. There is no email when nothing new needs attention.
 
 The message links to Questions and affected applications. Stored answers, question context values, credentials and sensitive non-question handoff summaries are excluded. **Settings → Send digest now** bypasses the schedule, not deduplication or the enabled setting. Settings also shows delivery errors. Each message carries a persisted delivery-reference footer and matching `X-Auto-Apply-Delivery-ID` header: Gmail can rewrite the RFC Message-ID. An uncertain delivery is reconciled against that exact identity, Sent label and verified self From/To before any retry; a missing confirmation does not trigger a blind resend.
 

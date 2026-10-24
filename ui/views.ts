@@ -3,7 +3,7 @@ import type { Status } from "../src/status";
 
 // An application under way that cannot continue without the user. Shown first in "In progress", with a marker.
 export const STUCK: readonly Status[] = ["awaiting_submit", "needs_input", "needs_manual", "failed"];
-export const SENT: readonly Status[] = ["submitted", "interview", "offer"];
+export const SENT: readonly Status[] = ["submitted", "interview", "offer", "withdrawn"];
 
 export type ViewKey = "review" | "progress" | "questions" | "applied" | "held" | "rejected" | "activity" | "profile" | "settings" | "more";
 interface View {
@@ -25,7 +25,12 @@ export const VIEWS: Record<ViewKey, View> = {
     empty: "Nothing is being worked on.",
   },
   questions: { label: "Questions", primary: true },
-  applied: { label: "Applied", primary: true, statuses: ["offer", "interview", "submitted", "rejected_by_company"], empty: "No applications sent yet." },
+  applied: {
+    label: "Applied",
+    primary: true,
+    statuses: ["offer", "interview", "submitted", "rejected_by_company", "withdrawn"],
+    empty: "No applications sent yet.",
+  },
   held: { label: "Held", group: "Archive", statuses: ["held"], empty: "No jobs are being held back." },
   rejected: { label: "Rejected", statuses: ["rejected"], empty: "You haven't rejected anything." },
   activity: { label: "Activity", group: "System" },
@@ -52,9 +57,10 @@ export const STATUS: Partial<Record<Status, readonly [cls: string, label: string
   approved: ["run", "Queued to apply"],
   filling: ["run", "Applying"],
   submitted: ["ok", "Submitted"],
-  interview: ["ok", "Interview"],
+  interview: ["ok", "In process"],
   offer: ["ok", "Offer"],
   rejected_by_company: ["bad", "Declined"],
+  withdrawn: ["idle", "Withdrawn"],
   rejected: ["idle", "Rejected"],
   skipped: ["idle", "Skipped"],
   held: ["idle", "Held"],

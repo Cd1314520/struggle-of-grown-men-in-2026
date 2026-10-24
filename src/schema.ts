@@ -278,11 +278,49 @@ function queuedQuestions(db: Database) {
   ]);
 }
 
+// What an employer asks for after an application is sent, one row per request (see steps.ts): a
+// questionnaire, an assessment, a time to book, an interview. The mailbox agent adds them and the user
+// marks them done; the state says whose move it is. Applications already in 'interview' carry what
+// the mail said in their note: each becomes one step for the user to sort out.
+function applicationSteps(db: Database) {
+  runEach(db, [
+    `CREATE TABLE application_steps (
+      id INTEGER PRIMARY KEY,
+      job_id INTEGER NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('questionnaire', 'assessment', 'schedule', 'interview', 'info_request', 'other')),
+      title TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'todo' CHECK (state IN ('todo', 'done', 'scheduled', 'closed', 'expired', 'cancelled')),
+      due_at TEXT,          -- the employer's deadline: YYYY-MM-DD, or an ISO time
+      scheduled_at TEXT,    -- ISO time of the booked call or interview
+      link TEXT,            -- the assessment or booking link from the mail, for the user; agents never open it
+      detail TEXT,
+      source TEXT NOT NULL CHECK (source IN ('mail', 'user')),
+      message_id TEXT,      -- the Gmail message it came from, so a message read twice adds nothing
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      done_at TEXT,
+      done_note TEXT,       -- the user's own note on doing it
+      closed_at TEXT,
+      CHECK (state != 'scheduled' OR scheduled_at IS NOT NULL)
+    )`,
+    "CREATE INDEX application_steps_job ON application_steps(job_id, id)",
+    "CREATE UNIQUE INDEX application_steps_message ON application_steps(job_id, message_id, kind) WHERE message_id IS NOT NULL",
+    `INSERT INTO application_steps (job_id, kind, title, source, created_at, updated_at)
+    SELECT id, 'other', COALESCE(NULLIF(trim(note), ''), 'Next step from the employer'), 'mail', updated_at, updated_at
+    FROM jobs WHERE status = 'interview'`,
+    `CREATE TRIGGER jobs_steps_forgotten AFTER DELETE ON jobs
+    BEGIN
+      DELETE FROM application_steps WHERE job_id = OLD.id;
+    END`,
+  ]);
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: "baseline", up: baseline },
   { version: 2, name: "status history", up: statusHistory },
   { version: 3, name: "fill state", up: fillState },
   { version: 4, name: "queued questions", up: queuedQuestions },
+  { version: 5, name: "application steps", up: applicationSteps },
 ];
 
 // The version this code reads and writes.

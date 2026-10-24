@@ -6,8 +6,8 @@ import { connectDatabase, migrate } from "./schema";
 import { AWAITING_OUTCOME, NOT_STARTED, OFF_BOARD, to, UNASSESSED, type Status } from "./status";
 
 // SQL lives with the module that owns the table: jobs, job_sources, status_changes, events and kv here,
-// accounts in accounts.ts, gates and answers in questions.ts, fill_state in fill-state.ts, the digest
-// ledger in digest.ts. The tables themselves are defined in schema.ts.
+// accounts in accounts.ts, gates and answers in questions.ts, fill_state in fill-state.ts, application_steps
+// in steps.ts, the digest ledger in digest.ts. The tables themselves are defined in schema.ts.
 // `bun test` sets NODE_ENV=test. Opening the database migrates it, so a test process must say where
 // its throwaway state is (tests/setup.ts does) rather than fall through to the live data directory.
 export function refuseLiveDataUnderTest(env: Record<string, string | undefined> = process.env) {
@@ -157,6 +157,7 @@ const APPLICATIONS: readonly Status[] = [
   "interview",
   "offer",
   "rejected_by_company",
+  "withdrawn",
 ];
 // How many applications the job's employer has besides this job, ever.
 export const employerApplications = (job: Pick<Job, "id" | "company_key">) =>

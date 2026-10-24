@@ -46,17 +46,21 @@ export function listHtml() {
       ? `<div class="search"><input type="text" id="q" placeholder="Search title, company or place" value="${esc(q)}" aria-label="Search this section"></div>`
       : "";
   const c = (...ss: string[]) => ss.reduce((t, s) => t + (S.counts[s] ?? 0), 0);
+  const yourMove = k === "applied" ? S.jobs.filter(j => j.next?.whose === "you" && j.status !== "offer").length : 0;
   const intro =
     k === "held" && total
       ? `<div class="intro"><p>Kept back by you or the phase rules. Releasing sends them all to be assessed again.</p><button class="btn sm danger" data-run="release_held">Release ${n(c("held") || total)} held job${(c("held") || total) === 1 ? "" : "s"}…</button></div>`
       : // What has gone out and what came back, as one line in place of the count beside the title.
         k === "applied" && total
         ? `<p class="intro tally">${[
-            `<b>${n(c("submitted", "interview", "offer", "rejected_by_company"))}</b> sent`,
-            `<b>${n(c("submitted"))}</b> awaiting reply`,
-            `<b>${n(c("interview", "offer"))}</b> interview${c("interview", "offer") === 1 ? "" : "s"}`,
+            `<b>${n(c("submitted", "interview", "offer", "rejected_by_company", "withdrawn"))}</b> sent`,
+            `<b>${n(c("interview"))}</b> in process`,
+            yourMove ? `<b>${n(yourMove)}</b> your move` : "",
+            c("offer") ? `<b>${n(c("offer"))}</b> offer${c("offer") === 1 ? "" : "s"}` : "",
             `<b>${n(c("rejected_by_company"))}</b> declined`,
-          ].join(" · ")}</p>`
+          ]
+            .filter(Boolean)
+            .join(" · ")}</p>`
         : "";
   // In progress holds the machine's queues too: say how many of its jobs wait on the user, as its badge does.
   const needYou = k === "progress" ? S.jobs.filter(j => STUCK.includes(j.status) && gateLabel(j) !== "Question").length : 0;
@@ -74,8 +78,18 @@ export function listHtml() {
   const side = (j: ListedJob) => {
     const score = j.score == null ? "" : `<span class="score ${S.threshold != null && j.score < S.threshold ? "low" : ""}">${j.score}</span>`;
     if (k === "applied") {
-      const at = j.status === "rejected_by_company" ? stamp(j.updated_at) : sentAt(j);
-      return ago(at, `${j.status === "rejected_by_company" ? "Declined" : "Sent"} ${dateTime(at)}`);
+      const ended = j.status === "rejected_by_company" || j.status === "withdrawn";
+      if (ended) return ago(stamp(j.updated_at), `${j.status === "withdrawn" ? "Withdrawn" : "Declined"} ${dateTime(stamp(j.updated_at))}`);
+      const next = j.next,
+        at = next ? stamp(next.at) : sentAt(j);
+      if (!next) return ago(at, `Sent ${dateTime(at)}`);
+      if (next.whose === "you" && next.due)
+        return at < Date.now()
+          ? `<span class="age hot" title="Was due ${esc(dateTime(at))}">overdue</span>`
+          : `<span class="age ${at - Date.now() < 48 * HOUR ? "late" : ""}" title="Due ${esc(dateTime(at))}">due ${span(at - Date.now())}</span>`;
+      if (next.whose === "you") return ago(at, `Asked ${dateTime(at)}`, Date.now() - at > 48 * HOUR ? "late" : "");
+      if (next.whose === "upcoming") return `<span class="age today" title="Booked for ${esc(dateTime(at))}">in ${span(at - Date.now())}</span>`;
+      return ago(at, `Waiting on them since ${dateTime(at)}`, next.quiet ? "late" : "");
     }
     if (k === "rejected") return ago(stamp(j.updated_at), `Rejected ${dateTime(stamp(j.updated_at))}`);
     if (STUCK.includes(j.status)) {
@@ -91,8 +105,11 @@ export function listHtml() {
   };
   const row = (p: Part, mixed: boolean) => (j: ListedJob) => {
     const sentThere = applied.get(j.company);
+    // In Applied, what the next move is about leads the line.
+    const step = k === "applied" && j.next && !["rejected_by_company", "withdrawn"].includes(j.status) ? j.next : null;
     const meta = [
       mixed ? tag(j) : "",
+      step ? `<span class="tag ${step.whose === "you" ? "need" : step.quiet ? "idle" : "ok"}">${esc(step.label)}${step.quiet ? " · quiet" : ""}</span>` : "",
       `<b>${esc(j.company)}</b>${sentThere ? `<span class="faint"> · ${sentThere} applied</span>` : ""}`,
       esc(j.location ?? ""),
     ]

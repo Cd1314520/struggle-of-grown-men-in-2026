@@ -20,6 +20,7 @@ import { BEFORE_COMPANY_KEYS_SCHEMA, FIRST_VERSION_SCHEMA, createLegacyDatabase 
 const TABLES = [
   "accounts",
   "application_answers",
+  "application_steps",
   "events",
   "fill_state",
   "job_sources",
