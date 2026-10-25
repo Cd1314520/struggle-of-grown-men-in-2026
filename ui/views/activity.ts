@@ -80,7 +80,7 @@ function feed(): FeedItem[] {
 }
 
 // Rows under a header per local day, each with its clock time; the relative age stays in the tooltip.
-function byDay<T extends { at: string }>(items: readonly T[], row: (e: T, time: string) => string) {
+export function byDay<T extends { at: string }>(items: readonly T[], row: (e: T, time: string) => string) {
   let day = "";
   return items
     .map(e => {

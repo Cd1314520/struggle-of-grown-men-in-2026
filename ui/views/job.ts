@@ -2,8 +2,9 @@
 import type { JobDetail } from "../../src/api-types";
 import type { Answer, ChecklistItem } from "../../src/rubric";
 import { state, ui } from "../store";
-import { cap, esc, plural, unent, when } from "../util";
+import { cap, esc, linkify, plural, unent, when } from "../util";
 import { SENT, statusOf, TAB_KEYS, TABS, VIEWS, type Tab } from "../views";
+import { causeChip } from "./blockers";
 import { eventRow, fold } from "./common";
 import { gateHtml } from "./gate";
 import { practiceEvidenceHtml, practiceLineHtml, practicePill } from "./practice";
@@ -120,8 +121,18 @@ function postingHtml(j: JobDetail) {
     <div class="section"><div class="label">Description</div><pre class="desc clamp" style="--lines:20">${esc(desc)}</pre>${desc.split("\n").length > 20 || desc.length > 2000 ? `<button class="morebtn" data-more="1">Show the whole description</button>` : ""}</div>`;
 }
 
+// Each time the application stopped short, before the full log.
+const stopsHtml = (j: JobDetail) =>
+  j.blockers.length
+    ? `<div class="section"><div class="label">Stopped ${j.blockers.length === 1 ? "once" : `${j.blockers.length} times`}</div>${j.blockers
+        .map(
+          b =>
+            `<div class="ev rel"><time>${when(b.at)}</time><div><div class="blockerline">${causeChip(b.cause)}</div><span class="msg" data-clamp="1">${linkify(esc(b.detail))}</span></div></div>`,
+        )
+        .join("")}</div>`
+    : "";
 const logHtml = (j: JobDetail) =>
-  `<div class="section">${j.events.map(eventRow).join("") || `<div class="empty">No activity yet. Found ${when(j.found_at)}.</div>`}</div>`;
+  `${stopsHtml(j)}<div class="section">${j.events.map(eventRow).join("") || `<div class="empty">No activity yet. Found ${when(j.found_at)}.</div>`}</div>`;
 
 const BODY: Record<Tab, (j: JobDetail) => string> = { summary: summaryHtml, score: scoreHtml, resume: resumeHtml, posting: postingHtml, log: logHtml };
 

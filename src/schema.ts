@@ -315,12 +315,32 @@ function applicationSteps(db: Database) {
   ]);
 }
 
+// Why an application stopped short of being sent, one row per stop (see blockers.ts). Rows outlive the
+// gate and the job's status, so a stop can be looked at again after the job was cleared away.
+function blockers(db: Database) {
+  runEach(db, [
+    `CREATE TABLE blockers (
+      id INTEGER PRIMARY KEY,
+      job_id INTEGER NOT NULL,
+      cause TEXT NOT NULL CHECK (cause IN ('site_down', 'login', 'captcha', 'email_code', 'no_form', 'needs_you', 'browser', 'no_response', 'unknown', 'other')),
+      detail TEXT NOT NULL, -- the worker's own account of what it saw
+      at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    "CREATE INDEX blockers_job ON blockers(job_id, id)",
+    `CREATE TRIGGER jobs_blockers_forgotten AFTER DELETE ON jobs
+    BEGIN
+      DELETE FROM blockers WHERE job_id = OLD.id;
+    END`,
+  ]);
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: "baseline", up: baseline },
   { version: 2, name: "status history", up: statusHistory },
   { version: 3, name: "fill state", up: fillState },
   { version: 4, name: "queued questions", up: queuedQuestions },
   { version: 5, name: "application steps", up: applicationSteps },
+  { version: 6, name: "blockers", up: blockers },
 ];
 
 // The version this code reads and writes.

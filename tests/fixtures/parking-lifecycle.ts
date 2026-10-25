@@ -165,6 +165,7 @@ await mock.module("../../src/digest", () => ({
 const { db, getJob, kvSet, updateJob } = await import("../../src/db");
 const { authorizeSubmit, isSubmitting, isVerifying, isRecovering } = await import("../../src/fill-state");
 const core = await import("../../src/questions");
+const { jobBlockers } = await import("../../src/blockers");
 const { backedOff, usedToday } = await import("../../src/limits");
 const { Scheduler } = await import("../../src/scheduler");
 const scheduler = new Scheduler({ runWorker, browser });
@@ -339,7 +340,7 @@ if (scenario === "recovery-prefix") {
   await until(() => workers.length === 1);
   assert.equal(workerAt(0).options.jobId, 4, "skip blocked recovery, preserve the next recovery's priority");
   assert.equal(jobRow(1).status, "approved");
-  const parked = call(workerAt(0), "need_manual", { ...navigation, tab_id: "recovery-4", reason: "Still blocked" });
+  const parked = call(workerAt(0), "need_manual", { ...navigation, cause: "other", tab_id: "recovery-4", reason: "Still blocked" });
   await until(() => core.getOpenGate(4) !== null);
   workerAt(0).exit();
   await parked;
@@ -405,7 +406,7 @@ if (scenario === "release" || scenario === "quick-answer") {
   }
   scheduler.pump();
   assert.equal(workers.length, 1, "abort is not process exit; slot must not be reused yet");
-  await call(first, "report_result", { outcome: "failed", note: "late old callback" });
+  await call(first, "report_result", { outcome: "failed", cause: "no_response", note: "late old callback" });
   assert.equal(jobRow(1).status, scenario === "release" ? "needs_input" : "approved");
   first.exit();
   await parking;
@@ -448,12 +449,23 @@ if (scenario === "release" || scenario === "quick-answer") {
   await until(() => workers.length === 2);
   assert.equal(workerAt(1).options.jobId, 3, "a posting opened today does not wait out the gap");
   assert.equal(jobRow(2).status, "approved");
+} else if (scenario === "crash") {
+  await call(first, "checkpoint", navigation);
+  assert.throws(() => call(first, "report_result", { outcome: "failed", note: "no cause given" }), /cause must be one of/);
+  first.fail("worker crashed");
+  await until(() => core.getOpenGate(1) !== null);
+  assert.equal(openGate(1).kind, "manual");
+  assert.deepEqual(
+    jobBlockers(1).map(b => [b.cause, b.detail]),
+    [["unknown", "Worker ended without a verified outcome (worker crashed)."]],
+  );
 } else if (scenario === "capacity") {
   await call(first, "checkpoint", navigation);
   first.fail("Codex error event: Codex is at capacity, please try again later (code=turn_rate_limit_exceeded)");
   await until(() => !scheduler.activeFillSession(1));
   assert.equal(jobRow(1).status, "approved", "back in the fill queue, not parked for a person");
   assert.equal(core.getOpenGate(1), null);
+  assert.equal(jobBlockers(1).length, 0, "a capacity refusal is not a blocker");
   assert.equal(isRecovering(1), true);
   assert.equal(backedOff(), true);
   scheduler.pump();
@@ -465,7 +477,7 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(jobRow(1).resume_sha, initialSha);
   assert.equal(usedToday("fill"), 1, "resuming is not a new application");
 } else if (scenario === "manual-same-employer") {
-  const parking = call(first, "need_manual", { ...navigation, reason: "CAPTCHA/session needs human" });
+  const parking = call(first, "need_manual", { ...navigation, cause: "other", reason: "CAPTCHA/session needs human" });
   await until(() => core.getOpenGate(1) !== null);
   const gate = openGate(1);
   first.exit();
@@ -485,9 +497,14 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(workerAt(2).options.jobId, 2);
 } else if (["manual", "manual-lost-tab"].includes(scenario ?? "")) {
   if (scenario === "manual-lost-tab") simulatedTabs.delete(navigation.tab_id);
-  const parking = call(first, "need_manual", { ...navigation, reason: "CAPTCHA/session needs human" });
+  const parking = call(first, "need_manual", { ...navigation, cause: "captcha", reason: "CAPTCHA/session needs human" });
   await until(() => core.getOpenGate(1) !== null);
   const gate = openGate(1);
+  assert.deepEqual(
+    jobBlockers(1).map(b => b.cause),
+    ["captcha"],
+  );
+  assert.match(jobBlockers(1)[0]?.detail ?? "", /^CAPTCHA\/session needs human/);
   await assert.rejects(scheduler.reserveBrowser(1, gate.id));
   scheduler.pump();
   assert.equal(workers.length, 1, "stopping worker still owns the slot");
@@ -511,7 +528,7 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(workerAt(2).options.jobId, 1);
   assert.equal(jobRow(1).resume_sha, initialSha);
 } else if (scenario === "manual-reservation" || scenario === "manual-activation-race") {
-  const parking = call(first, "need_manual", { ...navigation, reason: "Human inspection requested" });
+  const parking = call(first, "need_manual", { ...navigation, cause: "other", reason: "Human inspection requested" });
   await until(() => core.getOpenGate(1) !== null);
   const gate = openGate(1);
   first.exit();
@@ -554,7 +571,7 @@ if (scenario === "release" || scenario === "quick-answer") {
   await review;
   await until(() => workers.length === 2);
   const second = workerAt(1);
-  const handoff = call(second, "need_manual", { ...navigation, reason: "Session recovery before final re-observation" });
+  const handoff = call(second, "need_manual", { ...navigation, cause: "other", reason: "Session recovery before final re-observation" });
   await until(() => core.getOpenGate(1)?.kind === "manual");
   assert.equal(core.respond(1, "done"), true);
   assert.equal(core.respond(1, "duplicate return-control"), false);
@@ -598,7 +615,7 @@ if (scenario === "release" || scenario === "quick-answer") {
   } else {
     assert.match(await call(second, "confirm_submit", { ...navigation, summary: "Salary 100000; all fields checked" }), /^APPROVED/);
     assert.equal(isSubmitting(1), true);
-    const ambiguity = call(second, "report_result", { outcome: "failed", note: "Timed out after final click" });
+    const ambiguity = call(second, "report_result", { outcome: "failed", cause: "no_response", note: "Timed out after final click" });
     await ambiguity;
     assert.equal(openGate(1).kind, "submission_ambiguous");
     assert.equal(core.respond(1, "approve"), false);
@@ -618,7 +635,7 @@ if (scenario === "release" || scenario === "quick-answer") {
     assert.equal(workerAt(3).options.jobId, 1);
   }
 } else if (scenario === "recovery-manual") {
-  const parking = call(first, "need_manual", { ...navigation, reason: "Pre-submit site outage; no account yet" });
+  const parking = call(first, "need_manual", { ...navigation, cause: "other", reason: "Pre-submit site outage; no account yet" });
   await until(() => core.getOpenGate(1) !== null);
   const gate = openGate(1);
   assert.equal(gate.kind, "manual");
@@ -658,7 +675,7 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.match(await call(second, "confirm_submit", { ...navigation, summary }), /^APPROVED/);
   assert.equal(isSubmitting(1), true);
 
-  const ambiguity = call(second, "report_result", { outcome: "failed", note: "Timeout waiting for confirmation" });
+  const ambiguity = call(second, "report_result", { outcome: "failed", cause: "no_response", note: "Timeout waiting for confirmation" });
   await ambiguity;
   const gate = openGate(1);
   assert.equal(gate.kind, "submission_ambiguous");
@@ -694,7 +711,8 @@ if (scenario === "release" || scenario === "quick-answer") {
   await until(() => workers.length === 2);
   const second = workerAt(1);
   await call(second, "confirm_submit", { ...navigation, summary });
-  await call(second, "report_result", { outcome: "failed", note: "Browser dropped connection" });
+  await call(second, "report_result", { outcome: "failed", cause: "browser", note: "Browser dropped connection" });
+  assert.equal(jobBlockers(1).at(-1)?.cause, "browser", "a failure after the final click is still logged with its cause");
   const gate = openGate(1);
   second.exit();
   await until(() => !scheduler.activeFillSession(1));
@@ -732,7 +750,7 @@ if (scenario === "release" || scenario === "quick-answer") {
   await until(() => workers.length === 2);
   const second = workerAt(1);
   await call(second, "confirm_submit", { ...navigation, summary });
-  await call(second, "report_result", { outcome: "failed", note: "Timeout after click" });
+  await call(second, "report_result", { outcome: "failed", cause: "no_response", note: "Timeout after click" });
   const gate = openGate(1);
   second.exit();
   await until(() => !scheduler.activeFillSession(1));
@@ -768,7 +786,7 @@ if (scenario === "release" || scenario === "quick-answer") {
   await until(() => workers.length === 2);
   const second = workerAt(1);
   await call(second, "confirm_submit", { ...navigation, summary });
-  await call(second, "report_result", { outcome: "failed", note: "Timeout after click" });
+  await call(second, "report_result", { outcome: "failed", cause: "no_response", note: "Timeout after click" });
   const gate = openGate(1);
   second.exit();
   await until(() => !scheduler.activeFillSession(1));
@@ -837,7 +855,7 @@ if (scenario === "release" || scenario === "quick-answer") {
   // Stale callbacks while process is winding down cannot alter terminal status
   const staleSubmit = await call(second, "confirm_submit", { ...navigation, summary: "Stale attempt" });
   assert.match(staleSubmit, /ERROR: stale or parked fill worker/);
-  const staleFail = await call(second, "report_result", { outcome: "failed", note: "Stale late failure" });
+  const staleFail = await call(second, "report_result", { outcome: "failed", cause: "no_response", note: "Stale late failure" });
   assert.match(staleFail, /ERROR: stale or parked fill worker/);
   assert.equal(jobRow(1).status, "submitted");
   assert.equal(isSubmitting(1), false);

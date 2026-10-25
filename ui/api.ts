@@ -1,5 +1,5 @@
 // Calls to the server. A failed request has already told the user why by the time it throws.
-import type { AnswerResult, AppState, DigestResult, JobDetail } from "../src/api-types";
+import type { AnswerResult, AppState, BlockersResult, DigestResult, JobDetail } from "../src/api-types";
 import type { DigestStatus } from "../src/digest";
 import { toast } from "./util";
 
@@ -37,6 +37,7 @@ export const loadJob = (id: number) =>
     job => job as JobDetail,
     () => null,
   );
+export const loadBlockers = async () => ((await request("/api/blockers")) as BlockersResult).blockers;
 export const loadProfile = async (file: string) => (await request(`/api/profile/${file}`)) as string;
 export const loadDigestStatus = async () => (await request("/api/digest/status")) as DigestStatus;
 

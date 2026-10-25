@@ -2,6 +2,7 @@
 // the form is recorded, and the only ways a worker stops (parked under a gate, or ended).
 import { join } from "node:path";
 import { confirmsSubmit } from "./auto";
+import { recordBlocker, type BlockerCause } from "./blockers";
 import type * as chrome from "./chrome";
 import type { JobBrowser } from "./chrome";
 import { jobDir } from "./config";
@@ -138,8 +139,9 @@ export async function confirmSubmission(rt: FillRuntime, session: FillSession, s
 }
 
 // The worker stopped without a recorded outcome: leave the application under a gate a person must clear.
-export function stopFailedFill(rt: FillRuntime, session: FillSession, message: string) {
+export function stopFailedFill(rt: FillRuntime, session: FillSession, message: string, cause: BlockerCause = "unknown") {
   if (!ownsFill(rt, session)) return;
+  recordBlocker(session.jobId, cause, message);
   const ambiguous = isSubmitting(session.jobId);
   parkGate(
     session.jobId,

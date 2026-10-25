@@ -560,7 +560,16 @@ describe("where SQL lives", () => {
   const files = [...new Bun.Glob("{src,scripts}/**/*.ts").scanSync(root)].sort();
   const read = (file: string) => Bun.file(join(root, file)).text();
   // The modules that own tables. Everything else calls their functions.
-  const owners = new Set(["src/db.ts", "src/schema.ts", "src/accounts.ts", "src/questions.ts", "src/fill-state.ts", "src/digest.ts", "src/steps.ts"]);
+  const owners = new Set([
+    "src/db.ts",
+    "src/schema.ts",
+    "src/accounts.ts",
+    "src/questions.ts",
+    "src/fill-state.ts",
+    "src/digest.ts",
+    "src/steps.ts",
+    "src/blockers.ts",
+  ]);
   // Standalone tools that read a database by path rather than through the app's connection.
   const tools = new Set(["scripts/journal-stalls.ts", "scripts/journal-resumes.ts", "scripts/reassess-backlog.ts", "scripts/migrate.ts"]);
   it("keeps statements in the modules that own the tables", async () => {

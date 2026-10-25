@@ -1,5 +1,6 @@
 // What the page holds between repaints: the server's state, the open job, and where the user is.
 import type { AppState, JobDetail } from "../src/api-types";
+import type { ListedBlocker } from "../src/blockers";
 import type { Tab, ViewKey } from "./views";
 
 let loaded: AppState | null = null;
@@ -18,6 +19,7 @@ interface Ui {
   selected: number | null; // id of the open job
   shownSel: number | null; // the selection the list last scrolled into view
   job: JobDetail | null; // the open job, once loaded
+  blockers: ListedBlocker[] | null; // the Blockers page, fetched when it is shown
   tab: Tab;
   filt: Partial<Record<ViewKey, string>>; // per section: the chosen filter chip (remembered)
   query: Partial<Record<ViewKey, string>>; // per section: the search text
@@ -38,6 +40,7 @@ export const ui: Ui = {
   selected: null,
   shownSel: null,
   job: null,
+  blockers: null,
   tab: "summary",
   filt: {},
   query: {},

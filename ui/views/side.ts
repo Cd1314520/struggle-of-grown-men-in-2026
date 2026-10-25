@@ -54,6 +54,7 @@ function moreHint(k: ViewKey): [text: string, warn: boolean] {
       errors = new Set(S.highlights.filter(e => e.kind === "error" && new Date(parseAt(e.at)).toDateString() === today).map(e => e.message)).size;
     return errors ? [`${errors} error${errors === 1 ? "" : "s"} today`, true] : [S.lastScan ? `Last scan ${when(S.lastScan)}` : "Not scanned yet", false];
   }
+  if (k === "blockers") return ["Why applications stopped short", false];
   if (k === "profile")
     return S.profileProblems.length
       ? [`Setup unfinished: ${S.profileProblems.length} file${S.profileProblems.length === 1 ? "" : "s"}`, true]
@@ -66,4 +67,4 @@ const moreRow = (k: ViewKey) => {
   return `<button class="nav" data-view="${k}"><span class="mtext">${VIEWS[k].label}${hint ? `<small class="${warn ? "warn" : ""}">${esc(hint)}</small>` : ""}</span><span class="go" aria-hidden="true">›</span></button>`;
 };
 export const moreHtml = () =>
-  `<div class="morelist"><div class="navgroup">Archive</div>${(["held", "rejected"] as const).map(moreRow).join("")}<div class="navgroup">System</div>${(["activity", "profile", "settings"] as const).map(moreRow).join("")}</div>`;
+  `<div class="morelist"><div class="navgroup">Archive</div>${(["held", "rejected"] as const).map(moreRow).join("")}<div class="navgroup">System</div>${(["activity", "blockers", "profile", "settings"] as const).map(moreRow).join("")}</div>`;

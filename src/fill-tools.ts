@@ -3,6 +3,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveAccount } from "./accounts";
+import { CAUSE_GUIDE, recordBlocker, WORKER_CAUSES } from "./blockers";
 import type { JobBrowser } from "./chrome";
 import { db, notifyJobChange, writeJob, type Job } from "./db";
 import { errorMessage } from "./errors";
@@ -102,6 +103,9 @@ async function verifyStatus(rt: FillRuntime, ctx: FillContext, args: ToolArgs): 
   return "Recorded: Ambiguity resolved. Verified draft queued for normal fill with fresh confirm_submit required.";
 }
 
+// What stopped the application, so stops can be counted and looked at again by cause.
+const causeParam = { type: "string", enum: WORKER_CAUSES, description: CAUSE_GUIDE };
+
 export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, HostTool> {
   const { job, session, dir, mailbox, isVerification, jobBrowser } = ctx;
   const { slot } = session;
@@ -193,8 +197,9 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
     need_manual: {
       description:
         "Persist the blocker and draft checkpoint, then terminate the worker. The slot is reusable after exit; a human must explicitly reserve the browser before inspecting it.",
-      parameters: schema({ reason: S.str("Blocking evidence and what the candidate needs to do"), ...navigationFields }),
+      parameters: schema({ cause: causeParam, reason: S.str("Blocking evidence and what the candidate needs to do"), ...navigationFields }),
       handler: async args => {
+        const cause = arg.oneOf(args, "cause", WORKER_CAUSES);
         let checkpoint = session.checkpoint;
         let reason = arg.str(args, "reason");
         try {
@@ -203,6 +208,7 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
           if (!ownsFill(rt, session)) throw err;
           reason += `\nCurrent navigation could not be verified; checkpoint is the last observed draft: ${errorMessage(err)}`;
         }
+        recordBlocker(job.id, cause, reason);
         if (isVerification) {
           endVerification(job.id);
           return parkFill(rt, session, { kind: "submission_ambiguous", text: `Verification handoff: ${reason}` }, checkpoint);
@@ -212,15 +218,23 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
     },
     report_result: {
       description: "Report verified success/closed status, or failure. Failure after final authorization requires inspection, not retry.",
-      parameters: schema({ outcome: { type: "string", enum: ["submitted", "already_applied", "closed", "failed"] }, note: S.str("Observed evidence") }),
+      parameters: schema(
+        {
+          outcome: { type: "string", enum: ["submitted", "already_applied", "closed", "failed"] },
+          note: S.str("Observed evidence"),
+          cause: { ...causeParam, description: `Required when outcome is failed. ${CAUSE_GUIDE}` },
+        },
+        ["outcome", "note"],
+      ),
       handler: args => {
         const outcome = arg.oneOf(args, "outcome", ["submitted", "already_applied", "closed", "failed"]),
           note = arg.str(args, "note");
         if (isVerification) {
           return "ERROR: verification workers must record status through verify_status with structured evidence, or hand off through need_manual.";
         }
+        const cause = outcome === "failed" ? arg.oneOf(args, "cause", WORKER_CAUSES) : null;
         if (outcome !== "submitted" && outcome !== "already_applied" && isSubmitting(job.id)) {
-          stopFailedFill(rt, session, note);
+          stopFailedFill(rt, session, note, cause ?? "no_response");
           return "Submission ambiguity recorded; automatic retry forbidden.";
         }
         db.transaction(() => {
@@ -228,7 +242,10 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
           clearFillFlags(job.id);
           if (outcome === "submitted" || outcome === "already_applied") writeJob(job.id, to.submitted(note));
           else if (outcome === "closed") writeJob(job.id, to.skipped(`posting closed: ${note}`));
-          else writeJob(job.id, to.failed(note));
+          else {
+            writeJob(job.id, to.failed(note));
+            recordBlocker(job.id, cause ?? "other", note);
+          }
         })();
         notifyJobChange(job.id);
         endSession(session);

@@ -1,5 +1,5 @@
 // Where the user is lives in the URL: #view or #view/jobId.
-import { loadJob, loadState } from "./api";
+import { loadBlockers, loadJob, loadState } from "./api";
 import { ordered } from "./layout";
 import { render } from "./render";
 import { hasState, setState, ui } from "./store";
@@ -43,6 +43,7 @@ export async function route() {
     else scrollTo(0, 0);
   }
   if (!nextJob) ui.job = null;
+  if (ui.view === "blockers") ui.blockers = await loadBlockers().catch(() => ui.blockers);
   render();
 }
 

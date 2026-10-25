@@ -69,7 +69,8 @@ describe("application steps", () => {
     steps.changeStep(a, { state: "done" });
     next = steps.nextSteps(now).get(1);
     assert.equal(next.whose, "them"); assert.equal(next.quiet, false);
-    assert.equal(steps.nextSteps(now + 8 * DAY).get(1).quiet, true);
+    // done_at is stamped with the real clock, so quiet is measured from it.
+    assert.equal(steps.nextSteps(Date.now() + 8 * DAY).get(1).quiet, true);
     // A booked interview is upcoming until it is held, then waiting on them since it was held.
     const c = steps.addStep(getJob(1), { kind: "schedule", title: "Onsite", source: "user" }).id;
     assert.throws(() => steps.changeStep(c, { state: "scheduled" }), /time/);

@@ -39,6 +39,7 @@ describe("durable parking lifecycle", () => {
   it("applies to the most recently opened posting first", () => runScenarios(["freshest-first"]));
   it("spreads new applications to older postings over the day, but not one opened today", () => runScenarios(["paced"]));
   it("resumes the same draft after a capacity refusal, once the back-off ends", () => runScenarios(["capacity"]));
+  it("logs a worker that ends without reporting as an unknown blocker, and requires a cause for a failure", () => runScenarios(["crash"]));
   it("rejects missing-tab inspection without leasing the slot and allows recovery", () => runScenarios(["manual-lost-tab"]));
   it("holds capacity only during explicit inspection and releases without dismissing the gate", () => runScenarios(["manual-reservation"]));
   it("keeps asynchronous browser activation isolated when its gate changes", () => runScenarios(["manual-activation-race"]));

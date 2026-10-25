@@ -1,6 +1,7 @@
 // The shapes the HTTP API answers with. The server builds them (src/server.ts) and the UI reads them
 // (ui/), so a field renamed on one side fails the other's typecheck. Types only: the UI's bundle
 // must never pull in server code.
+import type { Blocker, ListedBlocker } from "./blockers";
 import type { BoardJob, EventRow, Job, StatusChange } from "./db";
 import type { DigestStatus } from "./digest";
 import type { FillCheckpoint, Gate, QuestionGroup } from "./questions";
@@ -56,6 +57,7 @@ export interface JobDetail extends Job {
   sources: { url: string; source: string; location: string | null }[];
   siblings: Pick<Job, "id" | "title" | "status">[];
   steps: Step[];
+  blockers: Blocker[]; // every time this application stopped short, and why
   next: NextStep | null; // whose move it is, while the application is in process
   gate: Gate | null;
   checkpoint: FillCheckpoint | null;
@@ -82,4 +84,9 @@ export interface DigestResult {
   groups: number;
   messageId?: string;
   reason?: string;
+}
+
+// GET /api/blockers: every stop, newest first.
+export interface BlockersResult {
+  blockers: ListedBlocker[];
 }

@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AppState, JobDetail } from "./api-types";
+import type { AppState, BlockersResult, JobDetail } from "./api-types";
 import { feedNames, loadCompanies } from "./ats";
+import { jobBlockers, listBlockers } from "./blockers";
 import { isBoardUrl } from "./boards";
 import { screenshot, tabs } from "./chrome";
 import { browserCount, config, jobDir, PROFILE, STOCK_MAIN, vncUrl } from "./config";
@@ -135,6 +136,7 @@ function jobDetail(scheduler: Scheduler, job: Job): JobDetail {
     sources: jobSources(job.id),
     siblings: siblingJobs(job),
     steps,
+    blockers: jobBlockers(job.id),
     next: ["submitted", "interview", "offer"].includes(job.status) ? nextStepOf(steps) : null,
     gate,
     checkpoint: readCheckpoint(job.id),
@@ -288,6 +290,7 @@ export function createHandler(scheduler: Scheduler) {
     if (page) return page;
     if (path === "/api/state") return json(state(scheduler));
 
+    if (path === "/api/blockers" && req.method === "GET") return json({ blockers: listBlockers() } satisfies BlockersResult);
     if (path === "/api/questions" && req.method === "GET") return json({ groups: listQuestionGroups() });
     const answerMatch = /^\/api\/questions\/([^/]+)\/answer$/.exec(path);
     if (answerMatch && req.method === "POST") {

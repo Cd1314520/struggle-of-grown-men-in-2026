@@ -423,8 +423,9 @@ async function onClick(ev: MouseEvent) {
   } else if (d["job"]) go(ui.view, Number(d["job"]));
   else if (d["open"]) {
     ev.preventDefault();
-    const id = Number(d["open"]);
-    go(viewOf(state().jobs.find(x => x.id === id)?.status), id);
+    const id = Number(d["open"]),
+      view = d["openView"]; // where the job is listed, when the page knows it better than the board does
+    go(isView(view) ? view : viewOf(state().jobs.find(x => x.id === id)?.status), id);
   } else if (d["back"]) go(ui.view);
   else if (d["tab"]) {
     if (isTab(d["tab"])) ui.tab = d["tab"];

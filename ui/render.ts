@@ -3,6 +3,7 @@ import { hasState, state, ui } from "./store";
 import { $, focused, formValue, isField, paint, shell, textBox } from "./util";
 import { ARCHIVE, STUCK, VIEWS } from "./views";
 import { activityHtml } from "./views/activity";
+import { blockersHtml } from "./views/blockers";
 import { jobHtml } from "./views/job";
 import { elsewhere, listHtml } from "./views/list";
 import { profileView } from "./views/profile";
@@ -66,6 +67,7 @@ export function render() {
             : "",
     );
   } else if (ui.view === "activity") paint(pane, activityHtml());
+  else if (ui.view === "blockers") paint(pane, blockersHtml());
   else if (ui.view === "questions") paint(pane, questionsHtml());
   else if (ui.view === "profile") void profileView();
   else if (ui.view === "more") paint(pane, moreHtml());

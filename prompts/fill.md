@@ -104,7 +104,7 @@ This worker's CDP endpoint exposes only its assigned application target `{{brows
   - Schema requirements: `outcome: "submitted"` requires `source: "portal"` (with `status: "submitted"`) or `source: "confirmation_email"` (with `message_id`). `outcome: "not_submitted"` requires `source: "portal"` (with `status` in `not_submitted` | `draft` | `incomplete`) or `source: "submission_error"` (with `status: "rejected"` and verbatim error text in `evidence`).
   - An empty loading page, transient spinner, or missing immediate email is NOT proof that an application succeeded or failed.
   - For inconclusive evidence, use `outcome: "unresolved"` or call `need_manual`. Never submit a second time under ambiguity.
-- **Manual handoff details (`need_manual`):** all manual handoffs must provide specific, actionable structured details in `reason` and `notes`:
+- **Manual handoff details (`need_manual`):** give the `cause` that best names what stopped you (the owner reviews stops by cause, and retries the site outages later), and provide specific, actionable structured details in `reason` and `notes`:
   - Actual step and observed error (verbatim message or error code);
   - Credential status (stored credentials found vs no account found);
   - Concrete actions tried (pages visited, login attempts, password reset checked);
@@ -112,7 +112,7 @@ This worker's CDP endpoint exposes only its assigned application target `{{brows
 
 ## Report
 
-Finish normal filling runs by calling `report_result` once with the outcome (`submitted`, `already_applied`, `closed`, or `failed`) and a short note (in verification mode, use `verify_status` instead, as `report_result` rejects). Leave the tab open.
+Finish normal filling runs by calling `report_result` once with the outcome (`submitted`, `already_applied`, `closed`, or `failed`) and a short note, plus a `cause` when it `failed` (in verification mode, use `verify_status` instead, as `report_result` rejects). Leave the tab open.
 
 ## Candidate details
 

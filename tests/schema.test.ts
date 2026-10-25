@@ -21,6 +21,7 @@ const TABLES = [
   "accounts",
   "application_answers",
   "application_steps",
+  "blockers",
   "events",
   "fill_state",
   "job_sources",

@@ -5,7 +5,7 @@ import type { Status } from "../src/status";
 export const STUCK: readonly Status[] = ["awaiting_submit", "needs_input", "needs_manual", "failed"];
 export const SENT: readonly Status[] = ["submitted", "interview", "offer", "withdrawn"];
 
-export type ViewKey = "review" | "progress" | "questions" | "applied" | "held" | "rejected" | "activity" | "profile" | "settings" | "more";
+export type ViewKey = "review" | "progress" | "questions" | "applied" | "held" | "rejected" | "activity" | "blockers" | "profile" | "settings" | "more";
 interface View {
   label: string;
   short?: string; // the label in the phone's tab bar, where five tabs share 360px
@@ -34,6 +34,7 @@ export const VIEWS: Record<ViewKey, View> = {
   held: { label: "Held", group: "Archive", statuses: ["held"], empty: "No jobs are being held back." },
   rejected: { label: "Rejected", statuses: ["rejected"], empty: "You haven't rejected anything." },
   activity: { label: "Activity", group: "System" },
+  blockers: { label: "Blockers" },
   profile: { label: "Profile" },
   settings: { label: "Settings" },
   more: { label: "More", hidden: true },
