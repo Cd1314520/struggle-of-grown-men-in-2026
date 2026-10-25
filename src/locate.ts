@@ -1,5 +1,5 @@
 // Locate: a job that passed triage on a job-search site is pointed at the employer's own posting.
-import { addCompany, fetchDescription } from "./ats";
+import { addCompany, fetchDescription, watchBoardOf } from "./ats";
 import { isBoardUrl, linkedinDescription, probeEmployer } from "./boards";
 import { config } from "./config";
 import { findTwin, jobsByStatus, kvGet, kvSet, logEvent, relocateJob, updateJob } from "./db";
@@ -72,6 +72,8 @@ export async function locateEmployerPostings(run: RunWorker) {
                 text.length >= 300 ? text : ((await fetchDescription(url)) ?? job.description ?? (await linkedinDescription(job.url)) ?? text),
               ) === "merged";
             logEvent("system", `Found the employer's posting: ${url}`, merged ? null : job_id, "locate");
+            const board = await watchBoardOf(url, job.company);
+            if (board) logEvent("system", `Watching ${board.name}'s board (${board.ats}/${board.slug}), found through a posting`, null, "locate");
             return merged ? "Recorded (that posting was already known)." : "Recorded.";
           },
         },

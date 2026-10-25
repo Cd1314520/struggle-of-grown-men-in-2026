@@ -1,15 +1,33 @@
-// Public job-board feeds. No scraping and no browser: these are documented JSON endpoints.
+// Public job-board feeds. No browser: these are the public endpoints the boards' own career pages
+// call, mostly JSON. iCIMS and JazzHR are read from their public sitemap and listing page.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
 import { config, PROFILE } from "./config";
 
-export const ATS = ["greenhouse", "lever", "ashby", "workable", "recruitee", "smartrecruiters", "workday"] as const;
+export const ATS = [
+  "greenhouse",
+  "lever",
+  "ashby",
+  "workable",
+  "recruitee",
+  "smartrecruiters",
+  "workday",
+  "oracle",
+  "adp",
+  "ukg",
+  "icims",
+  "eightfold",
+  "breezy",
+  "jazzhr",
+  "bamboohr",
+] as const;
 export type Ats = (typeof ATS)[number];
 export interface Company {
   name: string;
   ats: Ats;
   // Board id as it appears in the board's URL. Workday: "<tenant>.<wdN>/<site>", e.g. "acme.wd5/External".
+  // The others are in the table in prompts/discover.md, and boardOf reads them from a posting's URL.
   slug: string;
   // Workday only: keyword filter, for employers with thousands of openings.
   search?: string;
@@ -37,7 +55,7 @@ export function loadCompanies(): Company[] {
 
 export function addCompany(c: Company): boolean {
   const all = loadCompanies();
-  if (all.some(x => x.ats === c.ats && x.slug.toLowerCase() === c.slug.toLowerCase())) return false;
+  if (all.some(sameBoard(c))) return false;
   all.push(c);
   writeFileSync(companiesPath, YAML.stringify({ companies: all }));
   return true;
@@ -121,6 +139,11 @@ async function getJson(url: string, body?: unknown): Promise<unknown> {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }
+async function getText(url: string): Promise<string> {
+  const res = await fetch(url, { headers: { ...HEADERS, accept: "text/html,application/xml;q=0.9,*/*;q=0.8" }, signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.text();
+}
 // A source's date field as an ISO time; a bare date stays a bare date.
 export const posted = (v: unknown): string | null => {
   if (v == null || v === "") return null;
@@ -138,12 +161,46 @@ const workdayPosted = (s: string | null | undefined): string | null => {
 const place = (...parts: (string | null | undefined | false)[]) => [...new Set(parts.filter(Boolean))].join(", ") || null;
 
 const WORKDAY_MAX = 200; // newest postings read per board and scan
+const NEWEST_MAX = 200; // the same for the other boards that page through thousands of postings
+const EIGHTFOLD_MAX = 100; // Eightfold answers ten at a time
 function workday(c: Company) {
   const m = /^([\w-]+)\.(wd\d+)\/([\w-]+)$/i.exec(c.slug);
   if (!m) throw new Error(`workday slug must look like "tenant.wd5/Site", got "${c.slug}"`);
   const [, tenant, pod, site] = m;
   const host = `https://${tenant}.${pod}.myworkdayjobs.com`;
   return { api: `${host}/wday/cxs/${tenant}/${site}`, page: `${host}/en-US/${site}` };
+}
+
+// A slug made of several parts, "<a>/<b>". Throws with the expected shape when one is malformed.
+function slugParts(c: Company, count: 2, shape: string): [string, string];
+function slugParts(c: Company, count: 3, shape: string): [string, string, string];
+function slugParts(c: Company, count: number, shape: string): string[] {
+  const parts = c.slug.split("/").map(p => p.trim());
+  if (parts.length !== count || parts.some(p => !p)) throw new Error(`${c.ats} slug must look like "${shape}", got "${c.slug}"`);
+  return parts;
+}
+const ADP = "https://workforcenow.adp.com/mascsr/default";
+const ADP_CCID = "19000101_000001"; // the career center nearly every ADP client uses
+function adp(c: Company) {
+  const [cid, ccId = ADP_CCID, ...rest] = c.slug.split("/");
+  if (!cid || rest.length) throw new Error(`adp slug must look like "<cid>" or "<cid>/<ccId>", got "${c.slug}"`);
+  return { cid, ccId, query: `cid=${cid}&ccId=${ccId}&lang=en_US&locale=en_US` };
+}
+// "software-developer---ai-focus" -> "Software Developer - Ai Focus": iCIMS's sitemap has the title only in the URL.
+function icimsTitle(slug: string) {
+  let text = slug;
+  try {
+    text = decodeURIComponent(slug);
+  } catch {
+    // left as it is
+  }
+  return text
+    .replace(/---/g, " – ")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/(^|[\s(/])([a-z])/g, (_, before: string, letter: string) => before + letter.toUpperCase())
+    .replace(/ – /g, " - ");
 }
 
 // The fields read from each board's answer.
@@ -213,6 +270,43 @@ interface WorkdayPage {
 }
 interface WorkdayPosting {
   jobPostingInfo?: { jobDescription?: string };
+}
+interface OraclePage {
+  items?: { TotalJobsCount?: number; requisitionList?: { Id: string; Title: string; PrimaryLocation?: string | null; PostedDate?: string | null }[] }[];
+}
+interface OracleDetails {
+  items?: { ExternalDescriptionStr?: string | null; ExternalResponsibilitiesStr?: string | null; ExternalQualificationsStr?: string | null }[];
+}
+interface AdpRequisition {
+  itemID: string;
+  requisitionTitle: string;
+  postDate?: string;
+  requisitionDescription?: string;
+  requisitionLocations?: { address?: { cityName?: string; countrySubdivisionLevel1?: { codeValue?: string }; countryCode?: string } }[];
+}
+interface AdpPage {
+  jobRequisitions?: AdpRequisition[];
+}
+interface UkgPage {
+  totalCount?: number;
+  opportunities?: {
+    Id: string;
+    Title: string;
+    PostedDate?: string;
+    Locations?: { Address?: { City?: string | null; State?: { Code?: string | null } | null; Country?: { Code?: string | null } | null } | null }[];
+  }[];
+}
+interface EightfoldPage {
+  data?: { count?: number; positions?: { name: string; standardizedLocations?: string[]; locations?: string[]; positionUrl: string; postedTs?: number }[] };
+}
+type BreezyBoard = { name: string; url: string; published_date?: string; location?: { name?: string; is_remote?: boolean } | null }[];
+interface BambooBoard {
+  result?: {
+    id: string;
+    jobOpeningName: string;
+    isRemote?: boolean | null;
+    atsLocation?: { city?: string | null; state?: string | null; country?: string | null } | null;
+  }[];
 }
 interface RemotiveFeed {
   jobs?: { url: string; title: string; company_name?: string | null; candidate_required_location?: string; description?: string; publication_date?: string }[];
@@ -334,7 +428,227 @@ const fetchers: Record<Ats, (c: Company) => Promise<Posting[]>> = {
     }
     return out;
   },
+  // Oracle Recruiting Cloud (HCM) candidate sites. Slug: "<host>.oraclecloud.com/<site>", e.g. "egay.fa.us6.oraclecloud.com/CX_4001".
+  async oracle(c) {
+    const [host, site] = slugParts(c, 2, "<host>.oraclecloud.com/<site>");
+    const out: Posting[] = [];
+    for (let offset = 0; offset < NEWEST_MAX; offset += 25) {
+      const data = (await getJson(
+        `https://${host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList&finder=findReqs;siteNumber=${site},limit=25,offset=${offset},sortBy=POSTING_DATES_DESC`,
+      )) as OraclePage;
+      const page = data.items?.[0];
+      const list = page?.requisitionList ?? [];
+      for (const j of list)
+        out.push({
+          url: `https://${host}/hcmUI/CandidateExperience/en/sites/${site}/job/${j.Id}`,
+          source: "oracle",
+          company: c.name,
+          title: j.Title,
+          location: j.PrimaryLocation ?? null,
+          description: null,
+          posted: posted(j.PostedDate),
+        });
+      if (list.length < 25 || offset + 25 >= (page?.TotalJobsCount ?? 0)) break;
+    }
+    return out;
+  },
+  // ADP Workforce Now career centers. Slug: "<cid>", or "<cid>/<ccId>" when the career center is not the usual one.
+  async adp(c) {
+    const { cid, ccId, query } = adp(c);
+    const out: Posting[] = [];
+    for (let skip = 0; skip < NEWEST_MAX; skip += 100) {
+      const data = (await getJson(`${ADP}/careercenter/public/events/staffing/v1/job-requisitions?${query}&$top=100&$skip=${skip}`)) as AdpPage;
+      const list = data.jobRequisitions ?? [];
+      for (const j of list) {
+        const at = j.requisitionLocations?.[0]?.address;
+        out.push({
+          url: `${ADP}/mdf/recruitment/recruitment.html?cid=${cid}&ccId=${ccId}&jobId=${j.itemID}&lang=en_US`,
+          source: "adp",
+          company: c.name,
+          title: j.requisitionTitle,
+          location: place(at?.cityName, at?.countrySubdivisionLevel1?.codeValue, at?.countryCode),
+          description: null,
+          posted: posted(j.postDate),
+        });
+      }
+      if (list.length < 100) break;
+    }
+    return out;
+  },
+  // UKG Pro (UltiPro) recruiting. Slug: "<host>/<tenant>/<board id>", e.g. "recruiting2.ultipro.com/CRA1009CRWL/755fc3a5-077f-4395-ad9a-01ffdc6dea89".
+  async ukg(c) {
+    const [host, tenant, board] = slugParts(c, 3, "<host>/<tenant>/<board id>");
+    const base = `https://${host}/${tenant}/JobBoard/${board}`;
+    const out: Posting[] = [];
+    for (let skip = 0; skip < NEWEST_MAX; skip += 50) {
+      const data = (await getJson(`${base}/JobBoardView/LoadSearchResults`, {
+        opportunitySearch: {
+          Top: 50,
+          Skip: skip,
+          QueryString: "",
+          Filters: [],
+          OrderBy: [{ Value: "postedDateDesc", PropertyName: "PostedDate", Ascending: false }],
+        },
+        matchCriteria: { PreferredJobs: [], Educations: [], LicenseAndCertifications: [], Skills: [], hasNoLicenses: false, SkippedSkills: [] },
+      })) as UkgPage;
+      const list = data.opportunities ?? [];
+      for (const j of list) {
+        const at = j.Locations?.[0]?.Address;
+        out.push({
+          url: `${base}/OpportunityDetail?opportunityId=${j.Id}`,
+          source: "ukg",
+          company: c.name,
+          title: j.Title,
+          location: place(at?.City, at?.State?.Code, at?.Country?.Code),
+          description: null,
+          posted: posted(j.PostedDate),
+        });
+      }
+      if (list.length < 50 || skip + 50 >= (data.totalCount ?? 0)) break;
+    }
+    return out;
+  },
+  // iCIMS career portals, from their sitemap, which has no location. Slug: the host's first part, e.g. "careers-acme" for careers-acme.icims.com.
+  async icims(c) {
+    const xml = await getText(`https://${c.slug}.icims.com/sitemap.xml`);
+    return [...xml.matchAll(/<loc>(https:\/\/[^<]+\/jobs\/\d+\/([^/<]+)\/job)<\/loc>(?:\s*<lastmod>([^<]+)<\/lastmod>)?/g)]
+      .map(([, url = "", slug = "", lastmod]) => ({
+        url,
+        source: "icims",
+        company: c.name,
+        title: icimsTitle(slug),
+        location: null,
+        description: null,
+        posted: posted(lastmod),
+      }))
+      .sort((a, b) => (b.posted ?? "").localeCompare(a.posted ?? ""))
+      .slice(0, NEWEST_MAX);
+  },
+  // Eightfold career sites, US postings only (the rest would be dropped as abroad). Slug: "<host>.eightfold.ai/<company domain>".
+  async eightfold(c) {
+    const [host, domain] = slugParts(c, 2, "<host>.eightfold.ai/<company domain>");
+    const out: Posting[] = [];
+    for (let start = 0; start < EIGHTFOLD_MAX; start += 10) {
+      const data = (await getJson(
+        `https://${host}/api/pcsx/search?domain=${encodeURIComponent(domain)}&query=&location=United%20States&start=${start}&sort_by=timestamp`,
+      )) as EightfoldPage;
+      const list = data.data?.positions ?? [];
+      for (const j of list)
+        out.push({
+          url: `https://${host}${j.positionUrl}?domain=${domain}`,
+          source: "eightfold",
+          company: c.name,
+          title: j.name,
+          location: (j.standardizedLocations ?? j.locations ?? []).join("; ") || null,
+          description: null,
+          posted: posted(j.postedTs ? j.postedTs * 1000 : null),
+        });
+      if (list.length < 10 || start + 10 >= (data.data?.count ?? 0)) break;
+    }
+    return out;
+  },
+  async breezy(c) {
+    const data = (await getJson(`https://${c.slug}.breezy.hr/json`)) as BreezyBoard;
+    return data.map(j => ({
+      url: j.url,
+      source: "breezy",
+      company: c.name,
+      title: j.name,
+      location: place(j.location?.name, j.location?.is_remote && "Remote"),
+      description: null,
+      posted: posted(j.published_date),
+    }));
+  },
+  // JazzHR boards (<slug>.applytojob.com), from the public listing page.
+  async jazzhr(c) {
+    const html = await getText(`https://${c.slug}.applytojob.com/apply`);
+    const out: Posting[] = [];
+    for (const [, item = ""] of html.matchAll(/<li class="list-group-item">([\s\S]*?)<\/ul>\s*<\/li>/g)) {
+      const link = /<a href="(https:\/\/[^"]+\/apply\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/.exec(item);
+      if (!link?.[1]) continue;
+      out.push({
+        url: link[1],
+        source: "jazzhr",
+        company: c.name,
+        title: htmlToText(link[2] ?? ""),
+        location: /fa-map-marker[^>]*><\/i>\s*([^<]+)/.exec(item)?.[1]?.trim() || null,
+        description: null,
+        posted: null,
+      });
+    }
+    return out;
+  },
+  async bamboohr(c) {
+    const data = (await getJson(`https://${c.slug}.bamboohr.com/careers/list`)) as BambooBoard;
+    return (data.result ?? []).map(j => ({
+      url: `https://${c.slug}.bamboohr.com/careers/${j.id}`,
+      source: "bamboohr",
+      company: c.name,
+      title: j.jobOpeningName,
+      location: place(j.atsLocation?.city, j.atsLocation?.state, j.atsLocation?.country, j.isRemote && "Remote"),
+      description: null,
+      posted: null,
+    }));
+  },
 };
+
+// The board a posting's URL is on, as a company to watch, when it is one of the boards above.
+export function boardOf(url: string, name: string): Company | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const host = u.hostname.toLowerCase(),
+    path = u.pathname;
+  const first = path.split("/")[1] ?? "";
+  const at = (ats: Ats, slug: string | null | undefined): Company | null => (slug ? { name, ats, slug } : null);
+  if (/^(boards|job-boards)\.greenhouse\.io$/.test(host) && /^\/[\w-]+\/jobs\//.test(path) && first !== "embed") return at("greenhouse", first);
+  if (host === "jobs.lever.co") return at("lever", first);
+  if (host === "jobs.ashbyhq.com") return at("ashby", first);
+  if (host === "apply.workable.com" && first !== "api" && first !== "j") return at("workable", first); // /j/<id> is a short link
+  if (host.endsWith(".recruitee.com")) return at("recruitee", host.split(".")[0]);
+  if (host === "jobs.smartrecruiters.com") return at("smartrecruiters", first);
+  const wd = /^([\w-]+)\.(wd\d+)\.myworkdayjobs\.com$/.exec(host);
+  if (wd) return at("workday", `${wd[1]}.${wd[2]}/${/^[a-z]{2}-[A-Z]{2}$/.test(first) ? path.split("/")[2] : first}`);
+  const oracle = /\/hcmUI\/CandidateExperience\/[\w-]+\/sites\/([\w-]+)/.exec(path);
+  if (host.endsWith(".oraclecloud.com") && oracle) return at("oracle", `${host}/${oracle[1]}`);
+  if (host === "workforcenow.adp.com") {
+    const cid = u.searchParams.get("cid"),
+      ccId = u.searchParams.get("ccId");
+    return at("adp", cid && (ccId && ccId !== ADP_CCID ? `${cid}/${ccId}` : cid));
+  }
+  const ukg = /^\/([\w-]+)\/JobBoard\/([\w-]+)/.exec(path);
+  if (/(^|\.)(ultipro\.com|ukg\.net)$/.test(host) && ukg) return at("ukg", `${host}/${ukg[1]}/${ukg[2]}`);
+  if (host.endsWith(".icims.com") && path.startsWith("/jobs/")) return at("icims", host.slice(0, -".icims.com".length));
+  if (host.endsWith(".eightfold.ai") && u.searchParams.get("domain")) return at("eightfold", `${host}/${u.searchParams.get("domain")}`);
+  if (host.endsWith(".breezy.hr")) return at("breezy", host.split(".")[0]);
+  if (host.endsWith(".applytojob.com")) return at("jazzhr", host.split(".")[0]);
+  if (host.endsWith(".bamboohr.com") && first === "careers") return at("bamboohr", host.split(".")[0]);
+  return null;
+}
+
+// Two boards are one when they are the same kind with the same slug.
+const sameBoard = (a: Company) => (b: Company) => a.ats === b.ats && a.slug.toLowerCase() === b.slug.toLowerCase();
+
+// Watches the board a posting was found on, when boardOf knows it and it is not watched yet, so the
+// employer's later postings arrive with each scan rather than through a search. A board that lists
+// nothing is left alone. Returns the board when it was added.
+export async function watchBoardOf(url: string, name: string): Promise<Company | null> {
+  const company = boardOf(url, name);
+  if (!company || loadCompanies().some(sameBoard(company))) return null;
+  const postings = await fetchCompany(company).catch(() => []);
+  return postings.length && addCompany(company) ? company : null;
+}
+
+// What a board is read from, so that boards on one host are read one at a time.
+export function boardHost(c: Company): string {
+  if (c.ats === "workday") return c.slug.split("/")[0] ?? c.slug;
+  if (["oracle", "ukg", "eightfold"].includes(c.ats)) return c.slug.split("/")[0] ?? c.slug;
+  if (["icims", "breezy", "jazzhr", "bamboohr", "recruitee"].includes(c.ats)) return `${c.ats}:${c.slug}`;
+  return c.ats; // one shared API: Greenhouse, Lever, Ashby, Workable, SmartRecruiters, ADP
+}
 
 // Boards that list without the body text: fetch it for one posting.
 export async function fetchDescription(url: string): Promise<string | null> {
@@ -355,8 +669,70 @@ export async function fetchDescription(url: string): Promise<string | null> {
         .join("\n\n");
       return text || null;
     }
+    const oracle = /^https:\/\/([\w.-]+\.oraclecloud\.com)\/hcmUI\/CandidateExperience\/[\w-]+\/sites\/([\w-]+)\/job\/(\d+)/.exec(url);
+    if (oracle) {
+      const data = (await getJson(
+        `https://${oracle[1]}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails?expand=all&onlyData=true&finder=ById;Id=%22${oracle[3]}%22,siteNumber=${oracle[2]}`,
+      )) as OracleDetails;
+      const it = data.items?.[0];
+      const text = [it?.ExternalDescriptionStr, it?.ExternalResponsibilitiesStr, it?.ExternalQualificationsStr]
+        .filter(Boolean)
+        .map(h => htmlToText(h ?? ""))
+        .join("\n\n");
+      return text || null;
+    }
+    if (url.startsWith(`${ADP}/mdf/recruitment/recruitment.html?`)) {
+      const q = new URL(url).searchParams;
+      const [cid, ccId, jobId] = [q.get("cid"), q.get("ccId") ?? ADP_CCID, q.get("jobId")];
+      if (!cid || !jobId) return null;
+      const j = (await getJson(
+        `${ADP}/careercenter/public/events/staffing/v1/job-requisitions/${jobId}?cid=${cid}&ccId=${ccId}&lang=en_US&locale=en_US`,
+      )) as AdpRequisition;
+      return j.requisitionDescription ? htmlToText(j.requisitionDescription) || null : null;
+    }
+    const eightfold = /^https:\/\/([\w.-]+\.eightfold\.ai)\/careers\/job\/(\d+)\?domain=([^&#]+)/.exec(url);
+    if (eightfold) {
+      const data = (await getJson(`https://${eightfold[1]}/api/pcsx/position_details?position_id=${eightfold[2]}&domain=${eightfold[3]}&hl=en`)) as {
+        data?: { jobDescription?: string };
+      };
+      return data.data?.jobDescription ? htmlToText(data.data.jobDescription) || null : null;
+    }
+    const bamboo = /^https:\/\/([\w-]+)\.bamboohr\.com\/careers\/(\d+)/.exec(url);
+    if (bamboo) {
+      const data = (await getJson(`https://${bamboo[1]}.bamboohr.com/careers/${bamboo[2]}/detail`)) as { result?: { jobOpening?: { description?: string } } };
+      const html = data.result?.jobOpening?.description;
+      return html ? htmlToText(html) || null : null;
+    }
+    // Any other career page: UKG's carries the posting as JSON in a script, most others as schema.org JobPosting.
+    if (AGGREGATOR.test(url)) return null;
+    const page = await getText(url.includes(".icims.com/") ? `${url}${url.includes("?") ? "&" : "?"}in_iframe=1` : url);
+    const ukg = /CandidateOpportunityDetail\(\{[\s\S]*?"Description":("(?:[^"\\]|\\.)*")/.exec(page);
+    if (ukg?.[1]) return htmlToText(JSON.parse(ukg[1]) as string) || null;
+    return jsonLdDescription(page);
   } catch {
     return null;
+  }
+}
+
+// Job sites whose pages are read another way, if at all.
+const AGGREGATOR = /^https?:\/\/([\w-]+\.)*(linkedin|indeed)\.com\//i;
+
+// The description in a page's schema.org JobPosting, which most career sites publish for search engines.
+export function jsonLdDescription(html: string): string | null {
+  for (const [, body = ""] of html.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+    let data: unknown;
+    try {
+      data = JSON.parse(body.trim());
+    } catch {
+      continue;
+    }
+    const graph = data && typeof data === "object" && "@graph" in data ? data["@graph"] : data;
+    for (const node of Array.isArray(graph) ? graph : [graph]) {
+      if (!node || typeof node !== "object") continue;
+      const { "@type": type, description } = node as Record<string, unknown>;
+      if ((type === "JobPosting" || (Array.isArray(type) && type.includes("JobPosting"))) && typeof description === "string")
+        return htmlToText(description) || null;
+    }
   }
   return null;
 }

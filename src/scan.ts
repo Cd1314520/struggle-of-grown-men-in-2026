@@ -1,5 +1,5 @@
 // Scan: read every source, save what is new, and let a triage worker decide what is worth a full read.
-import { feedNames, fetchCompany, fetchDescription, fetchFeed, loadCompanies } from "./ats";
+import { boardHost, feedNames, fetchCompany, fetchDescription, fetchFeed, loadCompanies, watchBoardOf, type Company } from "./ats";
 import { boardMinutes, boardNames, fetchBoard, isBoardUrl } from "./boards";
 import { config, readProfile } from "./config";
 import { appliedLocation, insertJob, jobsByStatus, kvGet, kvSet, logEvent, updateJob, type Job } from "./db";
@@ -11,6 +11,9 @@ import { requireProfile } from "./profile";
 import { screenOut } from "./screen";
 import { to } from "./status";
 import { addCompanyTool, render, workDir } from "./worker-tools";
+
+// Hosts read at once during a scan.
+const SCAN_LANES = 6;
 
 // A board that is down would otherwise log the same error on every scan.
 const feedErrors = new Map<string, number>();
@@ -37,13 +40,22 @@ export async function scanSources(run: RunWorker, opts: { discover?: boolean } =
     if (n) from.push(`${label} ${n}`);
     added += n;
   };
-  for (const company of loadCompanies()) {
-    try {
-      take(company.name, await fetchCompany(company));
-    } catch (err) {
-      feedError(`${company.ats}/${company.slug}`, err);
-    }
-  }
+  // Boards on different hosts are read side by side; boards that share a host, one after another.
+  const byHost = new Map<string, Company[]>();
+  for (const company of loadCompanies()) byHost.set(boardHost(company), [...(byHost.get(boardHost(company)) ?? []), company]);
+  const queue = [...byHost.values()].sort((a, b) => b.length - a.length);
+  await Promise.all(
+    Array.from({ length: SCAN_LANES }, async () => {
+      for (let group; (group = queue.shift());)
+        for (const company of group) {
+          try {
+            take(company.name, await fetchCompany(company));
+          } catch (err) {
+            feedError(`${company.ats}/${company.slug}`, err);
+          }
+        }
+    }),
+  );
   for (const name of feedNames()) {
     if (!due(`last.feed.${name}`, config.feeds?.[name]?.minutes ?? 0)) continue;
     kvSet(`last.feed.${name}`, new Date().toISOString());
@@ -165,7 +177,7 @@ async function discover(run: RunWorker) {
           location: S.str("Location or 'Remote'"),
           description: S.str("Full job description text"),
         }),
-        handler: args => {
+        handler: async args => {
           const posting = {
             url: arg.str(args, "url"),
             company: arg.str(args, "company"),
@@ -174,7 +186,10 @@ async function discover(run: RunWorker) {
             description: arg.str(args, "description"),
           };
           if (/linkedin\.com|indeed\.com/i.test(posting.url)) return "ERROR: aggregator links are not accepted; find the original posting.";
-          return insertJob({ ...posting, source: "discover" }, "triaged") ? "Saved." : "Already known.";
+          const saved = insertJob({ ...posting, source: "discover" }, "triaged") ? "Saved." : "Already known.";
+          const board = await watchBoardOf(posting.url, posting.company);
+          if (board) logEvent("system", `Watching ${board.name}'s board (${board.ats}/${board.slug}), found through a posting`);
+          return board ? `${saved} Its board (${board.ats}/${board.slug}) is now watched, so do not save its other postings one by one.` : saved;
         },
       },
       discover_done: {

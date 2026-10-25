@@ -572,7 +572,13 @@ describe("where SQL lives", () => {
     "src/stats.ts", // reads only: the Overview's aggregates across jobs and status_changes
   ]);
   // Standalone tools that read a database by path rather than through the app's connection.
-  const tools = new Set(["scripts/journal-stalls.ts", "scripts/journal-resumes.ts", "scripts/reassess-backlog.ts", "scripts/migrate.ts"]);
+  const tools = new Set([
+    "scripts/journal-stalls.ts",
+    "scripts/journal-resumes.ts",
+    "scripts/reassess-backlog.ts",
+    "scripts/migrate.ts",
+    "scripts/watch-known-boards.ts",
+  ]);
   it("keeps statements in the modules that own the tables", async () => {
     expect(files.length).toBeGreaterThan(20);
     const strays: string[] = [];

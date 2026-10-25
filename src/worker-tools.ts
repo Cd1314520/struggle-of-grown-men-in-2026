@@ -26,7 +26,11 @@ export const workDir = () => {
 // `also` may add to the reply, given the board's postings.
 export const addCompanyTool = (also?: (postings: Posting[]) => string): HostTool => ({
   description: "Add a company job board to the watch list. Verifies the board exists.",
-  parameters: schema({ name: S.str("Company name"), ats: { type: "string", enum: [...ATS] }, slug: S.str("Board slug; for workday '<tenant>.<wdN>/<site>'") }),
+  parameters: schema({
+    name: S.str("Company name"),
+    ats: { type: "string", enum: [...ATS] },
+    slug: S.str("Board slug as the board table in your task gives it; for workday '<tenant>.<wdN>/<site>'"),
+  }),
   handler: async args => {
     const name = arg.str(args, "name"),
       ats = arg.str(args, "ats"),

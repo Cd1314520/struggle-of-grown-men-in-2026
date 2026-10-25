@@ -13,9 +13,17 @@ Use web search to widen the candidate's job search. Look for both kinds of emplo
    | recruitee | `<slug>.recruitee.com` | `<slug>` |
    | smartrecruiters | `jobs.smartrecruiters.com/<slug>` or `careers.smartrecruiters.com/<slug>` | `<slug>` |
    | workday | `<tenant>.<wdN>.myworkdayjobs.com/<site>` | `<tenant>.<wdN>/<site>`, e.g. `acme.wd5/External` |
+   | oracle | `<host>.oraclecloud.com/hcmUI/CandidateExperience/en/sites/<site>` | `<host>.oraclecloud.com/<site>`, e.g. `egay.fa.us6.oraclecloud.com/CX_4001` |
+   | adp | `workforcenow.adp.com/...recruitment.html?cid=<cid>&ccId=<ccId>` | `<cid>`, or `<cid>/<ccId>` when ccId is not `19000101_000001` |
+   | ukg | `<host>/<tenant>/JobBoard/<board id>` (ultipro.com) | `<host>/<tenant>/<board id>` |
+   | icims | `<slug>.icims.com/jobs/...` | `<slug>`, e.g. `careers-acme` |
+   | eightfold | `<host>.eightfold.ai/careers?domain=<domain>` | `<host>.eightfold.ai/<domain>` |
+   | breezy | `<slug>.breezy.hr` | `<slug>` |
+   | jazzhr | `<slug>.applytojob.com` | `<slug>` |
+   | bamboohr | `<slug>.bamboohr.com/careers` | `<slug>` |
 
    The tool checks the board exists; if it reports a failure, correct the slug or move on. Their postings are then scanned automatically, so do not save them one by one.
-2. Individual, currently open postings that match well and live anywhere else (company career sites and other applicant systems). Read the posting page, then call `save_job` with the direct application URL and the full description text. Skip LinkedIn, Indeed and other aggregators: find the original posting instead.
+2. Individual, currently open postings that match well and live anywhere else (company career sites and other applicant systems). Read the posting page, then call `save_job` with the direct application URL and the full description text. A posting saved from one of the boards above puts its board on the watch list too. Skip LinkedIn, Indeed and other aggregators: find the original posting instead.
 
 Aim for about {{companyGoal}} new companies and up to {{jobGoal}} individual postings. Prefer quality of fit over volume.
 
