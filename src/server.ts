@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AppState, BlockersResult, JobDetail } from "./api-types";
+import type { ActivityResult, AppState, Attention, BlockersResult, JobDetail, Summary } from "./api-types";
 import { feedNames, loadCompanies } from "./ats";
 import { jobBlockers, listBlockers } from "./blockers";
 import { isBoardUrl } from "./boards";
@@ -45,6 +45,8 @@ import { isSubmitting, recoveryMode } from "./fill-state";
 import { RETRYABLE, to, wasSent } from "./status";
 import { addStep, changeStep, jobSteps, nextStepOf, nextSteps, recordOutcome, removeStep, STEP_KINDS, stepOf } from "./steps";
 import { serveUi } from "./ui";
+import { isListView, listJobs } from "./listing";
+import { stats } from "./stats";
 
 const PROFILE_FILES = ["targets.md", "rubric.yml", MAIN, "resume-notes.md", "answers.md", "personal.yml", "companies.yml"];
 const safeThreshold = () => {
@@ -88,25 +90,26 @@ function resumeDiff(job: Job) {
   return out.stdout.toString().split("\n").slice(4).join("\n");
 }
 
-function state(scheduler: Scheduler): AppState {
-  const next = nextSteps();
-  const jobs = boardJobs().map(j => ({ ...j, opened_at: openedAt(j), next: next.get(j.id) ?? null }));
-  const counts = statusCounts();
-  const events = recentEvents();
-  const highlights = highlightEvents();
+// Reading companies.yml is most of what a summary would cost, so its count is kept until the file changes.
+let companies: { stamp: string; count: number } | null = null;
+function boardCount() {
+  const file = statSync(profilePath("companies.yml"), { throwIfNoEntry: false });
+  const stamp = file ? `${file.mtimeMs}:${file.size}` : "";
+  if (companies?.stamp !== stamp) companies = { stamp, count: loadCompanies().length };
+  return companies.count + feedNames().length;
+}
+
+// The app's state without its lists: what /api/state and /api/summary share.
+function settings(scheduler: Scheduler): Omit<Summary, "attention"> {
   return {
-    jobs,
-    counts,
-    questionGroups: listQuestionGroups(),
+    counts: statusCounts(),
     digest: digestStatus(),
-    events,
-    highlights,
     gmail: gmail.gmailStatus(),
     profileProblems: profileProblems(),
     running: { scan: scheduler.isRunning("scan"), track: scheduler.isRunning("track") },
     lastScan: kvGet("last.scan"),
     scanMinutes: config.schedule.scanMinutes,
-    boards: loadCompanies().length + feedNames().length,
+    boards: boardCount(),
     lastTrack: kvGet("last.track"),
     confirmBeforeSubmit: config.confirmBeforeSubmit,
     autoApply: { ...autoApply(), approvedToday: usedToday("auto") },
@@ -117,9 +120,51 @@ function state(scheduler: Scheduler): AppState {
     redirectUri: gmail.redirectUri(),
     mailbox: config.mailbox,
     phase: config.phase,
-    home: config.boards?.location.split(",")[0]?.trim() || null,
     profileFiles: PROFILE_FILES,
   };
+}
+
+function state(scheduler: Scheduler): AppState {
+  const next = nextSteps();
+  return {
+    ...settings(scheduler),
+    jobs: boardJobs().map(j => ({ ...j, opened_at: openedAt(j), next: next.get(j.id) ?? null })),
+    questionGroups: listQuestionGroups(),
+    events: recentEvents(),
+    highlights: highlightEvents(),
+  };
+}
+
+function summary(scheduler: Scheduler): Summary {
+  const rest = settings(scheduler),
+    questionGroups = listQuestionGroups();
+  const gates = (kind: string) => questionGroups.filter(g => g.kind === kind).reduce((n, g) => n + g.jobs.length, 0);
+  const attention: Omit<Attention, "total"> = {
+    review: rest.counts["awaiting_approval"] ?? 0,
+    questions: questionGroups.filter(g => g.kind === "question").length,
+    confirmSubmit: gates("confirm_submit"),
+    manual: gates("manual"),
+    coverLetter: gates("cover_letter"),
+    ambiguous: gates("submission_ambiguous"),
+    failed: rest.counts["failed"] ?? 0,
+  };
+  const total = attention.questions + attention.confirmSubmit + attention.manual + attention.coverLetter + attention.ambiguous + attention.failed;
+  return { ...rest, attention: { ...attention, total } };
+}
+
+// One page of the event log. The full log names the job of each event as the highlights do.
+function activity(url: URL): ActivityResult {
+  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 60));
+  const before = Number(url.searchParams.get("before")) || null;
+  const kinds = url.searchParams.getAll("kind").filter(Boolean);
+  const rows =
+    url.searchParams.get("feed") === "all"
+      ? recentEvents(limit, before, kinds).map(e => {
+          const job = e.job_id ? getJob(e.job_id) : null;
+          return { ...e, company: job?.company ?? null, title: job?.title ?? null };
+        })
+      : highlightEvents(limit, before, kinds).map(e => ({ ...e, worker: null }));
+  return { items: rows, next: rows.length === limit ? (rows.at(-1)?.id ?? null) : null };
 }
 
 function jobDetail(scheduler: Scheduler, job: Job): JobDetail {
@@ -289,6 +334,26 @@ export function createHandler(scheduler: Scheduler) {
     const page = await serveUi(path);
     if (page) return page;
     if (path === "/api/state") return json(state(scheduler));
+    if (path === "/api/summary") return json(summary(scheduler));
+    if (path === "/api/stats") return json(stats());
+    if (path === "/api/activity") return json(activity(url));
+    if (path === "/api/jobs" && req.method === "GET") {
+      const view = url.searchParams.get("view");
+      if (!isListView(view)) return fail("view must be one of review, pipeline, applications, held, rejected");
+      const p = url.searchParams;
+      return json(
+        listJobs({
+          view,
+          group: p.get("group"),
+          q: p.get("q"),
+          filters: p.getAll("filter"),
+          sort: p.get("sort"),
+          offset: Number(p.get("offset")) || 0,
+          limit: Number(p.get("limit")) || 50,
+          focus: Number(p.get("focus")) || null,
+        }),
+      );
+    }
 
     if (path === "/api/blockers" && req.method === "GET") return json({ blockers: listBlockers() } satisfies BlockersResult);
     if (path === "/api/questions" && req.method === "GET") return json({ groups: listQuestionGroups() });

@@ -1,0 +1,318 @@
+@import "tailwindcss";
+
+/* The design system. Tailwind's own palette and type scale are switched off, so the only colours and
+   sizes a component can use are the ones named here: one type scale, semantic colours, light and dark. */
+
+/* The fonts' @font-face rules are in index.html: the bundler would try to resolve their URLs here. */
+
+@custom-variant dark (&:where(.dark, .dark *));
+/* A finger, or a window too narrow for a mouse to be likely: controls grow to a 36px+ tap target. */
+@custom-variant touch {
+  @media (pointer: coarse), (width < 40rem) {
+    @slot;
+  }
+}
+
+@theme {
+  --color-*: initial;
+  --text-*: initial;
+  --font-*: initial;
+  --shadow-*: initial;
+  --radius-*: initial;
+
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Type scale. 13px is the UI's base; 14px is for reading. */
+  --text-2xs: 0.6875rem; /* 11px: kbd, counters */
+  --text-2xs--line-height: 1rem;
+  --text-xs: 0.75rem; /* 12px: overlines, table headers, captions */
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.8125rem; /* 13px: UI text, rows, meta */
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem; /* 14px: reading text, inputs */
+  --text-base--line-height: 1.375rem;
+  --text-lg: 1rem; /* 16px: card and panel titles */
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.25rem; /* 20px: page titles */
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5rem; /* 24px: the open job's title, stats */
+  --text-2xl--line-height: 2rem;
+  --text-3xl: 2rem; /* 32px: headline numbers */
+  --text-3xl--line-height: 2.5rem;
+
+  --radius-sm: 0.3125rem;
+  --radius-md: 0.4375rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.875rem;
+  --radius-full: 9999px;
+
+  --shadow-xs: 0 1px 2px 0 rgb(16 16 24 / 0.05);
+  --shadow-sm: 0 1px 3px 0 rgb(16 16 24 / 0.07), 0 1px 2px -1px rgb(16 16 24 / 0.05);
+  --shadow-md: 0 4px 12px -2px rgb(16 16 24 / 0.08), 0 2px 4px -2px rgb(16 16 24 / 0.05);
+  --shadow-lg: 0 16px 40px -8px rgb(16 16 24 / 0.18), 0 4px 12px -4px rgb(16 16 24 / 0.08);
+
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-white: #fff;
+  --color-black: #000;
+
+  /* Surfaces */
+  --color-canvas: var(--canvas); /* the app background */
+  --color-surface: var(--surface); /* cards, panels, inputs */
+  --color-subtle: var(--subtle); /* hover, wells, table headers */
+  --color-muted: var(--muted); /* pressed, selected rows, skeletons */
+  --color-overlay: var(--overlay);
+  /* Lines */
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  /* Text */
+  --color-fg: var(--fg); /* primary text */
+  --color-fg-muted: var(--fg-muted); /* secondary text */
+  --color-fg-subtle: var(--fg-subtle); /* tertiary text, placeholders, icons */
+  /* Brand */
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg); /* text on accent */
+  --color-accent-soft: var(--accent-soft); /* tinted backgrounds */
+  --color-accent-text: var(--accent-text); /* accent as text, links */
+  /* Status: each a solid (dots, bars), a soft background and a readable text colour */
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-text: var(--success-text);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-text: var(--warning-text);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-text: var(--danger-text);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-text: var(--info-text);
+  /* Data visualisation: a sequential ramp of the accent */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+
+  --animate-in: fade-in 140ms ease-out;
+  --animate-pop: pop-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-slide-up: slide-up 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-slide-left: slide-left 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-spin: spin 0.8s linear infinite;
+  --animate-pulse: pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(2px);
+  }
+}
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes slide-left {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+:root {
+  color-scheme: light;
+  --canvas: #f8f8fa;
+  --surface: #ffffff;
+  --subtle: #f3f3f6;
+  --muted: #ebebf0;
+  --overlay: rgb(20 20 28 / 0.32);
+  --border: #e6e6ec;
+  --border-strong: #d4d4dc;
+  --fg: #16161d;
+  --fg-muted: #5c5c6a;
+  --fg-subtle: #8b8b98;
+  --accent: #5b5bd6;
+  --accent-hover: #4f4fc9;
+  --accent-fg: #ffffff;
+  --accent-soft: #eff0fe;
+  --accent-text: #4a4ac4;
+  --success: #2e9d6b;
+  --success-soft: #e9f7f0;
+  --success-text: #1d7a52;
+  --warning: #d68a12;
+  --warning-soft: #fdf4e3;
+  --warning-text: #96600a;
+  --danger: #d9473f;
+  --danger-soft: #fdeeed;
+  --danger-text: #b5332c;
+  --info: #3b82e6;
+  --info-soft: #ebf3fe;
+  --info-text: #2563c4;
+  --chart-1: #5b5bd6;
+  --chart-2: #8d8de6;
+  --chart-3: #bcbcf1;
+  --chart-4: #e1e1f9;
+}
+
+.dark {
+  color-scheme: dark;
+  --canvas: #0c0c0f;
+  --surface: #141418;
+  --subtle: #1a1a1f;
+  --muted: #232329;
+  --overlay: rgb(0 0 0 / 0.6);
+  --border: #26262d;
+  --border-strong: #34343c;
+  --fg: #ededf1;
+  --fg-muted: #a3a3ae;
+  --fg-subtle: #6f6f7b;
+  --accent: #6e6ef0;
+  --accent-hover: #8080f5;
+  --accent-fg: #ffffff;
+  --accent-soft: #1e1e3a;
+  --accent-text: #a5a5ff;
+  --success: #3fb37f;
+  --success-soft: #11251c;
+  --success-text: #5fd39d;
+  --warning: #e3a03a;
+  --warning-soft: #2a2010;
+  --warning-text: #f0bb63;
+  --danger: #ec5d55;
+  --danger-soft: #2c1414;
+  --danger-text: #ff8a83;
+  --info: #5b9cf5;
+  --info-soft: #12203a;
+  --info-text: #8ab9ff;
+  --chart-1: #7b7bf2;
+  --chart-2: #5a5ac0;
+  --chart-3: #3d3d85;
+  --chart-4: #27274f;
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+    font-feature-settings: "cv11", "ss01", "ss03";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-canvas font-sans text-sm text-fg;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--accent) 22%, transparent);
+  }
+  :focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--accent) 70%, transparent);
+    outline-offset: 2px;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--fg-subtle);
+  }
+  /* Numbers in rows line up. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
+
+@layer components {
+  /* Rendered markdown (profile files) and long agent text. */
+  .prose {
+    @apply text-base text-fg;
+    h1,
+    h2,
+    h3,
+    h4 {
+      @apply mt-6 mb-2 font-semibold text-fg first:mt-0;
+    }
+    h1 {
+      @apply text-xl;
+    }
+    h2 {
+      @apply text-lg;
+    }
+    h3,
+    h4 {
+      @apply text-base;
+    }
+    p {
+      @apply my-2;
+    }
+    ul,
+    ol {
+      @apply my-2 pl-5;
+    }
+    ul {
+      @apply list-disc;
+    }
+    ol {
+      @apply list-decimal;
+    }
+    li {
+      @apply my-1 marker:text-fg-subtle;
+    }
+    a {
+      @apply text-accent-text underline-offset-2 hover:underline;
+    }
+    code {
+      @apply rounded-sm bg-subtle px-1 py-0.5 font-mono text-sm;
+    }
+    pre {
+      @apply my-3 overflow-x-auto rounded-md border bg-subtle p-3 font-mono text-sm;
+    }
+    pre code {
+      @apply bg-transparent p-0;
+    }
+    blockquote {
+      @apply my-3 border-l-2 border-border-strong pl-3 text-fg-muted;
+    }
+    hr {
+      @apply my-6;
+    }
+    b,
+    strong {
+      @apply font-semibold;
+    }
+  }
+}

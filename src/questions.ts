@@ -341,6 +341,15 @@ function queuedAfter(row: GateRow): number {
 }
 // Open gates grouped by what they ask, the group with the most recently opened posting first: an
 // answer is worth most to an application while its posting is new.
+// The kind of gate each parked job waits on.
+export const openGateKinds = () =>
+  new Map(
+    db
+      .query<{ job_id: number; kind: GateKind }, []>("SELECT job_id, kind FROM question_gates WHERE state = 'open'")
+      .all()
+      .map(r => [r.job_id, r.kind]),
+  );
+
 export function listQuestionGroups(): QuestionGroup[] {
   const groups = new Map<string, QuestionGroup>();
   for (const row of db.query<GateRow, []>("SELECT * FROM question_gates WHERE state = 'open' ORDER BY created_at, id").all()) {

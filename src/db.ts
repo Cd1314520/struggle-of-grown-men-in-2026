@@ -118,6 +118,24 @@ export type BoardJob = Pick<
   | "updated_at"
   | "submitted_at"
 >;
+// Every job in the given statuses, without the long text columns: a job list before it is paged.
+export const listedJobs = (statuses: readonly Status[]) =>
+  db
+    .query<BoardJob, [string]>(
+      `SELECT id, url, source, company, title, location, status, score, pending, note, found_at, posted_at, updated_at, submitted_at
+      FROM jobs WHERE status IN (SELECT value FROM json_each(?))`,
+    )
+    .all(JSON.stringify(statuses));
+// How many jobs in the given statuses each employer has.
+export const countByCompany = (statuses: readonly Status[]) =>
+  new Map(
+    db
+      .query<{ company: string; n: number }, [string]>(
+        "SELECT company, count(*) AS n FROM jobs WHERE status IN (SELECT value FROM json_each(?)) GROUP BY company",
+      )
+      .all(JSON.stringify(statuses))
+      .map(r => [r.company, r.n]),
+  );
 // Lists that grow with every scan: only their most recently touched `limit` reach the board.
 const BACKLOG: readonly Status[] = ["locating", "triaged", "held", "rejected", "failed"];
 // Everything past triage, most recently touched first. Leaves out the long text columns. Jobs under
@@ -523,6 +541,17 @@ export const statusHistory = (jobId: number, limit = 500) =>
   db
     .query<StatusChange, [number, number]>("SELECT from_status, to_status, note, approved_by, at FROM status_changes WHERE job_id = ? ORDER BY id LIMIT ?")
     .all(jobId, limit);
+// The status each of these jobs last moved from. A job with no recorded move is left out.
+export const lastMovedFrom = (jobIds: readonly number[]) =>
+  new Map(
+    db
+      .query<{ job_id: number; from_status: Status }, [string]>(
+        `SELECT job_id, from_status FROM status_changes WHERE id IN (
+          SELECT max(id) FROM status_changes WHERE job_id IN (SELECT value FROM json_each(?)) GROUP BY job_id)`,
+      )
+      .all(JSON.stringify(jobIds))
+      .map(r => [r.job_id, r.from_status]),
+  );
 
 // ---- events
 
@@ -540,26 +569,33 @@ export function logEvent(kind: string, message: string, jobId?: number | null, w
   emit(jobId == null ? { type: "event" } : { type: "event", jobId });
 }
 
-export const recentEvents = (limit = 150) =>
-  db.query<EventRow, [number]>("SELECT id, job_id, worker, kind, message, at FROM events ORDER BY id DESC LIMIT ?").all(limit);
+// Newest first; `before` pages back from an event id, `kinds` keeps only those kinds.
+export const recentEvents = (limit = 150, before: number | null = null, kinds: readonly string[] = []) =>
+  db
+    .query<EventRow, [number, number, string, number]>(
+      `SELECT id, job_id, worker, kind, message, at FROM events
+      WHERE id < ?1 AND (?2 = 0 OR kind IN (SELECT value FROM json_each(?3)))
+      ORDER BY id DESC LIMIT ?4`,
+    )
+    .all(before ?? Number.MAX_SAFE_INTEGER, kinds.length, JSON.stringify(kinds), limit);
 
 // The agents' step-by-step chatter: each step taken, each tool call, each message. Useful while an
 // application is in flight and for a while after; everything else in events is a decision or an outcome.
 const CHATTER = JSON.stringify(["step", "tool", "agent"]);
 
 // Without the chatter: what a person scanning the feed cares about.
-export const highlightEvents = (limit = 80) =>
+export const highlightEvents = (limit = 80, before: number | null = null, kinds: readonly string[] = []) =>
   db
-    .query<Omit<EventRow, "worker"> & { company: string | null; title: string | null }, [string, number]>(
+    .query<Omit<EventRow, "worker"> & { company: string | null; title: string | null }, [string, number, number, string, number]>(
       `
       SELECT e.id, e.job_id, e.kind, e.message, e.at, j.company, j.title
       FROM events e
       LEFT JOIN jobs j ON j.id = e.job_id
-      WHERE e.kind NOT IN (SELECT value FROM json_each(?))
+      WHERE e.kind NOT IN (SELECT value FROM json_each(?1)) AND e.id < ?2 AND (?3 = 0 OR e.kind IN (SELECT value FROM json_each(?4)))
       ORDER BY e.id DESC
-      LIMIT ?`,
+      LIMIT ?5`,
     )
-    .all(CHATTER, limit);
+    .all(CHATTER, before ?? Number.MAX_SAFE_INTEGER, kinds.length, JSON.stringify(kinds), limit);
 
 // Removes chatter older than `days`; returns how many records went. Nothing else is ever removed:
 // approvals, gates, errors, mail and what the user did stay for good.

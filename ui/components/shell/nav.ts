@@ -1,0 +1,49 @@
+// The sections of the app, in the order the sidebar lists them, with what their badge counts.
+import { Activity, Archive, Inbox, LayoutGrid, MessageSquareText, Send, Settings, UserRound, Workflow, type LucideIcon } from "lucide-react";
+import type { Summary } from "../../../src/api-types";
+import type { Page } from "../../lib/router";
+
+export interface NavItem {
+  page: Page;
+  label: string;
+  icon: LucideIcon;
+  group: "workspace" | "library" | "system";
+  go?: string; // the letter after G that opens it
+  badge?: (s: Summary) => { value: number; tone: "neutral" | "accent" | "warning" } | null;
+}
+
+export const NAV: readonly NavItem[] = [
+  { page: "overview", label: "Overview", icon: LayoutGrid, group: "workspace", go: "o" },
+  { page: "review", label: "Review", icon: Inbox, group: "workspace", go: "r", badge: s => ({ value: s.attention.review, tone: "accent" }) },
+  {
+    page: "questions",
+    label: "Questions",
+    icon: MessageSquareText,
+    group: "workspace",
+    go: "q",
+    badge: s => ({ value: s.attention.questions, tone: "warning" }),
+  },
+  {
+    page: "pipeline",
+    label: "Pipeline",
+    icon: Workflow,
+    group: "workspace",
+    go: "p",
+    badge: s => {
+      const a = s.attention;
+      return { value: a.confirmSubmit + a.manual + a.coverLetter + a.ambiguous + a.failed, tone: "warning" };
+    },
+  },
+  { page: "applications", label: "Applications", icon: Send, group: "workspace", go: "a" },
+  { page: "archive", label: "Archive", icon: Archive, group: "library", go: "h" },
+  { page: "activity", label: "Activity", icon: Activity, group: "library", go: "l" },
+  {
+    page: "profile",
+    label: "Profile",
+    icon: UserRound,
+    group: "library",
+    badge: s => (s.profileProblems.length ? { value: s.profileProblems.length, tone: "warning" } : null),
+  },
+  { page: "settings", label: "Settings", icon: Settings, group: "system", go: "s" },
+];
+export const navItem = (page: Page) => NAV.find(n => n.page === page);

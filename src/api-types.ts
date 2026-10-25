@@ -45,7 +45,6 @@ export interface AppState {
   redirectUri: string;
   mailbox: string | null;
   phase: "practice" | "real";
-  home: string | null;
   profileFiles: string[];
 }
 
@@ -90,3 +89,41 @@ export interface DigestResult {
 export interface BlockersResult {
   blockers: ListedBlocker[];
 }
+
+// What waits on the user, by kind: the badges in the navigation and the Overview's inbox.
+export interface Attention {
+  review: number; // jobs awaiting approval
+  questions: number; // question groups to answer
+  confirmSubmit: number;
+  manual: number; // browser hand-offs
+  coverLetter: number;
+  ambiguous: number; // submissions whose outcome is unknown
+  failed: number;
+  total: number; // everything above but review
+}
+
+// GET /api/summary: the app's state without its lists. Small enough to fetch on every change.
+export type Summary = Omit<AppState, "jobs" | "events" | "highlights" | "questionGroups"> & { attention: Attention };
+
+// GET /api/jobs?view=…: one page of a job list. See src/listing.ts.
+export type { ListGroup, ListResult, ListRow, ListView } from "./listing";
+export type { Reason } from "./reasons";
+
+// GET /api/activity?feed=highlights|all&kind=…&before=…: one page of the event log, newest first.
+export interface ActivityItem {
+  id: number;
+  job_id: number | null;
+  worker: string | null;
+  kind: string;
+  message: string;
+  at: string;
+  company: string | null;
+  title: string | null;
+}
+export interface ActivityResult {
+  items: ActivityItem[];
+  next: number | null; // pass as `before` for the page after this one
+}
+
+// GET /api/stats: see src/stats.ts.
+export type { Stats } from "./stats";

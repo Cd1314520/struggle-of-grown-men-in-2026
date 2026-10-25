@@ -5,6 +5,7 @@
 !scripts/**/*.ts
 !tests/**/*.ts
 !ui/**/*.ts
+!ui/**/*.tsx
 !eslint.config.mjs
 node_modules/
 data/

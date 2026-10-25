@@ -31,14 +31,19 @@ case "${1:-}" in
     if pid="$(ours)"; then echo "already running: pid $pid at $BASE"; exit 0; fi
     if [ -n "$(listener)" ]; then echo "port $PORT is held by pid $(listener), which this script did not start; pick another VERIFY_PORT" >&2; exit 1; fi
     mkdir -p "$STATE" "$EVIDENCE"
+    # VERIFY_SNAPSHOT: a directory holding data/, profile/ and resume/ (e.g. a scrubbed copy of the live
+    # state) to start from instead of the nine seeded jobs. Copied, so the snapshot itself is never written.
+    if [ -n "${VERIFY_SNAPSHOT:-}" ] && [ ! -f "$STATE/data/app.db" ]; then
+      cp -r "$VERIFY_SNAPSHOT/." "$STATE/" && echo "state copied from snapshot $VERIFY_SNAPSHOT"
+    fi
     VERIFY_STATE="$STATE" VERIFY_PORT="$PORT" setsid nohup bun "$HERE/serve.ts" >>"$LOG" 2>&1 </dev/null &
-    for _ in $(seq 1 50); do
+    for _ in $(seq 1 150); do
       if curl -fsS "$BASE/__verify" >/dev/null 2>&1 && curl -fsS "$BASE/api/state" >/dev/null 2>&1; then
         echo "ready: $BASE  (pid $(cat "$PIDFILE"), state $STATE, evidence $EVIDENCE)"; exit 0
       fi
       sleep 0.2
     done
-    echo "not ready after 10s; see $LOG" >&2; tail -20 "$LOG" >&2; exit 1 ;;
+    echo "not ready after 30s; see $LOG" >&2; tail -20 "$LOG" >&2; exit 1 ;;
   doctor)
     ok=0
     pid="$(ours)" && echo "ok   process: pid $pid" || { echo "FAIL process: nothing this script started is running (run: ctl.sh start)"; ok=1; }

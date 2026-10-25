@@ -1,17 +1,17 @@
 ---
 name: verify-auto-apply
-description: Launch an isolated verification instance of auto-apply (the local job-application pipeline) and drive its web UI and HTTP API the way the owner does, to prove a change works. Use when asked to verify, demo, screenshot or smoke-test anything a user sees in the app: the review queue, approvals, question/cover-letter/submit/manual gates, the Questions inbox, adding a posting, profile editing, Settings. Never drives the live instance on port 8787.
+description: Launch an isolated verification instance of auto-apply (the local job-application pipeline) and drive its web UI and HTTP API the way the owner does, to prove a change works. Use when asked to verify, demo, screenshot or smoke-test anything a user sees in the app: Overview, the Review queue, approvals, question/cover-letter/submit/manual gates, Pipeline, the Questions inbox, Applications and their next steps, Archive, Activity and Blockers, adding a posting, profile editing, Settings. Never drives the live instance on port 8787.
 ---
 
 # verify-auto-apply
 
-auto-apply is a Bun server (`src/server.ts`) with a single-page UI (`ui/`: the page, its stylesheet, and TypeScript modules the server bundles on request). A live copy normally runs on this machine as a systemd user service on **port 8787**, holding real site passwords, a connected mailbox and logged-in Chromes on CDP port 9222. It submits real job applications.
+auto-apply is a Bun server (`src/server.ts`) with a React single-page UI (`ui/`, bundled by the server on request; see `docs/ui.md`). A live copy normally runs on this machine as a systemd user service on **port 8787**, holding real site passwords, a connected mailbox and logged-in Chromes on CDP port 9222. It submits real job applications.
 
 **Never drive, restart or point a browser at `:8787`, and never run `bun src/server.ts` or `bun run dev` to verify something.** A second copy of the real entry point shares the live Chrome's CDP port: approving a job there attaches a real agent to the owner's logged-in browser. Verification uses the instance below instead.
 
 ## What the verification instance is
 
-`serve.ts` (in this directory) serves the real `createHandler` and runs the real `Scheduler` against a throwaway database, profile and resume directory. Real: every route, status move, gate, stored answer, submit approval, frozen resume, the event log, the SSE stream, and the UI. Replaced, at the boundary the app itself provides (`new Scheduler({ runWorker, browser })`):
+`serve.ts` (in this directory) serves the real `createHandler` and runs the real `Scheduler` against a throwaway database, profile and resume directory. Real: every route, status move, gate, stored answer, submit approval, frozen resume, blocker, the event log, the SSE stream, and the UI. Replaced, at the boundary the app itself provides (`new Scheduler({ runWorker, browser })`):
 
 | Outside world | In the verification instance |
 |---|---|
@@ -33,23 +33,24 @@ bun install                                      # once per checkout
 
 - `VERIFY_PORT` (default `18787`) and `VERIFY_HOME` (default `<repo>/artifacts/verify-auto-apply`, git-ignored) select the instance. Two runs are independent when **both** differ. With the defaults there is one instance per checkout; do not double-drive it.
 - State (throwaway): `$VERIFY_HOME/state/{data,profile,resume}`. Evidence (kept): `$VERIFY_HOME/evidence/`.
-- The server runs the code of the checkout the skill lives in and does not hot-reload: after editing `src/` or `ui/`, run `ctl.sh reset`. (`ui/` is read, and its script rebundled when a file changed, per request; a page reload is enough for UI-only edits.)
+- The server runs the code of the checkout the skill lives in and does not hot-reload `src/`: after editing it, run `ctl.sh reset`. `ui/` is rebundled per request when a file changed, so a page reload is enough for UI-only edits.
+- `VERIFY_SNAPSHOT=<dir>`: start from real-looking data instead of the seed. `<dir>` holds `data/`, `profile/` and `resume/` (for example a scrubbed copy of the live state); `start` copies them into `state/` when it has no database yet, so the snapshot itself is never written. The seed adds nothing to a database that already has jobs, so the nine jobs below do not exist then. `reset` copies again only if `VERIFY_SNAPSHOT` is still set. The instance names every compiled resume `resume.pdf` (`config.yml`'s `resume.pdfName`); a snapshot of the live state names them after the owner's `config.local.yml`, so an approved job parks at once on a "Browser hand-off" whose text is an `ENOENT … resume.pdf`. Before approving, give each job folder the file it looks for: `for d in $VERIFY_HOME/state/data/jobs/*/; do [ -e "$d/resume.pdf" ] || cp tests/fixtures/sample-resume.pdf "$d/resume.pdf"; done`.
 
-Seeded jobs. Each company is `Verify Co A`..`I`; the word in the posting URL (`https://ats.verify.invalid/<script>/<n>`) picks what the stand-in worker does once the job is approved:
+Seeded jobs (no snapshot). Each company is `Verify Co A`..`I`; the word in the posting URL (`https://ats.verify.invalid/<script>/<n>`) picks what the stand-in worker does once the job is approved:
 
 | id | Title | Starts as | Script after Approve |
 |---|---|---|---|
-| 1 | Backend Engineer (straight through) | To review | `straight`: asks to submit (gate 2), then reports submitted |
-| 2 | Platform Engineer (asks a question) | To review | `question`: parks on a question, then as `straight` |
-| 3 | Data Engineer (wants a cover letter) | To review | `cover-letter`: parks for a letter, then as `straight` |
-| 4 | Site Reliability Engineer (needs browser help) | To review | `manual`: hands off once, then as `straight` |
-| 5 | Full Stack Developer (worker fails) | To review | `fail`: reports failure |
-| 6 | Support Engineer (reject me) | To review | `straight` |
-| 7 | Staff Engineer (held) | Held | `straight` |
-| 8 | QA Engineer (failed earlier) | In progress, failed | `straight` |
-| 9 | Software Engineer (already sent) | Applied | n/a |
+| 1 | Backend Engineer (straight through) | Review | `straight`: asks to submit (gate 2), then reports submitted |
+| 2 | Platform Engineer (asks a question) | Review | `question`: parks on a question, then as `straight` |
+| 3 | Data Engineer (wants a cover letter) | Review | `cover-letter`: parks for a letter, then as `straight` |
+| 4 | Site Reliability Engineer (needs browser help) | Review | `manual`: hands off once (blocker cause CAPTCHA), then as `straight` |
+| 5 | Full Stack Developer (worker fails) | Review | `fail`: reports failure (blocker cause Site down) |
+| 6 | Support Engineer (reject me) | Review | `straight` |
+| 7 | Staff Engineer (held) | Archive, Held | `straight` |
+| 8 | QA Engineer (failed earlier) | Pipeline, Failed | `straight` |
+| 9 | Software Engineer (already sent) | Applications, No reply yet | n/a |
 
-A posting added through the UI gets the script named in its URL path (`question`, `cover-letter`, `manual`, `fail`; anything else is `straight`), but stays "Not assessed yet": assessing needs a model.
+All nine were opened just now, so Review lists them under "Just opened". A posting added through the UI gets the script named in its URL path (`question`, `cover-letter`, `manual`, `fail`; anything else is `straight`), but stays "Not assessed yet": assessing needs a model.
 
 ## Doctor
 
@@ -61,59 +62,100 @@ Read-only. Checks that the pid this script started is alive, owns the port, answ
 
 ## Drive
 
-Primary surface: the web UI, driven with the Playwright MCP browser tools (`mcp__plugin_playwright_playwright__browser_*`). Navigate by hash route, act through the handles below, read state with `browser_snapshot`.
+Primary surface: the web UI, driven with the Playwright MCP browser tools (`mcp__plugin_playwright_playwright__browser_*`): navigate by hash route, read with `browser_snapshot`, act on the refs it gives (or a CSS selector as `target`). Without the MCP tools, a small `playwright-core` script does the same with `page.getByRole(role, { name })` and the CSS handles below. Work at 1440×900 unless a recipe says otherwise: from 1024 px a list and its open job sit side by side; narrower, the job opens full screen over the list.
 
-Routes: `/#review`, `/#progress`, `/#questions`, `/#applied`, `/#held`, `/#rejected`, `/#activity`, `/#profile`, `/#settings`; a job opens at `/#<view>/<id>` (e.g. `/#progress/2`).
+### Routes
 
-Stable handles (CSS selectors work as the `target` of `browser_click` / `browser_type`):
+`#page/part?param=value` (`ui/lib/router.ts`). `/` opens Overview.
+
+| Route | Shows |
+|---|---|
+| `#overview` | What needs you, this week's numbers, charts, system health, recent activity |
+| `#review`, `#review/<id>` | The approval queue. On a desktop a job is always open: `#review` becomes `#review/<first id>` |
+| `#questions`, `#questions/<group key>` | One question at a time beside the queue (the first opens by itself on a desktop) |
+| `#pipeline?group=<stage>`, `#pipeline/<id>` | Applications past review, by stage: `needs_you`, `questions`, `failed`, `applying`, `assessing`. Without `group` it opens on the first stage holding anything; a linked job opens on its own stage |
+| `#applications?group=<g>`, `#applications/<id>` | Sent applications: `offer`, `your_move`, `upcoming`, `waiting`, `no_reply`, `closed` |
+| `#archive/held`, `#archive/rejected`, `#archive/<held\|rejected>/<id>` | Jobs set aside; the job opens in a panel over the table (`#archive` is Held) |
+| `#activity?kind=<k>`, `#activity/blockers?cause=<c>`, `#activity/log?kind=<k>` | Highlights (`gate`, `user`, `error`, `system`, `mail`), every stop by cause, the raw event log |
+| `#profile/<file>` | A profile file (`targets.md`, `rubric.yml`, `main.typ`, `resume-notes.md`, `answers.md`, `personal.yml`, `companies.yml`); bare `#profile` opens the first still to fill in |
+| `#settings` | Configuration, mailbox, digest, browser, release held |
+| `#job/<id>` | Any job on a page of its own, with a breadcrumb back to its list |
+
+List params: `q` (search), `filter` (repeatable: `top`, `remote`, `near`, `first`), `sort`, `group`, `page` (50 a page). Old links redirect (`history.replaceState`): `#progress/<id>` → `#pipeline/<id>`, `#applied/<id>` → `#applications/<id>`, `#held` → `#archive/held`, `#rejected` → `#archive/rejected`, `#blockers` → `#activity/blockers`, `#more` → `#overview`. A route can open a job its list does not hold (`#pipeline/2` while job 2 is still in Review opens it beside the Failed stage, with no "N of M"); use the route of the list that holds it, or `#job/<id>`, whose breadcrumb names that list.
+
+### Handles
+
+Role and accessible name as `browser_snapshot` prints them, verified against the running UI; CSS where a name is long, counted or repeated. A button's name includes the key hint printed on it (`button "Approve A"`): match on the start.
 
 | What | Handle |
 |---|---|
-| Section nav | `nav[aria-label="Sections"] [data-view="review"]` (also `progress`, `questions`, `applied`, `more`; the rest are desktop-only or under More) |
-| Job row | `[data-job="<id>"]` (role `link`, name starts with the title) |
-| Filter chip (To review: `all`, `top`, `near`, `remote`; Held: `all`, `near`, `remote`; no other list has chips) | `[role=toolbar][aria-label="Filter"] [data-filter="<key>"]` |
-| List part header that folds (`aria-expanded`) | `[data-part="<view>\|<label>"]`, e.g. `progress\|Waiting to be assessed`, `progress\|Queued to apply`, `applied\|Declined`, `held\|Everything else` (these start collapsed); `[data-cap="<view>\|<label>"]` shows the next 50 rows of a part |
-| Release held jobs (Held page, also Settings) | `[data-run="release_held"]` (asks to confirm) |
-| Section search (only when a section has more than 8 jobs) | `#q` |
-| Job tabs | `[data-tab="summary"]`, `score`, `resume`, `posting`, `log` |
-| Gate buttons | `.gate [data-act="approve"]`, `reject` ("Stop & reject" on a queued or running job), `hold` ("Hold for later": every gate except Held, running jobs and ambiguous submissions), `retry` (also "Assess now" on a held job), `mark_submitted`, `recover`, `confirmed_not_submitted`. Each gate has one `.btn.primary`; Hold, Reject, Mark submitted / I submitted it sit in `.acts-end` (on a phone behind `[data-toggle="#gmore"]` "More actions", still in the DOM so clicks and A/X work). Policy text folds into `details.gate-why` ("How this works"); the saved page and checkpoint into one `details[data-how="gate-evidence"]` |
-| Job header | `.facts`: a state pill (gate kind for a stuck job: Question, Cover letter, Browser hand-off, Confirm submit, Outcome unknown), `button.score-pill` "Fit N" (opens Score), the practice pill, location, "Found …" or "Applied …" |
-| Answer / letter box and its button | `#ans`, then `.gate [data-act="respond"]` |
-| Gate 2 | `.gate [data-act="respond"][data-fixed="approve"]`; changes: `[data-toggle="#chgbox"]`, `#chg` |
-| Change resume (gate 1) | `[data-toggle="#redo"]`, `#fb`, `.gate [data-act="redo"]` |
-| Manual hand-off | `[data-browser-action="reserve"]`, `[data-browser-action="release"]`, `.gate [data-act="respond"][data-fixed="done"]` |
-| Questions inbox | Row (expand toggle) `[data-question-row="<group key>"]`; only the open group renders its form, and the one whose posting opened most recently is open by default. Form `[data-question-group] [data-question-form]` (question groups only), fields `[name=job]` (hidden input for one application, `select` for several), `textarea[name=answer]`, `[name=scope]` (hidden `application`, or a `standing` checkbox when standing is allowed), one-click option buttons `[data-question-option="<option>"]` (up to 8 fixed options), button `[data-question-answer]`. Other gates are not listed here: one line `.qelse` counts them ("Also waiting on you: 1 submit to confirm, …") and links to In progress |
-| Add a posting (Settings, first on the page) | `#addurl`, `#addbtn` (Enter adds too); the outcome line `#add-result` (role `status`) |
-| Profile editor | `[data-pfile="targets.md"]` (`.tab.need` marks a file still to fill in), `#pmode` (Edit, "Write it" on an empty file, Cancel), `#ptext`, `#psave` |
-| Activity | Feed `[data-feed="highlights"]` / `[data-feed="all"]` ("Highlights" / "Full log"); filter chips `[role=toolbar][aria-label="Filter"] [data-filter="gate\|user\|error\|system"]`; runs `[data-run="scan"]`, `track`, `discover` |
-| Settings | Overview rows `.ovrow` (name links jump to `#settings-mailbox`, `#settings-digest`, `#settings-auto-apply`, `#settings-phase`, `#settings-browser`); explanations fold into `details[data-how]` ("How this works") |
-| Toast | `#toast` (role `status`); connection banner `#offline` (role `alert`) |
+| Sidebar (desktop) | `navigation "Sections"` (Overview, Review, Questions, Pipeline, Applications), `"Library"` (Archive, Activity, Profile), `"System"` (Settings). A link's name carries its badge (`link "Review 6"`); CSS `[data-nav="<page>"]`. Also `button "Add a posting"`, `button "Search Ctrl K"`, `button "Scan now"` (foot), `button "Auto Apply"` (theme, Keyboard shortcuts) |
+| Phone shell | Top bar `button "Search"`, `button "Add a posting"`; bottom `navigation "Sections"` with Overview, Review, Questions, Pipeline (`[data-nav]` too) and `button "More"`, which opens `dialog "Navigation"` holding the full sidebar |
+| Command palette | Ctrl/⌘K or the Search button: `dialog "Search and commands"`, `combobox "Search and commands"`; `option`s in groups Jobs (after two letters), Go to, Actions ("Add a posting", "Scan job boards now", "Check mail for replies", "Find new companies to watch"), Theme. Enter opens the selected one |
+| List row | `row` whose name starts with the title (Review prefixes `Just opened` on new postings): `row "Support Engineer (reject me) Verify Co F 61 1m"`. CSS `a[data-row="<id>"]` (Questions: `a[data-question="<group key>"]`). Group headings are rows too (`row "Just opened 6"`), without `data-row` |
+| List controls | `searchbox`: "Search the queue" (Review), "Search this stage", "Search applications", "Search held jobs by title, company, place or reason", "Filter questions", "Search blockers". `combobox "Sort"` (then `option` by name). `button "Filter"` → `menu "Filter"`: `menuitemcheckbox "Score 80+ 1"`, `"Remote 6"`, `"First at employer 6"`, then `menuitem "Clear filters"`; the button takes the filter's name while one is on. Groups are a `tablist` of `tab "<label> <count>"`: Review "When the posting opened", Archive "Fit", Applications "Segments", Blockers "Cause", Activity "Show"; CSS `[data-segment="<key>"]`. Pipeline stages: `tablist "Stages"`, CSS `[data-stage="<stage>"]` (the tab name grows a caption at wide widths). Over 50 rows: `button "Previous page"`, `button "Next page"`, `textbox "Page, of N"` |
+| Open job | `region "Open job"` beside a list (absent on `#job/<id>`, where it is `main`); CSS `[data-job="<id>"]`. Its bar: `button "Previous job"`, `button "Next job"`, text `3 of 6`, `link "Open as a page"`, `button "Close"` (not on desktop Review). Header: link to the posting named after the company, `heading` level 1 (title), the status word, `button "Fit 84, open the Fit tab"`. Tabs: `tab "Overview"`, `"Fit"`, `"Resume"` (`img "First page of the tailored resume"`), `"Posting"`, `"Activity"` |
+| The decision | CSS `[data-decision="<title>"]`. A bar under the tabs for a judgement on the fit: "Apply to this job?", "Held for later", "Rejected", "Skipped by the assessment". A card above the tabs when the agent stopped or is working: "The agent needs an answer", "This application needs a cover letter", "Submit this application?", "Browser hand-off", "This application failed", "Submission outcome unknown", "Queued to apply", "Applying", "Not assessed yet", "Assessing"; and "Next steps" on a sent application. One primary button: "Approve A", "Assess now A", "Retry A", "Reserve browser A", "Hand control back A" (the A means the key presses it), "Save and queue", "Save letter and queue", "Approve submission". The rest: `button "Change resume"`, `"Change something"`, `"Check status and recover"`, `"Reconsider"`, and `button "More actions"` → `menuitem`s "Hold for later H", "Reject X", "I submitted it", "Mark submitted", "Release browser", "Check status and recover", "Stop and reject". Folds: `button "How this works"`, `"Saved checkpoint"`, `"Previous run note"` |
+| Gate fields | `textbox "Your answer For this application only"`, `textbox "Cover letter Entered exactly as you write it"` (Ctrl+Enter saves either); a question's fixed options are `radiogroup "Options"` `radio`s that fill the box; gate 2's `button "Change something"` → `textbox "Changes for this application"`, `button "Save changes and queue"` |
+| Change resume | `button "Change resume"` → `dialog "Change the resume"`, `textbox "What should change in the resume?"`, `button "Redo with this note"` |
+| Questions | `region "Open question"`: `heading` level 2 (the question), `textbox "Your answer"`, option cards CSS `[data-option="<n>"]` (a click saves), `button "Save and next Ctrl ↵"`, `button "Skip"`, `checkbox "Also use for future <Company> applications asking exactly this"` (when a standing answer is allowed) → `alertdialog "Approve a standing answer?"` `button "Approve and save"`, `button "Previous question"`/`"Next question"`, a link to the application (`#pipeline/<id>`). Other gates: `alert` "1 cover letter also waits on you" with `link "Pipeline"` |
+| Next steps | In `[data-decision="Next steps"]`: `button "Outcome"` → `menuitem` "Mark offer", "Mark declined", "Withdraw", or "Back in process"; `button "Add a step"` → `combobox "Kind"`, `textbox "What"`, `"Due"` (a date input), `"Link"`, `"Notes"`, `button "Add step"`. Each step is a `listitem`: `button "Done"`, `"Booked for…"`/`"Change time"` (Booking and Interview), `button "More step actions"` → "Done, with a note…", "Back to to-do", "Edit", "Cancel step", "Reopen", "Remove" (`alertdialog "Remove this step?"`). Inline forms: `textbox "How it went, what you sent"` + `button "Save as done"`; `textbox "Booked for"` (datetime-local) + `button "Save time"` |
+| Add a posting | `dialog "Add a posting"`: `textbox "Job URL"` (`#addurl`), `button "Add posting"` (disabled while empty; Enter adds). A known URL keeps the dialog open with `status` "Already tracked" and `button "Open job"`; a refusal is an `alert` |
+| Archive | `tab "Held 1"`, `tab "Rejected"`; header `button "More actions"` → `menuitem "Release all held jobs…"` → `alertdialog "Release all held jobs?"`. With a job open there are two "More actions": scope to `region "Open job"` |
+| Activity | `button "Run: Scan job boards"`, `"Run: Check mail"`, `"Run: Find companies"`; `tab "Highlights"`, `"Blockers"`, `"Full log"`; the log's `combobox "Kind"`; a blocker row links its job (`#job/<id>`) and `link "Open the <Company> posting"` |
+| Profile | `navigation "Profile files"`: `link "Targets Roles, places and pay you want"` and so on (desktop; a phone has `combobox "Profile file"`); `button "Write it"` (empty file) or `button "Edit E"`; `textbox "Edit <file>"`; `button "Save Ctrl S"`, `button "Cancel"`; leaving with edits: `alertdialog "Discard unsaved changes?"`, `button "Discard"` |
+| Settings | `navigation "Settings sections"` (buttons that scroll); `region`s "General", "Auto apply", "Mail & digest", "Browser", "Danger zone"; `link "Connect Gmail"`, `button "Send now"`, `button "Refresh status"`, `button "Release held jobs"`; folds "How auto apply decides", "How the digest works", "Before you take over a browser" |
+| Feedback | Toasts: CSS `[data-sonner-toast]` in `region "Notifications alt+T"` (Reject's carries `button "Undo"`, Add's `button "Open"`); they stack, newest first. Connection lost: `#offline` (`alert`) |
 
-Keyboard, with focus outside any field: `J`/`K` move, `A` presses the gate's primary button (Approve, Retry, Assess now, Reserve browser…; never one that needs text first, and never Approve submission, which takes a click), `X` reject, `1`-`5` job tabs, `/` search. On `#questions`: `J`/`K` move the open question, `Enter` on a row focuses its answer, `1`-`8` pick an option, `Ctrl`+`Enter` in the form saves, `Esc` closes. `A` and `X` click the gate's buttons, and the gate is part of the Summary tab: on any other tab they do nothing (press `1` first).
+### Keyboard
 
-Timing: the stand-in worker takes about 0.4 s per tool call, so a gate appears 1-2 s after the action that queues it. Wait on text (`browser_wait_for` with the gate heading), not on a fixed sleep.
+With focus outside a text field and no dialog open (`ui/lib/hotkeys.ts`; `?` lists them):
 
-Second surface, for reading stored state and for clients without a browser: the same JSON API the UI uses.
+- Anywhere: Ctrl/⌘K the palette (also from a field), `?` the shortcuts dialog, `G` then (within a second) `O` Overview, `R` Review, `Q` Questions, `P` Pipeline, `A` Applications, `H` Archive, `L` Activity, `S` Settings.
+- A list: `J`/`K` next and previous job (across pages), `/` focuses its search, `Esc` closes the open job (not on desktop Review, where one is always open).
+- An open job: `A` presses the primary button when it carries the A hint (never one that needs text first, never Approve submission), `X` rejects and `H` holds when the decision's ⋯ menu offers them, `1`-`5` switch tabs. They work on every tab.
+- Questions: `J`/`K` move, `1`-`8` pick an option (and save it), `Enter` puts the cursor in the answer box, Ctrl/⌘+Enter saves, `Esc` leaves the box (on a phone, closes the question), `/` filters the queue.
+- Profile: `E` edits the file, Ctrl/⌘+S saves, `Esc` in an unchanged editor cancels.
+
+A held key repeats only `J`/`K`. Keys typed into a search box or the palette go there.
+
+### Timing and moving on
+
+The stand-in worker takes about 0.4 s per tool call, so a gate appears 1-2 s after the action that queues it. Wait on text or a `[data-decision]` (`browser_wait_for`), not a fixed sleep; the page refetches on its own from `/api/stream`.
+
+After an action that takes the job out of its list (Approve, Reject, Hold, Retry, answering a gate in Pipeline), the next job in the list opens in its place, or the panel closes when none is left. Navigate back to the job's route before reading its state. Applications keeps the job open after an outcome.
+
+### API
+
+The JSON the UI reads, for stored state and for clients without a browser (`docs/ui.md`):
 
 ```bash
 B=http://127.0.0.1:${VERIFY_PORT:-18787}
-curl -s $B/api/state                 # board: jobs, counts, questionGroups, events, profileProblems
-curl -s $B/api/jobs/2                # one job: status, gate, checkpoint, history, events, resumeFrozen
-curl -s $B/api/questions
+curl -s $B/api/summary                                    # counts, attention (what waits, by kind), profileProblems, settings
+curl -s "$B/api/jobs?view=review&sort=score&limit=50"     # one page of a view: review|pipeline|applications|held|rejected
+curl -s "$B/api/jobs?view=pipeline&group=needs_you"       # rows carry group, gate, reason, next; groups and filters with counts
+curl -s "$B/api/jobs?view=pipeline&focus=8"               # the page holding job 8: focusIndex, focusGroup
+curl -s $B/api/jobs/2                                     # one job: status, gate, checkpoint, history, events, blockers, steps, next, resumeFrozen
+curl -s $B/api/questions                                  # open gate groups, every kind
+curl -s "$B/api/activity?feed=all&kind=user"              # the event log, a page at a time (feed=highlights for the folded feed)
+curl -s $B/api/blockers                                   # every stop, newest first
+curl -s $B/api/stats                                      # Overview aggregates
 curl -s -X POST $B/api/jobs/1/action -H 'content-type: application/json' -d '{"action":"approve"}'
 ```
+
+`/api/state` (the whole board) still answers and `ctl.sh` waits on it, but the UI no longer reads it.
 
 Per-feature recipes are in [`features/`](features/README.md). Read the index before driving; a proof that uses one entry point is incomplete when the feature file lists others.
 
 ## Evidence
 
-Put artifacts in `$VERIFY_HOME/evidence/<feature>/`, numbered in the order things happened. `server.log` there already holds the stand-in worker's transcript (`[worker job N] tool -> reply`).
+Put artifacts in `$VERIFY_HOME/evidence/<feature>/`, numbered in the order things happened. `server.log` there already holds the stand-in worker's transcript (`[worker job N] tool -> reply`, or `tool threw: …` when a host tool refused the script's arguments).
 
 Standards:
 
-- Exercise the user path: click the UI (or, for an API-only claim, call the route the UI calls). Do not write the database, call `updateJob`, or add routes to reach a state. The seed is the only state not created through the UI.
+- Exercise the user path: click the UI (or, for an API-only claim, call the route the UI calls). Do not write the database, call `updateJob`, or add routes to reach a state. The seed (or the snapshot) is the only state not created through the UI.
 - Capture the action and the result: a screenshot or ARIA snapshot before the click, and one after. A final screen alone is not proof.
-- Verify the side effect from a second view: `GET /api/jobs/<id>` (`status`, `history`, `gate`, `submitted_at`, `resumeFrozen`), the job's Log tab, files under `state/data/jobs/<id>/` (e.g. `applied/<sha12>/` for a frozen resume), or the edited file under `state/profile/`.
+- Verify the side effect from a second view: `GET /api/jobs/<id>` (`status`, `history`, `gate`, `submitted_at`, `resumeFrozen`, `blockers`), the job's Activity tab, files under `state/data/jobs/<id>/` (e.g. `applied/<sha12>/` for a frozen resume), or the edited file under `state/profile/`.
 - Confirm isolation in every proof: `curl -s $B/__verify` and record `refusedOutbound`. For journeys that do not start a scan it must be `[]`.
 - Name what the stand-ins covered. "Submitted" here means the app recorded an outcome reported by the stand-in worker; no form was filled and nothing was sent.
 
@@ -131,11 +173,11 @@ Then close the Playwright page (`browser_close`). `stop` never matches by proces
 
 | File | Invocation | Does |
 |---|---|---|
-| `ctl.sh` | `ctl.sh start \| doctor \| stop \| reset` | Process lifecycle and the read-only health check described above. |
-| `serve.ts` | started by `ctl.sh` (`VERIFY_STATE=… VERIFY_PORT=… bun serve.ts`) | The verification instance: isolation, stand-ins, seed, `/__verify`. Typechecked and linted with the app (`bun run check`), so a change to the `Scheduler`, `Browser` or worker interfaces breaks it loudly. |
+| `ctl.sh` | `ctl.sh start \| doctor \| stop \| reset` | Process lifecycle, the snapshot copy, and the read-only health check described above. |
+| `serve.ts` | started by `ctl.sh` (`VERIFY_STATE=… VERIFY_PORT=… bun serve.ts`) | The verification instance: isolation, stand-ins, seed, `/__verify`. Typechecked and linted with the app (`bun run check`), so a change to the `Scheduler`, `Browser` or worker interfaces breaks it loudly; a host tool that starts requiring an argument shows as `threw:` in `server.log`. |
 
 To add a scripted behaviour (say, a worker that leaves a submission ambiguous), extend `actOut` in `serve.ts` and add a seed row; keep the stand-in calling host tools rather than writing state.
 
 ## Keeping this honest
 
-Run `/maintain-verification-skill` after the UI or the routes change: the feature map names selectors and button labels that will drift.
+Run `/maintain-verification-skill` after the UI or the routes change: the feature map names roles, accessible names and button labels that will drift.

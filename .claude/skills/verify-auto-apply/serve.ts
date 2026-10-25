@@ -95,7 +95,14 @@ async function actOut(opts: WorkerOptions, stopped: () => boolean) {
     await Bun.sleep(STEP_MS);
     const tool = opts.tools[name];
     if (stopped() || !tool) return "STOPPED";
-    const reply = await tool.handler(args);
+    let reply: string;
+    try {
+      reply = await tool.handler(args);
+    } catch (err) {
+      // A tool refusing its arguments: logged, or the script's drift from the tools goes unseen.
+      console.log(`[worker job ${opts.jobId}] ${name} threw: ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    }
     console.log(`[worker job ${opts.jobId}] ${name} -> ${reply.split("\n")[0]?.slice(0, 120)}`);
     return reply;
   };
@@ -110,7 +117,7 @@ async function actOut(opts: WorkerOptions, stopped: () => boolean) {
   const nav = { tab_id: tab.tab_id, url: tab.url, step: `Job ${jobId} / stand-in form`, notes: "stand-in draft; nothing was typed into a real site" };
 
   if (script === "fail") {
-    await call("report_result", { outcome: "failed", note: "stand-in worker: scripted failure" });
+    await call("report_result", { outcome: "failed", cause: "site_down", note: "stand-in worker: scripted failure" });
     return;
   }
   if (script === "question") {
@@ -128,7 +135,7 @@ async function actOut(opts: WorkerOptions, stopped: () => boolean) {
   }
   if (script === "manual" && !handedOff.has(jobId)) {
     handedOff.add(jobId);
-    await call("need_manual", { ...nav, reason: "Stand-in CAPTCHA: the form asked for a check only a person can pass." });
+    await call("need_manual", { ...nav, cause: "captcha", reason: "Stand-in CAPTCHA: the form asked for a check only a person can pass." });
     return;
   }
   const approved = await call("confirm_submit", { ...nav, summary: `Stand-in application for job ${jobId}: name, email and resume ${PDF_NAME} entered.` });

@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "bun src/server.ts",
-    "dev": "bun --watch src/server.ts",
+    "dev": "NODE_ENV=development bun --watch src/server.ts",
     "migrate": "bun scripts/migrate.ts",
     "reassess-backlog": "bun scripts/reassess-backlog.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p ui",
@@ -16,12 +16,29 @@
     "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "@fontsource-variable/inter": "5.3.0",
+    "@tanstack/react-query": "5.104.5",
+    "bun-plugin-tailwind": "0.1.2",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "cmdk": "1.1.1",
+    "lucide-react": "1.61.0",
+    "radix-ui": "1.8.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "sonner": "2.0.8",
+    "tailwind-merge": "3.7.0",
+    "tailwindcss": "4.3.3",
     "yaml": "^2.5.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/bun": "1.4.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "eslint": "^10.12.0",
+    "eslint-plugin-react-hooks": "7.1.1",
     "prettier": "3.9.10",
     "typescript": "^6",
     "typescript-eslint": "^8.71.2"

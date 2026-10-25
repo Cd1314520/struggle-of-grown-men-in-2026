@@ -1,0 +1,85 @@
+// Where the postings found in the last 30 days ended up: one bar per stage, each a share of the first.
+import type { Stats } from "../../../src/api-types";
+import { Card, CardFooter, CardHeader, Skeleton } from "../../components/ui";
+import { useStats } from "../../lib/api";
+import { num } from "../../lib/format";
+
+const STAGES: readonly (readonly [key: Exclude<keyof Stats["funnel"], "found">, label: string])[] = [
+  ["assessed", "Assessed"],
+  ["recommended", "Recommended"],
+  ["approved", "Approved"],
+  ["applied", "Applied"],
+  ["responded", "Heard back"],
+];
+
+const percent = (part: number, whole: number) => {
+  if (!whole) return "–";
+  const p = (part / whole) * 100;
+  return `${p >= 10 || p === 0 ? Math.round(p) : p.toFixed(1)}%`;
+};
+
+export function Funnel() {
+  const { data: st } = useStats();
+  const f = st?.funnel;
+  const first = f?.assessed ?? 0;
+  return (
+    <Card>
+      <CardHeader
+        title="Funnel"
+        description={
+          f
+            ? `Of ${num(f.found)} postings found in the last 30 days, ${percent(f.assessed, f.found)} passed the title screen to be assessed.`
+            : "Postings found in the last 30 days"
+        }
+      />
+      <div className="px-5 pt-1 pb-5">
+        {!f ? (
+          <Skeleton className="h-44" />
+        ) : (
+          <>
+            <div className="mb-2 hidden grid-cols-[104px_minmax(0,1fr)_64px_72px] gap-4 text-xs text-fg-subtle sm:grid">
+              <span>Stage</span>
+              <span />
+              <span className="text-right">Jobs</span>
+              <span className="text-right">Conversion</span>
+            </div>
+            <ol className="flex flex-col gap-2.5">
+              {STAGES.map(([key, label], i) => {
+                const n = f[key],
+                  prior = i === 0 ? f.found : f[STAGES[i - 1]?.[0] ?? "assessed"];
+                return (
+                  <li
+                    key={key}
+                    className="grid grid-cols-[100px_minmax(0,1fr)_44px_40px] items-center gap-3 sm:grid-cols-[104px_minmax(0,1fr)_64px_72px] sm:gap-4"
+                  >
+                    <span className="truncate text-sm text-fg">{label}</span>
+                    <span className="h-6 overflow-hidden rounded-sm bg-subtle">
+                      <span className="block h-full rounded-sm bg-chart-1" style={{ width: first ? `max(2px, ${(n / first) * 100}%)` : 0 }} />
+                    </span>
+                    <span className="tabular text-right text-sm font-medium text-fg">{num(n)}</span>
+                    <span className="tabular text-right text-sm text-fg-muted">{percent(n, prior)}</span>
+                  </li>
+                );
+              })}
+            </ol>
+          </>
+        )}
+      </div>
+      {st && (
+        <CardFooter className="gap-6 text-sm">
+          <span className="text-fg-muted">Approvals in 30 days</span>
+          <span className="flex items-center gap-4">
+            <span>
+              <span className="text-fg-muted">Auto apply </span>
+              <span className="tabular font-medium text-fg">{num(st.approvals.auto)}</span>
+            </span>
+            <span>
+              <span className="text-fg-muted">You </span>
+              <span className="tabular font-medium text-fg">{num(st.approvals.user)}</span>
+            </span>
+          </span>
+        </CardFooter>
+      )}
+    </Card>
+  );
+}
