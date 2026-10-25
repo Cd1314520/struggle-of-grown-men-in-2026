@@ -56,7 +56,9 @@ describe("application steps", () => {
   it("says whose move it is from the steps' states", () => {
     scenario(`
     job(1);
-    const now = Date.parse("2026-10-23T12:00:00Z");
+    // done_at is stamped with the real clock, so "now" must be the real clock too: a fixed date falls
+    // behind it, and a step done "later" would then seem older than an interview booked after it.
+    const now = Date.now();
     const a = steps.addStep(getJob(1), { kind: "assessment", title: "OA", source: "mail" }).id;
     const b = steps.addStep(getJob(1), { kind: "questionnaire", title: "Form", due_at: "2026-10-25", source: "mail" }).id;
     // The user's move: the step with the nearest deadline leads.
