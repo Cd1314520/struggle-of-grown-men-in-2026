@@ -188,6 +188,16 @@ export const employerApplications = (job: Pick<Job, "id" | "company_key">) =>
     : 0;
 
 // Other live jobs at the same employer.
+// Practice assessments recorded on full assessments of other jobs at the same employer, newest first.
+export const employerAssessments = (job: Pick<Job, "id" | "company_key">) =>
+  job.company_key
+    ? db
+        .query<{ id: number; practice_assessment: string }, [number, string]>(
+          "SELECT id, practice_assessment FROM jobs WHERE id != ? AND company_key = ? AND practice_assessment IS NOT NULL AND checklist IS NOT NULL ORDER BY id DESC",
+        )
+        .all(job.id, job.company_key)
+    : [];
+
 export const siblingJobs = (job: Pick<Job, "id" | "company_key">, limit = 20) =>
   db
     .query<Pick<Job, "id" | "title" | "status">, [number, string, string, number]>(

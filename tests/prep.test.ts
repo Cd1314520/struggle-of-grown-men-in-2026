@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { config } from "../src/config";
-import { getJob, insertJob, updateJob } from "../src/db";
+import { getJob, insertJob, kvSet, updateJob } from "../src/db";
 import { countOne, usedToday } from "../src/limits";
 import type { RunWorker, ToolArgs, WorkerOptions } from "../src/omp";
 import { prep } from "../src/prep";
@@ -41,15 +41,17 @@ describe("screen verdict", () => {
   });
 });
 
-// Records the workers prep starts; `screen` answers the screen's tool the way a worker would.
+// Records the workers prep starts and their prompts; `screen` answers the screen's tool the way a worker would.
 function fakeRun(screen?: (report: (args: ToolArgs) => unknown) => void, error?: string) {
   const started: string[] = [];
+  const prompts: string[] = [];
   const run: RunWorker = (opts: WorkerOptions) => {
     started.push(opts.name);
+    prompts.push(opts.prompt);
     if (opts.name === "screen") screen?.(args => opts.tools["screen_result"]?.handler(args));
     return { done: Promise.resolve({ status: error ? "error" : "completed", lastText: "", ...(error ? { error } : {}) }), abort: () => undefined };
   };
-  return { run, started };
+  return { run, started, prompts };
 }
 
 let n = 0;
@@ -96,5 +98,71 @@ describe("prep before the full assessment", () => {
     await prep(job, run);
     expect(started).toEqual(["screen"]);
     expect(getJob(job.id)?.status).toBe("triaged");
+  });
+});
+
+// A job at `company` that a full assessment judged to be `employerType`.
+function assessedJob(company: string, employerType: string) {
+  const job = preppingJob(company);
+  const practice = { version: 3, employerType, employerEvidence: `${company} evidence`, agentNative: "unclear", agentNativeEvidence: "", listed: null };
+  updateJob(job.id, { ...to.held("assessed"), checklist: "[]", practice_assessment: JSON.stringify(practice) });
+  return job;
+}
+
+describe("prep for an employer judged before", () => {
+  it("holds a practice-phase job at a tech company at scale after only the real screen", async () => {
+    config.phase = "practice";
+    const earlier = assessedJob("Scaled Co", "tech_scaled");
+    assessedJob("Scaled Co", "startup");
+    const job = preppingJob("Scaled Co");
+    const before = usedToday("prep");
+    const { run, started, prompts } = fakeRun(report => report({ answers: screenAnswers({}, screenChecklistText("frontier")) }));
+    await prep(job, run);
+    expect(started).toEqual(["screen"]);
+    expect(prompts[0]).not.toContain("practice.");
+    const held = getJob(job.id);
+    expect(held?.status).toBe("held");
+    expect(held?.note).toContain(`a tech company at scale, as judged on job #${earlier.id} (Scaled Co evidence)`);
+    expect(JSON.parse(held?.practice_assessment ?? "null")).toMatchObject({ employerType: "tech_scaled" });
+    expect(usedToday("prep")).toBe(before - 1);
+  });
+
+  it("still skips a job the real screen rules out", async () => {
+    config.phase = "practice";
+    assessedJob("Scaled Senior Co", "tech_scaled");
+    const job = preppingJob("Scaled Senior Co");
+    const { run } = fakeRun(report => report({ answers: screenAnswers({ "real.not_senior": "no" }, screenChecklistText("frontier")) }));
+    await prep(job, run);
+    expect(getJob(job.id)).toMatchObject({ status: "skipped", note: "screened out: failed real requirement: not_senior" });
+  });
+
+  it("gives a practice employer the full assessment", async () => {
+    config.phase = "practice";
+    assessedJob("Insurer Co", "non_tech_enterprise");
+    const job = preppingJob("Insurer Co");
+    const { run, started } = fakeRun(report => report({ answers: screenAnswers() }));
+    await prep(job, run);
+    expect(started).toEqual(["screen", "prep"]);
+  });
+
+  it("assesses a job the candidate asked for, whatever the employer", async () => {
+    config.phase = "practice";
+    assessedJob("Asked For Co", "tech_scaled");
+    const job = preppingJob("Asked For Co");
+    kvSet(`feedback.${job.id}`, "apply to this one");
+    const { run, started } = fakeRun();
+    await prep(job, run);
+    expect(started).toEqual(["prep"]);
+  });
+
+  it("skips a real-phase job at an employer judged not a tech company at scale, without a worker", async () => {
+    config.phase = "real";
+    assessedJob("Agency Co", "it_services");
+    const job = preppingJob("Agency Co");
+    const { run, started } = fakeRun();
+    await prep(job, run);
+    expect(started).toEqual([]);
+    expect(getJob(job.id)?.status).toBe("skipped");
+    expect(getJob(job.id)?.note).toContain("failed real requirement: employer_ok (IT services or consultancy");
   });
 });

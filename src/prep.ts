@@ -7,9 +7,9 @@ import { deferApproval, forgetDeferredApproval } from "./deferred-approvals";
 import { countOne, uncountOne, usedToday } from "./limits";
 import { placeOf } from "./location";
 import { arg, S, schema, type RunWorker } from "./omp";
-import { employerListing, employersText } from "./employers";
+import { employerListing, employersText, rememberedEmployer } from "./employers";
 import { isCapacityError } from "./errors";
-import { assessPractice, EMPLOYER_TYPES } from "./practice";
+import { assessPractice, EMPLOYER_LABELS, EMPLOYER_TYPES, type PracticeAssessment } from "./practice";
 import { changedTemplateFiles, MAIN, pageCount, PDF_NAME, stageResume, stockPages, workingPdf } from "./resume";
 import { checklistText, evaluate, screenChecklistText, screenVerdict, type Verdict } from "./rubric";
 import { to } from "./status";
@@ -28,6 +28,28 @@ export async function prep(job: Job, run: RunWorker) {
   if (capped) {
     uncountOne("prep");
     updateJob(job.id, to.skipped(capped));
+    return;
+  }
+  // An employer judged before settles what the full assessment would only judge again.
+  const settled = feedback ? null : settledByEmployer(job);
+  if (settled?.decision === "skip") {
+    uncountOne("prep");
+    updateJob(job.id, to.skipped(settled.reason));
+    return;
+  }
+  if (settled?.decision === "hold") {
+    // The real rubric decides whether a job held for the real search is worth keeping. Its plain
+    // requirements are left to the cheap screen; the rest wait until the job is released.
+    if (job.description) {
+      const screened = await screen(job, location, run, "frontier");
+      if (screened !== "pass") {
+        uncountOne("prep");
+        if (screened === "capacity") updateJob(job.id, to.triaged("assessing again: the model provider was at capacity"));
+        return;
+      }
+    }
+    uncountOne("prep");
+    updateJob(job.id, { ...to.held(settled.reason), practice_assessment: settled.practice ? JSON.stringify(settled.practice) : null });
     return;
   }
   if (!feedback && job.description) {
@@ -205,11 +227,45 @@ function employerCapped(job: Job): string | null {
   return others >= rules.perEmployer ? employerCapNote(others) : null;
 }
 
+// What the employer alone decides about a job, before a full assessment is spent on it. In practice a
+// tech company at scale is never one to practise on, so its jobs are held for the real search; in the
+// real search, an employer judged anything else fails the real rubric's employer requirement. The
+// lists in profile/employers.yml outrank an earlier judgment, and a practice-listed employer is left
+// to the full assessment in either phase.
+function settledByEmployer(job: Job): { decision: "hold"; reason: string; practice: PracticeAssessment | null } | { decision: "skip"; reason: string } | null {
+  const listed = employerListing(job.company);
+  if (listed === "practice") return null;
+  const unassessed = "held without a full assessment until it is released";
+  if (config.phase === "practice" && listed === "frontier")
+    return { decision: "hold", reason: `not a practice job: the employer is on your frontier list; ${unassessed}`, practice: null };
+  if (listed) return null;
+  const known = rememberedEmployer(job);
+  if (!known) return null;
+  const { employerType, employerEvidence } = known.assessment;
+  if (config.phase === "practice" && employerType === "tech_scaled")
+    return {
+      decision: "hold",
+      reason: `not a practice job: a tech company at scale, as judged on job #${known.jobId} (${employerEvidence}); ${unassessed}`,
+      practice: { ...known.assessment, listed: null },
+    };
+  if (config.phase === "real" && employerType && employerType !== "tech_scaled")
+    return {
+      decision: "skip",
+      reason: `failed real requirement: employer_ok (${EMPLOYER_LABELS[employerType]}, as judged on job #${known.jobId}: ${employerEvidence})`,
+    };
+  return null;
+}
+
 // A cheap model reads the posting for the requirements it settles on its own, and a job that plainly
 // fails them is skipped without the full assessment. Anything else, including a screen that does not
 // finish, goes on to prep: the screen can only rule a job out.
-async function screen(job: Job, location: string | null | undefined, run: RunWorker): Promise<"pass" | "stop" | "capacity"> {
-  const listed = employerListing(job.company);
+// `listed` is the list the employer counts as being on, which decides the rubrics asked.
+async function screen(
+  job: Job,
+  location: string | null | undefined,
+  run: RunWorker,
+  listed = employerListing(job.company),
+): Promise<"pass" | "stop" | "capacity"> {
   let out = null as string | null; // set from the tool callback
   const { done } = run({
     name: "screen",

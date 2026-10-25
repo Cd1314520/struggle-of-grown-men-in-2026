@@ -2,9 +2,9 @@
 // organisation is agent-native shows poorly in a posting, so a listed employer overrides what an
 // assessment judges: `frontier` ones are never spent on practice, `practice` ones always may be.
 import YAML from "yaml";
-import { companyKey } from "./db";
+import { companyKey, employerAssessments, type Job } from "./db";
 import { readProfile } from "./config";
-import type { Listed } from "./practice";
+import { parsePracticeAssessment, type Listed, type PracticeAssessment } from "./practice";
 
 interface EmployerLists {
   frontier: string[];
@@ -35,4 +35,20 @@ export function employerListing(company: string, lists = loadEmployers()): Liste
 export function employersText(lists = loadEmployers()) {
   const line = (l: string[]) => (l.length ? l.join(", ") : "(none)");
   return `- Frontier (agent-native, at scale; real targets): ${line(lists.frontier)}\n- Practice (behind; fine to practise on): ${line(lists.practice)}`;
+}
+
+// What earlier assessments made of a job's employer, so one employer is judged the same way every
+// time. One that judged it a tech company at scale settles it: holding a job back costs a review,
+// while practising on a frontier employer costs its record of the candidate. Otherwise the most recent
+// judgment stands. Only full assessments count, not the copies held jobs carry. `jobId` is the job the
+// judgment was made on.
+export function rememberedEmployer(job: Pick<Job, "id" | "company_key">): { assessment: PracticeAssessment; jobId: number } | null {
+  let latest = null as { assessment: PracticeAssessment; jobId: number } | null;
+  for (const row of employerAssessments(job)) {
+    const assessment = parsePracticeAssessment(row.practice_assessment);
+    if (!assessment?.employerType) continue;
+    if (assessment.employerType === "tech_scaled") return { assessment, jobId: row.id };
+    latest ??= { assessment, jobId: row.id };
+  }
+  return latest;
 }
