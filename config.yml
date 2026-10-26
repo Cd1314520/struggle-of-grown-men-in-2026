@@ -30,14 +30,14 @@ phase: practice
 # without a restart, writing the choice to config.local.yml.
 models:
   triage: openai-codex/gpt-6-luna # pass over raw titles
-  discover: openai-codex/gpt-6.1-sol # web search for companies and postings
-  locate: openai-codex/gpt-6.1-sol # web search for the employer's own posting of a LinkedIn/Indeed job
+  discover: openai-codex/gpt-6.1-terra # web search for companies and postings
+  locate: openai-codex/gpt-6.1-terra # web search for the employer's own posting of a LinkedIn/Indeed job
   screen: openai-codex/gpt-6-luna # reads each posting for plain dealbreakers before prep
-  prep: openai-codex/gpt-6.1-sol # scoring + resume tailoring
-  fill: openai-codex/gpt-6.1-sol # form filling in the browser
-  track: openai-codex/gpt-6.1-sol
-  recheck: openai-codex/gpt-6.1-sol # answers parked questions the profile now settles
-  import: openai-codex/gpt-6.1-sol # turns uploaded resume files into the Typst resume (Resume page)
+  prep: openai-codex/gpt-6.1-terra # scoring + resume tailoring
+  fill: openai-codex/gpt-6.1-terra # form filling in the browser
+  track: openai-codex/gpt-6.1-terra
+  recheck: openai-codex/gpt-6.1-terra # answers parked questions the profile now settles
+  import: openai-codex/gpt-6.1-terra # turns uploaded resume files into the Typst resume (Resume page)
 
 # Scoring weights and thresholds live in profile/rubric.yml.
 
