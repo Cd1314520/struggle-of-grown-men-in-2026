@@ -1,0 +1,95 @@
+# Example: copied into profile/ the first time the app started. It works as it is; tune the
+# statements and weights to what you want once you have seen how a few postings score.
+#
+# How a job's score is computed. The agent never picks a number: it answers each statement below
+# with yes / no / unclear (plus a quote from the posting), and the app does the arithmetic.
+#
+#   label            short name shown in the app's at-a-glance view
+#   required: true   a "no" rules the job out, whatever the score ("unclear" does not)
+#   screen: false    a requirement the cheap pre-read leaves to the full assessment: a judgment, or
+#                    one the cheap model was seen to get wrong; other requirements are screened
+#   weight: N        points earned when the answer is "yes"; a negative weight is a penalty
+#   score            = points earned / total positive weight * 100
+#   unclear          earns this fraction of the weight (the posting did not say)
+#
+# In the practice phase a job is held back unless its employer is one the real search rules out
+# (src/practice.ts and profile/employers.yml), independent of the real fit score.
+# Edits take effect on the next job; no restart needed.
+
+unclear: 0.5
+
+practice:
+  threshold: 60
+  criteria:
+    - id: legit_paid
+      label: Paid, named employer
+      required: true
+      statement: The posting is for paid work with a named employer or staffing firm (not unpaid, commission-only, or a course/bootcamp).
+    - id: engineering_work
+      label: Hands-on engineering
+      required: true
+      statement: The main duties are hands-on engineering (software, automation, data, AI/ML, integration, or internal tools).
+    - id: not_senior
+      label: Not senior level
+      required: true
+      statement: The posting does not require 5 or more years of experience, and the title is not senior, staff, principal, lead or manager.
+    - id: not_internship
+      label: Not an internship
+      required: true
+      statement: The position is a regular job, not an internship, co-op, apprenticeship, or other student or training programme.
+    - id: degree_fits
+      label: Degree fits
+      required: true
+      screen: false
+      statement: No degree, licence or certification is required beyond what the candidate's resume shows.
+
+    - id: experience_fits
+      label: ≤3 years asked
+      weight: 30
+      statement: The required experience is 3 years or less, or no number of years is stated.
+    - id: skills_overlap
+      label: Skills overlap
+      weight: 40
+      statement: At least half of the technologies listed as required appear on the candidate's resume.
+    - id: coding_is_core
+      label: Coding is core
+      weight: 30
+      statement: Writing code is described as a core daily duty (so the process is likely to include a technical interview).
+
+real:
+  threshold: 65
+  criteria:
+    - id: employer_ok
+      label: Tech company at scale
+      required: true
+      screen: false
+      statement: The employer is a technology company at scale (past early stage, software is its core product), not an early-stage startup, a non-tech enterprise, an IT services firm or consultancy, or government. An employer on the candidate's frontier list counts as yes.
+    - id: legit_paid
+      label: Paid, named employer
+      required: true
+      statement: The posting is for paid work with a named employer (not unpaid, commission-only, or a course/bootcamp).
+    - id: not_senior
+      label: Not senior level
+      required: true
+      statement: The posting does not require 5 or more years of experience, and the title is not staff, principal, or manager.
+    - id: not_internship
+      label: Not an internship
+      required: true
+      statement: The position is a regular job, not an internship, co-op, apprenticeship, or other student or training programme.
+
+    - id: core_work
+      label: Engineering on the product
+      weight: 30
+      statement: The core work is hands-on software engineering on the product or its platform.
+    - id: experience_fits
+      label: ≤3 years asked
+      weight: 25
+      statement: The required experience is 3 years or less, or no number of years is stated.
+    - id: skills_overlap
+      label: Skills overlap
+      weight: 25
+      statement: At least half of the technologies listed as required appear on the candidate's resume.
+    - id: growth
+      label: Room to grow
+      weight: 20
+      statement: The posting describes mentorship, a strong engineering team, or ownership of meaningful systems.

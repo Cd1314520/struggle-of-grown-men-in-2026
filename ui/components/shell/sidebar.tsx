@@ -105,7 +105,7 @@ function SystemStatus({ summary }: { summary: Summary | undefined }) {
   return (
     <div className="rounded-lg border border-border bg-surface p-3 shadow-xs">
       <div className="flex items-center gap-2">
-        <StatusDot tone={scanning ? "info" : summary.profileProblems.length ? "warning" : "success"} pulse={scanning} />
+        <StatusDot tone={scanning ? "info" : summary.setupRemaining ? "warning" : "success"} pulse={scanning} />
         <span className="flex-1 text-sm font-medium text-fg">{scanning ? "Scanning…" : `${cap(summary.phase)} phase`}</span>
         <Tooltip content="Scan job boards now">
           <button

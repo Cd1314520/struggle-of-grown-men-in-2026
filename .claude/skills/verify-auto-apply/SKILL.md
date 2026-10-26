@@ -15,10 +15,10 @@ auto-apply is a Bun server (`src/server.ts`) with a React single-page UI (`ui/`,
 
 | Outside world | In the verification instance |
 |---|---|
-| omp agents (model calls) | A **stand-in fill worker** that acts out a fixed script through the real host tools in `src/fill-tools.ts`. Prep, triage, locate and track workers end at once with an error: they need a model. |
+| omp agents (model calls) | A **stand-in fill worker** that acts out a fixed script through the real host tools in `src/fill-tools.ts`, and a **stand-in import worker** that writes the example resume as the draft, adds a line to the notes and calls the real `finish_import` (which compiles with this machine's `typst`); a note containing "fail" makes it end without a draft. Prep, triage, locate and track workers end at once with an error: they need a model. |
 | Chrome over CDP | Stand-in tabs that exist only as ids. No screenshots (`gate.png` is 404). |
 | Network (job boards, LinkedIn/Indeed, Gmail) | Every outbound `fetch` is refused and recorded; `GET /__verify` lists the refused URLs. |
-| `config.local.yml` | Not read (`NODE_ENV=test`). `config.yml` only, then: schedules off, auto apply off, `confirmBeforeSubmit` on, one fill slot, no pause between fills, new applications not spread over the day (`limits.applySpreadHours` 0, so each starts as soon as the slot is free), VNC links off. |
+| `config.local.yml` | Not read (`NODE_ENV=test`); Settings → Models writes `state/config.local.yml` instead (`AUTO_APPLY_LOCAL_CONFIG`). The profile starts as the examples (`profile.example/`), as a fresh install's does. `config.yml` only, then: schedules off, auto apply off, `confirmBeforeSubmit` on, one fill slot, no pause between fills, new applications not spread over the day (`limits.applySpreadHours` 0, so each starts as soon as the slot is free), VNC links off. |
 
 So this instance proves the app's own behaviour between a user action and a recorded state. It does **not** prove anything about scanning, triage, scoring, resume tailoring, real form filling, mail tracking, digest delivery or the Chrome/pacing-proxy layer. Say so when a task touches those; `bun test` covers parts of them.
 
@@ -78,7 +78,9 @@ Primary surface: the web UI, driven with the Playwright MCP browser tools (`mcp_
 | `#archive/held`, `#archive/rejected`, `#archive/<held\|rejected>/<id>` | Jobs set aside; the job opens in a panel over the table (`#archive` is Held) |
 | `#activity?kind=<k>`, `#activity/blockers?cause=<c>`, `#activity/log?kind=<k>` | Highlights (`gate`, `user`, `error`, `system`, `mail`), every stop by cause, the raw event log |
 | `#profile/<file>` | A profile file (`targets.md`, `rubric.yml`, `main.typ`, `resume-notes.md`, `answers.md`, `personal.yml`, `companies.yml`); bare `#profile` opens the first still to fill in |
-| `#settings` | Configuration, mailbox, digest, browser, release held |
+| `#settings`, `#settings/<section>` | Configuration, models, mailbox, digest, browser, release held; a section (`models`, `mail`, ...) opens scrolled to it |
+| `#setup` | The setup checklist, each step checked live (`GET /api/setup`) |
+| `#resume` | The stock resume, the import (upload, draft, ask for changes, accept), the notes |
 | `#job/<id>` | Any job on a page of its own, with a breadcrumb back to its list |
 
 List params: `q` (search), `filter` (repeatable: `top`, `remote`, `near`, `first`), `sort`, `group`, `page` (50 a page). Old links redirect (`history.replaceState`): `#progress/<id>` → `#pipeline/<id>`, `#applied/<id>` → `#applications/<id>`, `#held` → `#archive/held`, `#rejected` → `#archive/rejected`, `#blockers` → `#activity/blockers`, `#more` → `#overview`. A route can open a job its list does not hold (`#pipeline/2` while job 2 is still in Review opens it beside the Failed stage, with no "N of M"); use the route of the list that holds it, or `#job/<id>`, whose breadcrumb names that list.
@@ -89,7 +91,7 @@ Role and accessible name as `browser_snapshot` prints them, verified against the
 
 | What | Handle |
 |---|---|
-| Sidebar (desktop) | `navigation "Sections"` (Overview, Review, Questions, Pipeline, Applications), `"Library"` (Archive, Activity, Profile), `"System"` (Settings). A link's name carries its badge (`link "Review 6"`); CSS `[data-nav="<page>"]`. Also `button "Add a posting"`, `button "Search Ctrl K"`, `button "Scan now"` (foot), `button "Auto Apply"` (theme, Keyboard shortcuts) |
+| Sidebar (desktop) | `navigation "Sections"` (Overview, Review, Questions, Pipeline, Applications), `"Library"` (Archive, Activity, Resume, Profile), `"System"` (Setup, Settings). A link's name carries its badge (`link "Review 6"`); CSS `[data-nav="<page>"]`. Also `button "Add a posting"`, `button "Search Ctrl K"`, `button "Scan now"` (foot), `button "Auto Apply"` (theme, Keyboard shortcuts) |
 | Phone shell | Top bar `button "Search"`, `button "Add a posting"`; bottom `navigation "Sections"` with Overview, Review, Questions, Pipeline (`[data-nav]` too) and `button "More"`, which opens `dialog "Navigation"` holding the full sidebar |
 | Command palette | Ctrl/⌘K or the Search button: `dialog "Search and commands"`, `combobox "Search and commands"`; `option`s in groups Jobs (after two letters), Go to, Actions ("Add a posting", "Scan job boards now", "Check mail for replies", "Find new companies to watch"), Theme. Enter opens the selected one |
 | List row | `row` whose name starts with the title (Review prefixes `Just opened` on new postings): `row "Support Engineer (reject me) Verify Co F 61 1m"`. CSS `a[data-row="<id>"]` (Questions: `a[data-question="<group key>"]`). Group headings are rows too (`row "Just opened 6"`), without `data-row` |
@@ -105,6 +107,7 @@ Role and accessible name as `browser_snapshot` prints them, verified against the
 | Activity | `button "Run: Scan job boards"`, `"Run: Check mail"`, `"Run: Find companies"`; `tab "Highlights"`, `"Blockers"`, `"Full log"`; the log's `combobox "Kind"`; a blocker row links its job (`#job/<id>`) and `link "Open the <Company> posting"` |
 | Profile | `navigation "Profile files"`: `link "Targets Roles, places and pay you want"` and so on (desktop; a phone has `combobox "Profile file"`); `button "Write it"` (empty file) or `button "Edit E"`; `textbox "Edit <file>"`; `button "Save Ctrl S"`, `button "Cancel"`; leaving with edits: `alertdialog "Discard unsaved changes?"`, `button "Discard"` |
 | Settings | `navigation "Settings sections"` (buttons that scroll); `region`s "General", "Auto apply", "Mail & digest", "Browser", "Danger zone"; `link "Connect Gmail"`, `button "Send now"`, `button "Refresh status"`, `button "Release held jobs"`; folds "How auto apply decides", "How the digest works", "Before you take over a browser" |
+| Setup and Resume | Setup: `button "Check again"`, one card per step with `button "How to do it"` and `"Details"` folds, the current step's primary action ("Choose models", "Open Resume", "Open Profile", "Connect Gmail", "Scan now"). Models: `button "<Stage> model"` (e.g. "Triage model") opens a searchable list (`[cmdk-input]`, `[cmdk-item]`). Resume: the drop zone's text "Drop files here, or choose them" opens the file chooser, `button "Convert to a resume"`/`"Convert"`; a draft has `button "Use this resume"`/`"Replace my resume"`, `"Discard"`, `textbox "Ask for changes"` + `button "Ask for these changes"`; a running import `button "Cancel"` |
 | Feedback | Toasts: CSS `[data-sonner-toast]` in `region "Notifications alt+T"` (Reject's carries `button "Undo"`, Add's `button "Open"`); they stack, newest first. Connection lost: `#offline` (`alert`) |
 
 ### Keyboard

@@ -10,12 +10,14 @@ import { api, refreshAll, useSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { cap, num, plural } from "../../lib/format";
 import type { Tone } from "../../lib/labels";
-import { href } from "../../lib/router";
+import { href, useRoute } from "../../lib/router";
 import { Digest, Gmail } from "./mail";
+import { Models } from "./models";
 import { FromConfig, SettingRow, SettingsCard, SettingsSection } from "./parts";
 
 const SECTIONS = [
   ["general", "General"],
+  ["models", "Models"],
   ["auto-apply", "Auto apply"],
   ["mail", "Mail & digest"],
   ["browser", "Browser"],
@@ -289,6 +291,13 @@ function DangerZone({ s }: { s: Summary }) {
 
 export function SettingsPage() {
   const { data: s } = useSummary();
+  // #settings/<section> opens the page at that section (the Setup page links to them).
+  const { parts } = useRoute();
+  const section = parts[0];
+  const ready = !!s;
+  useEffect(() => {
+    if (ready && section) document.getElementById(section)?.scrollIntoView({ block: "start" });
+  }, [ready, section]);
   return (
     <Page>
       <PageHeader title="Settings" description="How the app runs: what it may do on its own, where mail goes, and the browser it applies with." />
@@ -297,6 +306,7 @@ export function SettingsPage() {
         {s ? (
           <div className="flex max-w-3xl min-w-0 flex-col gap-12">
             <General s={s} />
+            <Models />
             <AutoApply s={s} />
             <SettingsSection id="mail" title="Mail & digest">
               <Gmail s={s} />

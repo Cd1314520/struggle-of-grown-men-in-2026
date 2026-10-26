@@ -11,13 +11,17 @@ export const PROMPTS = join(ROOT, "prompts");
 
 mkdirSync(join(DATA, "jobs"), { recursive: true });
 
+// The kinds of agent work, each run on the model `models.<stage>` names (null: omp's default).
+export const MODEL_STAGES = ["triage", "discover", "locate", "screen", "prep", "fill", "track", "recheck", "import"] as const;
+export type ModelStage = (typeof MODEL_STAGES)[number];
+
 export interface Config {
   port: number;
   publicUrl: string | null;
   vncUrl: string | null;
   mailbox: string | null;
   phase: "practice" | "real";
-  models: Record<"triage" | "discover" | "locate" | "screen" | "prep" | "fill" | "track" | "recheck", string | null>;
+  models: Record<Exclude<ModelStage, "import">, string | null> & { import?: string | null };
   confirmBeforeSubmit: boolean;
   autoApply?: {
     enabled?: boolean;
@@ -52,11 +56,11 @@ export function overlay(base: unknown, over: unknown): unknown {
 
 // config.yml holds the settings that are the same wherever the app runs. config.local.yml, which is
 // not tracked, holds what belongs to this machine and its owner. Checked once, here, against config-check.ts: past this line the file is what `Config` says it is.
+export const LOCAL_CONFIG = process.env["AUTO_APPLY_LOCAL_CONFIG"] ?? join(ROOT, "config.local.yml");
 function loadConfig(): Config {
   let raw: unknown = YAML.parse(readFileSync(join(ROOT, "config.yml"), "utf8"));
   // A test run sees config.yml alone, so it behaves the same on every machine.
-  const local = join(ROOT, "config.local.yml");
-  if (process.env.NODE_ENV !== "test" && existsSync(local)) raw = overlay(raw, YAML.parse(readFileSync(local, "utf8")));
+  if (process.env.NODE_ENV !== "test" && existsSync(LOCAL_CONFIG)) raw = overlay(raw, YAML.parse(readFileSync(LOCAL_CONFIG, "utf8")));
   const problems = configProblems(raw);
   if (problems.length)
     throw new Error(`config.yml (with config.local.yml, if there is one) cannot be used:\n${problems.map(problem => `  - ${problem}`).join("\n")}`);

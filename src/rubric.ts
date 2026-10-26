@@ -45,9 +45,9 @@ export interface Verdict {
   practice: PracticeAssessment | null;
 }
 
-export function loadRubric(): Rubric {
+export function loadRubric(file = join(PROFILE, "rubric.yml")): Rubric {
   // Hand-edited file: nothing is there until checked.
-  const r = YAML.parse(readFileSync(join(PROFILE, "rubric.yml"), "utf8")) as (Partial<Record<Phase, Partial<PhaseRubric>>> & { unclear?: number }) | null;
+  const r = YAML.parse(readFileSync(file, "utf8")) as (Partial<Record<Phase, Partial<PhaseRubric>>> & { unclear?: number }) | null;
   for (const phase of ["practice", "real"] as const) {
     const criteria = r?.[phase]?.criteria;
     if (!criteria?.length) throw new Error(`profile/rubric.yml: no criteria for phase "${phase}"`);

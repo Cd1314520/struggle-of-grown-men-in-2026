@@ -71,4 +71,5 @@ export const PROFILE_LABEL: Record<string, string> = {
   "answers.md": "Answers",
   "personal.yml": "Personal",
   "companies.yml": "Companies",
+  "employers.yml": "Employers",
 };

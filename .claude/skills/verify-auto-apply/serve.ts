@@ -6,7 +6,7 @@
 // What is a stand-in: the agent runner and the browser (the two things a Scheduler takes as constructor
 // arguments), and outbound network, which is refused. Nothing here can reach the live Chrome on the
 // configured CDP port, a model, the mailbox or a job board.
-import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { JobBrowser } from "../../../src/chrome";
 import type { Browser } from "../../../src/fill-session";
@@ -29,6 +29,7 @@ Object.assign(process.env, {
   AUTO_APPLY_PROFILE: PROFILE,
   AUTO_APPLY_RESUME_DIR: RESUME,
   AUTO_APPLY_PORT: String(PORT),
+  AUTO_APPLY_LOCAL_CONFIG: join(STATE, "config.local.yml"), // where Settings → Models writes; the owner's file is never touched
 });
 
 // Outbound network is refused outright. Scans, posting look-ups, Gmail and the CDP calls the server
@@ -56,6 +57,7 @@ config.chrome.cdpPort = PORT + 2; // nothing listens here; the live Chrome's por
 const { db, getJob, insertJob, logEvent, updateJob } = await import("../../../src/db");
 const { MAIN, PDF_NAME } = await import("../../../src/resume");
 const { createHandler } = await import("../../../src/server");
+const { seedProfile } = await import("../../../src/profile");
 const { Scheduler } = await import("../../../src/scheduler");
 
 // ---- stand-in browser: tabs exist only as names
@@ -143,6 +145,17 @@ async function actOut(opts: WorkerOptions, stopped: () => boolean) {
   await call("report_result", { outcome: "submitted", note: "stand-in worker: confirmation page observed (no real site was contacted)" });
 }
 
+// The resume import's stand-in: the example resume as the draft, a line added to the notes, then the real
+// finish_import, which compiles the draft with the machine's typst. A note containing "fail" ends without a draft.
+async function importOut(opts: WorkerOptions) {
+  await Bun.sleep(STEP_MS * 3);
+  if (/fail/i.test(opts.prompt)) throw new Error("stand-in import asked to fail");
+  copyFileSync(join(opts.cwd, "main.example.typ"), join(opts.cwd, MAIN));
+  appendFileSync(join(opts.cwd, "resume-notes.md"), "\n## Extra projects\n\n- Stand-in project from the uploaded files.\n");
+  const reply = await opts.tools["finish_import"]?.handler({ summary: "Stand-in draft: the example resume.", warnings: "Dates were guessed by the stand-in." });
+  console.log(`[worker import] finish_import -> ${String(reply)}`);
+}
+
 const runWorker: RunWorker = (opts): WorkerHandle => {
   const { promise: done, resolve: finish } = Promise.withResolvers<Awaited<WorkerHandle["done"]>>();
   let stopped = false;
@@ -150,7 +163,16 @@ const runWorker: RunWorker = (opts): WorkerHandle => {
     stopped = true;
     finish({ status, lastText: "", ...(error ? { error } : {}) });
   };
-  if (opts.name !== "fill") setTimeout(end, STEP_MS, "error", `verification instance has no model: the ${opts.name} worker cannot run`);
+  if (opts.name === "import")
+    void importOut(opts).then(
+      () => {
+        end("completed");
+      },
+      (err: unknown) => {
+        end("error", err instanceof Error ? err.message : String(err));
+      },
+    );
+  else if (opts.name !== "fill") setTimeout(end, STEP_MS, "error", `verification instance has no model: the ${opts.name} worker cannot run`);
   else
     void actOut(opts, () => stopped).then(
       () => {
@@ -184,6 +206,8 @@ const SEED: { script: string; title: string; status: "awaiting_approval" | "held
 function seed() {
   if (db.query<{ n: number }, []>("SELECT count(*) AS n FROM jobs").get()?.n) return;
   writeFileSync(join(RESUME, MAIN), "// stand-in stock resume source\n");
+  // The template the import's draft is written on, as a real install has it.
+  for (const f of ["resume.typ", "main.example.typ"]) copyFileSync(join(REPO, "basic-resume", f), join(RESUME, f));
   SEED.forEach((s, i) => {
     const company = `Verify Co ${String.fromCharCode(65 + i)}`;
     const id = insertJob(
@@ -210,6 +234,8 @@ function seed() {
 seed();
 
 // ---- serve
+
+seedProfile(); // the examples, as a fresh install's start copies them
 
 const scheduler = new Scheduler({ runWorker, browser });
 const handle = createHandler(scheduler);

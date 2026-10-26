@@ -72,7 +72,8 @@ const CONFIG = shape(
   {
     port,
     phase,
-    models: shape({ triage: model, discover: model, locate: model, screen: model, prep: model, fill: model, track: model, recheck: model }),
+    // import was added later: a config.yml from before it still loads, and the resume import uses omp's default.
+    models: shape({ triage: model, discover: model, locate: model, screen: model, prep: model, fill: model, track: model, recheck: model }, { import: model }),
     confirmBeforeSubmit: bool,
     schedule: shape({ scanMinutes: amount(), discoverMinutes: amount(), trackMinutes: amount() }),
     concurrency: shape({ prep: count() }, { fill: count(1) }),

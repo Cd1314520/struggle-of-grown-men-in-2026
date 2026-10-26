@@ -18,10 +18,11 @@ The app is a [Bun](https://bun.sh) program (the version in `.bun-version`) and s
 
 ## Install
 
+The app's **Setup** page (`#setup`) walks a new install through what follows and checks each step against the machine as it is: the programs on the service's `PATH`, a model provider omp can reach, `config.local.yml`, the resume, the profile, Gmail and the first scan. The sidebar counts the required steps left.
+
 ```bash
 bun install                      # also points git at .githooks (pre-commit runs `bun run check`)
 cp config.local.example.yml config.local.yml              # then edit: addresses, mailbox, resume file name
-cp basic-resume/main.example.typ basic-resume/main.typ   # then replace with your own resume
 mkdir -p ~/.config/systemd/user
 cp deploy/systemd/* ~/.config/systemd/user/
 systemctl --user daemon-reload
@@ -60,12 +61,13 @@ If you reach the app under another name, set `publicUrl` to it.
 
 ## Profile, Gmail and config
 
-1. **Profile** (Profile tab, or edit `profile/` directly). Nothing is assessed or applied while a file still contains `TODO-FILL`.
+1. **Profile** (Profile tab, or edit `profile/` directly). `profile/` is not tracked: on start, the app copies each file of `profile.example/` that is missing from it (never over one that exists), so a fresh checkout starts from working templates. Nothing is assessed or applied while a file still contains `TODO-FILL`; the examples carry it only where the choice is yours (`targets.md`, `personal.yml`, `answers.md`).
    - `targets.md`: what you want, in plain language; drives triage and discovery.
    - `rubric.yml`: the scoring checklist. The agent answers each statement yes / no / unclear with evidence; the app computes the score from the weights, applies the required items and threshold, and decides apply / hold / skip. A required item marked `screen: false` is left out of the cheap pre-read that comes before the full assessment: use it for judgments, such as what kind of employer it is, and for items the cheap model gets wrong.
-   - `basic-resume/`: the stock resume (Typst). `main.typ` is yours and not tracked; `main.example.typ` shows the shape. The agent tailors a per-job copy of `main.typ` and never edits the template `resume.typ`.
+   - `basic-resume/`: the stock resume (Typst). `main.typ` is yours and not tracked; `main.example.typ` shows the shape. The agent tailors a per-job copy of `main.typ` and never edits the template `resume.typ`. The **Resume** page (`#resume`) builds `main.typ` from whatever files you upload (any format, up to 8 files, 20 MB together): the `import` worker (`src/resume-import.ts`, `prompts/import.md`) writes it on the template and moves what does not fit into `resume-notes.md`, the host compiles the draft, and you can ask for changes before you accept it. Accepting keeps the files it replaced in `data/resume-import/history/`. "Start from the example" copies `main.example.typ` with a `TODO-FILL` line, so nothing is applied with the example's made-up person.
    - `resume-notes.md` (not tracked): optional bank of extra bullets/skills/examples the agent may swap in. Empty means reorder and trim only.
    - `personal.yml`, `answers.md`: form details and deliberately maintained standard answers. Inbox answers are application-local by default; they are never automatically appended to `answers.md`.
+   - `employers.yml`: employers settled by hand: `frontier` (the real targets, never spent on practice) and `practice`.
    - `companies.yml`: company boards to watch (`ats`: greenhouse, lever, ashby, workable, recruitee, smartrecruiters, workday). The discover step adds to it. A Workday slug is `<tenant>.<wdN>/<site>`; an optional `search:` narrows a large employer to matching titles.
 2. **Gmail**: in Google Cloud, enable the Gmail API, create a Web OAuth client with redirect URI `<publicUrl>/oauth/callback`, save its JSON as `profile/gmail-client.json`, then Settings → Connect Gmail and sign in as the `mailbox` you configured. Scope is `gmail.modify`.
-3. **`config.yml`**: phase, models per stage, schedule, daily caps, and `confirmBeforeSubmit` (gate 2). **`config.local.yml`** (not tracked; start from `config.local.example.yml`) is laid over it and holds what identifies you or this machine: `publicUrl`, `vncUrl`, `mailbox` and `resume.pdfName`.
+3. **`config.yml`**: phase, models per stage, schedule, daily caps, and `confirmBeforeSubmit` (gate 2). Settings → Models picks each stage's model from what `omp models` lists (prices per million tokens beside each) and writes the choice to `config.local.yml`; it takes effect from that stage's next run, with no restart. A model omp does not list can still be typed by name. **`config.local.yml`** (not tracked; start from `config.local.example.yml`) is laid over it and holds what identifies you or this machine: `publicUrl`, `vncUrl`, `mailbox` and `resume.pdfName`.

@@ -579,6 +579,14 @@ export function logEvent(kind: string, message: string, jobId?: number | null, w
   emit(jobId == null ? { type: "event" } : { type: "event", jobId });
 }
 
+// The newest event's id, so a run can later ask for only the events logged after it started.
+export const lastEventId = () => db.query<{ id: number | null }, []>("SELECT MAX(id) AS id FROM events").get()?.id ?? 0;
+// A worker's steps and messages since `afterId`, newest first.
+export const workerEvents = (worker: string, afterId: number, limit = 8) =>
+  db
+    .query<EventRow, [string, number, number]>("SELECT * FROM events WHERE worker = ? AND id > ? AND kind IN ('step', 'agent') ORDER BY id DESC LIMIT ?")
+    .all(worker, afterId, limit);
+
 // Newest first; `before` pages back from an event id, `kinds` keeps only those kinds.
 export const recentEvents = (limit = 150, before: number | null = null, kinds: readonly string[] = []) =>
   db

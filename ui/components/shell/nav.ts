@@ -1,5 +1,18 @@
 // The sections of the app, in the order the sidebar lists them, with what their badge counts.
-import { Activity, Archive, Inbox, LayoutGrid, MessageSquareText, Send, Settings, UserRound, Workflow, type LucideIcon } from "lucide-react";
+import {
+  Activity,
+  Archive,
+  FileText,
+  Inbox,
+  LayoutGrid,
+  ListChecks,
+  MessageSquareText,
+  Send,
+  Settings,
+  UserRound,
+  Workflow,
+  type LucideIcon,
+} from "lucide-react";
 import type { Summary } from "../../../src/api-types";
 import type { Page } from "../../lib/router";
 
@@ -37,12 +50,20 @@ export const NAV: readonly NavItem[] = [
   { page: "applications", label: "Applications", icon: Send, group: "workspace", go: "a" },
   { page: "archive", label: "Archive", icon: Archive, group: "library", go: "h" },
   { page: "activity", label: "Activity", icon: Activity, group: "library", go: "l" },
+  { page: "resume", label: "Resume", icon: FileText, group: "library" },
   {
     page: "profile",
     label: "Profile",
     icon: UserRound,
     group: "library",
     badge: s => (s.profileProblems.length ? { value: s.profileProblems.length, tone: "warning" } : null),
+  },
+  {
+    page: "setup",
+    label: "Setup",
+    icon: ListChecks,
+    group: "system",
+    badge: s => (s.setupRemaining ? { value: s.setupRemaining, tone: "warning" } : null),
   },
   { page: "settings", label: "Settings", icon: Settings, group: "system", go: "s" },
 ];

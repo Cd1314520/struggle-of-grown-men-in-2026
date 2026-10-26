@@ -1,9 +1,10 @@
 // The stock resume is a Typst project (content file + template). Each job gets its own copy to
 // tailor; the PDF is always compiled to the same stock filename so uploads never look versioned.
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { config, DATA, jobDir, RESUME_DIR } from "./config";
+import { config, DATA, jobDir, RESUME_DIR, STOCK_MAIN } from "./config";
+import { errorMessage } from "./errors";
 
 export const PDF_NAME = config.resume.pdfName;
 export const MAIN = config.resume.main;
@@ -32,6 +33,41 @@ export function stockPages(): number | null {
   const res = Bun.spawnSync(["typst", "compile", "--root", RESUME_DIR, join(RESUME_DIR, MAIN), join(dir, PDF_NAME)]);
   if (res.exitCode !== 0) throw new Error(`stock resume does not compile: ${res.stderr.toString().slice(0, 400)}`);
   return pageCount(join(dir, PDF_NAME));
+}
+
+export const stockPdf = () => join(DATA, "stock", PDF_NAME);
+
+// The stock resume as the Resume page shows it, compiled once per change to the project's files.
+export interface StockResume {
+  exists: boolean;
+  pages: number | null;
+  error: string | null; // why it does not compile
+  updatedAt: string | null;
+}
+let compiled: { stamp: string; pages: number | null; error: string | null } | null = null;
+export function stockResume(): StockResume {
+  if (!existsSync(STOCK_MAIN)) return { exists: false, pages: null, error: null, updatedAt: null };
+  const stamp = typFiles()
+    .map(f => {
+      const s = statSync(join(RESUME_DIR, f));
+      return `${f}:${s.mtimeMs}:${s.size}`;
+    })
+    .join("|");
+  if (compiled?.stamp !== stamp) {
+    try {
+      compiled = { stamp, pages: stockPages(), error: null };
+    } catch (err) {
+      compiled = { stamp, pages: null, error: errorMessage(err) };
+    }
+  }
+  return { exists: true, pages: compiled.pages, error: compiled.error, updatedAt: statSync(STOCK_MAIN).mtime.toISOString() };
+}
+
+// One page of a PDF as a PNG: phones cannot embed PDFs, and an image is calmer than a PDF viewer on desktop.
+export function pagePng(pdf: string, page = 1): Uint8Array | null {
+  if (!existsSync(pdf)) return null;
+  const out = Bun.spawnSync(["pdftoppm", "-png", "-r", "120", "-f", String(page), "-l", String(page), pdf]);
+  return out.exitCode === 0 && out.stdout.length ? out.stdout : null;
 }
 
 export const workingPdf = (jobId: number) => join(jobDir(jobId), PDF_NAME);

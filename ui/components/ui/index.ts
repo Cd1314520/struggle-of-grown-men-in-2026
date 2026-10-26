@@ -3,6 +3,7 @@
 export * from "./button";
 export * from "./card";
 export * from "./checkbox";
+export * from "./combobox";
 export * from "./count";
 export * from "./data";
 export * from "./dialog";

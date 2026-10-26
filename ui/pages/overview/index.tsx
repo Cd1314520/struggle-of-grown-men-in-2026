@@ -1,11 +1,12 @@
 // The home page: what needs the owner, whether the machine is healthy, and whether it is working.
-import { Plus, RefreshCw } from "lucide-react";
+import { ListChecks, Plus, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { shellActions } from "../../components/shell/state";
-import { Button, Page, PageHeader } from "../../components/ui";
+import { Button, Callout, Page, PageHeader } from "../../components/ui";
 import { api, refreshAll, useSummary } from "../../lib/api";
 import { num } from "../../lib/format";
+import { href } from "../../lib/router";
 import { Funnel } from "./funnel";
 import { Health } from "./health";
 import { Kpis } from "./kpis";
@@ -21,6 +22,8 @@ export function OverviewPage() {
   const [starting, setStarting] = useState(false);
   const waiting = s ? attentionRows(s).reduce((n, r) => n + r.count, 0) : 0;
   const scanning = !!s?.running.scan || starting;
+  // A new install has nothing to show yet: say where to begin instead of leaving empty charts to explain it.
+  const fresh = !!s && s.setupRemaining > 0 && !Object.values(s.counts).some(Boolean);
   return (
     <Page>
       <PageHeader
@@ -65,6 +68,21 @@ export function OverviewPage() {
           </>
         }
       />
+      {fresh && (
+        <Callout
+          tone="accent"
+          icon={<ListChecks />}
+          title="Welcome to Auto Apply"
+          className="mb-5"
+          action={
+            <Button asChild variant="primary">
+              <a href={href("setup")}>Start setup</a>
+            </Button>
+          }
+        >
+          A few steps first: the programs it runs, a model provider, your resume and profile, and the mailbox. Setup checks each one as you go.
+        </Callout>
+      )}
       {/* Two columns that flow on their own; on a phone, what needs the owner comes first. */}
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-5">

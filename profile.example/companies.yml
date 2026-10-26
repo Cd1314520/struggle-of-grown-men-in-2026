@@ -1,0 +1,11 @@
+# Example: copied into profile/ the first time the app started. The company job boards each scan reads.
+# The discover run adds to it; add your own as well. `ats` is one of: greenhouse, lever, ashby,
+# workable, recruitee, smartrecruiters, workday, and the others in src/ats.ts. The slug is the board's
+# name in its URL (boards.greenhouse.io/<slug>, jobs.lever.co/<slug>, jobs.ashbyhq.com/<slug>). A
+# Workday slug is <tenant>.<wdN>/<site>; an optional `search:` narrows a large employer to matching titles.
+#
+# companies:
+#   - name: Example Co
+#     ats: greenhouse
+#     slug: exampleco
+companies: []

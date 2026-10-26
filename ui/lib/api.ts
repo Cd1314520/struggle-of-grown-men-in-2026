@@ -3,7 +3,21 @@
 import { keepPreviousData, QueryClient, useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { toast } from "sonner";
-import type { ActivityResult, AnswerResult, BlockersResult, DigestResult, JobDetail, ListResult, ListView, Stats, Summary } from "../../src/api-types";
+import type {
+  ActivityResult,
+  AnswerResult,
+  BlockersResult,
+  DigestResult,
+  JobDetail,
+  ListResult,
+  ListView,
+  ModelsResult,
+  ModelStage,
+  ResumeState,
+  SetupResult,
+  Stats,
+  Summary,
+} from "../../src/api-types";
 import type { DigestStatus } from "../../src/digest";
 import type { QuestionGroup } from "../../src/questions";
 
@@ -18,11 +32,11 @@ export class ApiError extends Error {
   }
 }
 
-// `quiet`: the caller tells the user itself.
+// `quiet`: the caller tells the user itself. `raw`: the body goes as it is (text, or a FormData of files).
 async function request<T>(path: string, send?: { method: string; body?: unknown; raw?: boolean; quiet?: boolean }): Promise<T> {
   const init: RequestInit | undefined = send && {
     method: send.method,
-    ...(send.raw ? { body: send.body as string } : { headers: { "content-type": "application/json" }, body: JSON.stringify(send.body ?? {}) }),
+    ...(send.raw ? { body: send.body as BodyInit } : { headers: { "content-type": "application/json" }, body: JSON.stringify(send.body ?? {}) }),
   };
   const res = await fetch(path, init).catch((err: unknown) => {
     if (send && !send.quiet) toast.error("Can't reach the app. Nothing was changed.");
@@ -78,6 +92,10 @@ export const api = {
   },
   profile: (file: string) => request<string>(`/api/profile/${file}`),
   digestStatus: () => request<DigestStatus>("/api/digest/status"),
+  // `refresh`: look again past the server's cache (after installing a program or `omp login`).
+  setup: (refresh = false) => request<SetupResult>(`/api/setup${refresh ? "?refresh" : ""}`),
+  models: (refresh = false) => request<ModelsResult>(`/api/models${refresh ? "?refresh" : ""}`),
+  resume: () => request<ResumeState>("/api/resume"),
 
   // ---- writes. Each shows the server's refusal as a toast and rethrows it.
   jobAction: (id: number, body: { action: string; text?: string; gateId?: string | undefined }) => post(`/api/jobs/${id}/action`, { text: "", ...body }),
@@ -91,6 +109,18 @@ export const api = {
     post<AnswerResult>(`/api/questions/${encodeURIComponent(gateId)}/answer`, { answer, scope }),
   sendDigest: () => post<DigestResult>("/api/digest/send", {}),
   saveProfile: (file: string, text: string) => request<{ ok: true }>(`/api/profile/${file}`, { method: "PUT", body: text, raw: true }),
+  setModel: (stage: ModelStage, model: string | null) => request<{ ok: true }>(`/api/models/${stage}`, { method: "PUT", body: { model } }),
+  importResume: (files: readonly File[], note: string) => {
+    const form = new FormData();
+    for (const f of files) form.append("files", f);
+    form.append("note", note);
+    return request<{ ok: true }>("/api/resume/import", { method: "POST", body: form, raw: true });
+  },
+  reviseImport: (feedback: string) => post("/api/resume/import/revise", { feedback }),
+  acceptImport: (notes: boolean) => post("/api/resume/import/accept", { notes }),
+  discardImport: () => post("/api/resume/import/discard", {}),
+  cancelImport: () => post("/api/resume/import/cancel", {}),
+  exampleResume: () => post("/api/resume/example", {}),
 };
 
 export const queryClient = new QueryClient({
@@ -118,6 +148,9 @@ export const useJob = (id: number | null) => useQuery({ queryKey: ["job", id], q
 export const prefetchJobs = (ids: readonly (number | undefined)[]) => {
   for (const id of ids) if (id !== undefined) queryClient.query({ queryKey: ["job", id], queryFn: () => api.job(id) }).catch(() => undefined); // the open job shows its own error
 };
+export const useSetup = () => useQuery({ queryKey: ["setup"], queryFn: () => api.setup() });
+export const useModels = () => useQuery({ queryKey: ["models"], queryFn: () => api.models() });
+export const useResume = () => useQuery({ queryKey: ["resume"], queryFn: api.resume });
 export const useQuestions = () => useQuery({ queryKey: ["questions"], queryFn: api.questions });
 export const useBlockers = () => useQuery({ queryKey: ["blockers"], queryFn: api.blockers });
 export const useProfileFile = (file: string | null) =>

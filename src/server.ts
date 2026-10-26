@@ -1,11 +1,11 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ActivityResult, AppState, Attention, BlockersResult, JobDetail, Summary } from "./api-types";
+import type { ActivityResult, AppState, Attention, BlockersResult, JobDetail, ModelsResult, ResumeState, Summary } from "./api-types";
 import { feedNames, loadCompanies } from "./ats";
 import { jobBlockers, listBlockers } from "./blockers";
 import { isBoardUrl } from "./boards";
 import { screenshot, tabs } from "./chrome";
-import { browserCount, config, jobDir, PROFILE, STOCK_MAIN, vncUrl } from "./config";
+import { browserCount, config, jobDir, LOCAL_CONFIG, PROFILE, RESUME_DIR, STOCK_MAIN, vncUrl } from "./config";
 import {
   boardJobs,
   getJob,
@@ -31,12 +31,15 @@ import {
 import * as gmail from "./gmail";
 import { startCdpProxy } from "./cdp-proxy";
 import { killAllWorkers } from "./omp";
-import { MAIN, PDF_NAME, resumeFiles, workingPdf } from "./resume";
+import { MAIN, pagePng, PDF_NAME, resumeFiles, stockPdf, stockResume, workingPdf } from "./resume";
+import { cachedCatalog, isModelStage, modelCatalog, setModel, stageModels } from "./models";
+import { acceptImport, beginImport, discardImport, draftPdf, importState, importSteps, MAX_BYTES, MAX_FILES, reviseImport } from "./resume-import";
+import { setupStatus } from "./setup";
 import { autoApply } from "./auto";
 import { currentThreshold } from "./rubric";
 import { forgetDeferredApproval } from "./deferred-approvals";
 import { usedToday } from "./limits";
-import { profileProblems } from "./profile";
+import { isExample, PLACEHOLDER, profileProblems, seedProfile } from "./profile";
 import { answerGate, getOpenGate, listQuestionGroups, readCheckpoint, resolveAmbiguous, respond } from "./questions";
 import { Scheduler } from "./scheduler";
 import { digestStatus, sendQuestionDigest } from "./digest";
@@ -48,7 +51,7 @@ import { serveUi } from "./ui";
 import { isListView, listJobs } from "./listing";
 import { stats } from "./stats";
 
-const PROFILE_FILES = ["targets.md", "rubric.yml", MAIN, "resume-notes.md", "answers.md", "personal.yml", "companies.yml"];
+const PROFILE_FILES = ["targets.md", "rubric.yml", MAIN, "resume-notes.md", "answers.md", "personal.yml", "companies.yml", "employers.yml"];
 const safeThreshold = () => {
   try {
     return currentThreshold();
@@ -121,6 +124,7 @@ function settings(scheduler: Scheduler): Omit<Summary, "attention"> {
     mailbox: config.mailbox,
     phase: config.phase,
     profileFiles: PROFILE_FILES,
+    setupRemaining: setupStatus(cachedCatalog()).remaining,
   };
 }
 
@@ -322,6 +326,34 @@ function stepAction(job: Job, b: Record<string, unknown>) {
   return null;
 }
 
+function resumeState(): ResumeState {
+  const imp = importState();
+  const notes = readProfileFile("resume-notes.md");
+  return {
+    stock: stockResume(),
+    import: { ...imp, steps: importSteps(imp) },
+    notes: { example: isExample("resume-notes.md"), empty: !notes.trim() },
+    pdfName: PDF_NAME,
+    main: MAIN,
+    limits: { files: MAX_FILES, bytes: MAX_BYTES },
+  };
+}
+const readProfileFile = (name: string) => {
+  const file = profilePath(name);
+  return existsSync(file) ? readFileSync(file, "utf8") : "";
+};
+
+const pdf = async (file: string) =>
+  (await Bun.file(file).exists())
+    ? new Response(Bun.file(file), {
+        headers: { "content-type": "application/pdf", "content-disposition": `inline; filename="${PDF_NAME}"`, "cache-control": "no-store" },
+      })
+    : fail("no resume", 404);
+const png = (file: string, page: number) => {
+  const image = pagePng(file, page);
+  return image ? new Response(image, { headers: { "content-type": "image/png", "cache-control": "no-store" } }) : fail("no such page", 404);
+};
+
 // Answers one request against the given scheduler.
 export function createHandler(scheduler: Scheduler) {
   return async function handle(req: Request): Promise<Response> {
@@ -417,12 +449,11 @@ export function createHandler(scheduler: Scheduler) {
           : fail("no resume yet", 404);
       }
       if (sub === "/resume.png") {
-        // First page as an image: phones cannot embed PDFs, and it is calmer than a PDF viewer on desktop.
-        const pdf = resumeFiles(job.id, job.resume_sha).pdf;
-        if (!existsSync(pdf)) return fail("no resume yet", 404);
-        const out = Bun.spawnSync(["pdftoppm", "-png", "-r", "120", "-f", "1", "-l", "1", pdf]);
-        return out.exitCode === 0
-          ? new Response(out.stdout, { headers: { "content-type": "image/png", "cache-control": "max-age=300" } })
+        const file = resumeFiles(job.id, job.resume_sha).pdf;
+        if (!existsSync(file)) return fail("no resume yet", 404);
+        const image = pagePng(file);
+        return image
+          ? new Response(image, { headers: { "content-type": "image/png", "cache-control": "max-age=300" } })
           : fail("could not render the resume", 500);
       }
       if (sub === "/gate.png") {
@@ -522,6 +553,69 @@ export function createHandler(scheduler: Scheduler) {
       return json({ ok: true });
     }
 
+    if (path === "/api/setup" && req.method === "GET") return json(setupStatus(await modelCatalog(url.searchParams.has("refresh"))));
+
+    if (path === "/api/models" && req.method === "GET")
+      return json({ catalog: await modelCatalog(url.searchParams.has("refresh")), stages: stageModels(), localConfig: LOCAL_CONFIG } satisfies ModelsResult);
+    const modelMatch = /^\/api\/models\/(\w+)$/.exec(path);
+    if (modelMatch && req.method === "PUT") {
+      const stage = modelMatch[1];
+      if (!isModelStage(stage)) return fail("unknown stage", 404);
+      const { model } = await body();
+      if (model !== null && (typeof model !== "string" || !model.trim() || /\s/.test(model.trim())))
+        return fail("model must be a model name, or null for omp's default");
+      try {
+        setModel(stage, model === null ? null : model.trim());
+      } catch (err) {
+        return fail(errorMessage(err), 409);
+      }
+      logEvent("user", `${stage} model set to ${model ?? "omp's default"}`);
+      return json({ ok: true });
+    }
+
+    if (path === "/api/resume" && req.method === "GET") return json(resumeState());
+    if (path === "/api/resume/stock.pdf") return pdf(stockPdf());
+    if (path === "/api/resume/draft.pdf") return pdf(draftPdf());
+    if (path === "/api/resume/stock.png" || path === "/api/resume/draft.png") {
+      if (path === "/api/resume/stock.png") stockResume(); // compiled if the sources changed since
+      return png(path.endsWith("stock.png") ? stockPdf() : draftPdf(), Math.max(1, Number(url.searchParams.get("page")) || 1));
+    }
+    if (path === "/api/resume/example" && req.method === "POST") {
+      if (existsSync(STOCK_MAIN)) return fail("there is already a stock resume", 409);
+      // Marked, so nothing is applied with the example's made-up person until its details are replaced.
+      const example = readFileSync(join(RESUME_DIR, "main.example.typ"), "utf8");
+      writeFileSync(STOCK_MAIN, `// ${PLACEHOLDER}: replace every detail below with your own, then delete this line.\n${example}`);
+      logEvent("user", `started ${MAIN} from the example resume`);
+      return json({ ok: true });
+    }
+    const importMatch = /^\/api\/resume\/import(?:\/(\w+))?$/.exec(path);
+    if (importMatch && req.method === "POST") {
+      const op = importMatch[1] ?? "start";
+      let err: string | null;
+      if (op === "start") {
+        // Only the app's own pages may post here (refusal), and the size is checked before the body is read.
+        if (Number(req.headers.get("content-length") ?? Infinity) > MAX_BYTES + 1024 * 1024) return fail("the files are too large", 413);
+        // eslint-disable-next-line @typescript-eslint/no-deprecated -- the body is bounded above and comes from the app's own page
+        const form = await req.formData().catch(() => null);
+        if (!form) return fail("send the files as a form");
+        const files = form.getAll("files").flatMap(f => (typeof f === "string" || !f.size ? [] : [f]));
+        const note = form.get("note");
+        err = await beginImport(files, typeof note === "string" ? note : "");
+        if (!err) void scheduler.importResume();
+      } else if (op === "revise") {
+        const { feedback } = await body();
+        err = reviseImport(typeof feedback === "string" ? feedback : "");
+        if (!err) void scheduler.importResume();
+      } else if (op === "accept") {
+        const { notes } = await body();
+        err = acceptImport(notes !== false);
+        if (!err) scheduler.pump();
+      } else if (op === "discard") err = discardImport();
+      else if (op === "cancel") err = scheduler.cancelImport() ? null : "no import is running";
+      else return fail("not found", 404);
+      return err ? fail(err, 409) : json({ ok: true });
+    }
+
     const profileMatch = /^\/api\/profile\/([\w.-]+)$/.exec(path);
     if (profileMatch) {
       const name = profileMatch[1] ?? "";
@@ -568,6 +662,9 @@ export function createHandler(scheduler: Scheduler) {
 
 // Starts the app: the HTTP server, a pacing proxy per browser, and the scheduler.
 export function main() {
+  const seeded = seedProfile();
+  if (seeded.length) logEvent("system", `Copied the example ${seeded.join(", ")} into profile/: fill them in on the Profile page`);
+  void modelCatalog(); // read once now, so the setup count in the summary knows the models
   const scheduler = new Scheduler();
   const server = Bun.serve({
     hostname: "127.0.0.1", // holds credentials and controls a logged-in browser: local only. `tailscale serve` publishes it to the tailnet

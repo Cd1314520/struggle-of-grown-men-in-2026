@@ -1,0 +1,39 @@
+# Example: copied into profile/ the first time the app started. Replace every placeholder with your own
+# details; nothing is applied while one is left. Application forms are filled from this file. Email is
+# taken from the connected Gmail mailbox. Leave a field blank to have the agent ask you when a form needs it.
+first_name: TODO-FILL
+last_name: TODO-FILL
+preferred_name:
+phone: "TODO-FILL" # as you want it typed, e.g. "+1 (555) 010-0100"
+address:
+  street: # optional; many forms accept a blank or "Available on request"
+  city: TODO-FILL
+  state: TODO-FILL # an abbreviation or a name
+  postal_code: "TODO-FILL"
+  country: TODO-FILL
+links:
+  linkedin: # https://linkedin.com/in/...
+  github:
+  website:
+current_company: # blank if you are not working now
+current_title:
+years_of_experience: TODO-FILL
+education:
+  - school: TODO-FILL
+    location:
+    degree: TODO-FILL # e.g. Bachelor of Science
+    field: TODO-FILL # e.g. Computer Science
+    started: # e.g. "September 2020"
+    graduated: # e.g. "May 2024"
+# Plain answers the prefill script gives without the agent (src/prefill.ts), for questions asked as a
+# choice. They should agree with profile/answers.md; anything left out here is left to the agent.
+prefill:
+  work_authorized: TODO-FILL # yes / no: authorised to work in the country of the job
+  sponsorship: TODO-FILL # yes / no: needs visa sponsorship now or in the future
+  adult: yes # at least 18
+  previously_employed: no # worked for this employer before
+  referred: no
+  relocate: TODO-FILL # yes / no
+  eeo: decline # gender, race, veteran, disability: decline wherever the form allows it
+  sms_consent: no # recruiting text messages
+  how_heard: [Job board, Company website, LinkedIn, Online, Other] # the first one a form offers wins

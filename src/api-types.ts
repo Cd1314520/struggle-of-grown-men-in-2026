@@ -4,6 +4,10 @@
 import type { Blocker, ListedBlocker } from "./blockers";
 import type { BoardJob, EventRow, Job, StatusChange } from "./db";
 import type { DigestStatus } from "./digest";
+import type { ModelStage } from "./config";
+import type { ModelCatalog } from "./models";
+import type { ImportState } from "./resume-import";
+import type { StockResume } from "./resume";
 import type { FillCheckpoint, Gate, QuestionGroup } from "./questions";
 import type { NextStep, Step } from "./steps";
 
@@ -46,6 +50,7 @@ export interface AppState {
   mailbox: string | null;
   phase: "practice" | "real";
   profileFiles: string[];
+  setupRemaining: number; // required setup steps not done (src/setup.ts)
 }
 
 // GET /api/jobs/:id
@@ -127,3 +132,24 @@ export interface ActivityResult {
 
 // GET /api/stats: see src/stats.ts.
 export type { Stats } from "./stats";
+
+export type { SetupCheck, SetupResult, SetupStep, SetupStepId } from "./setup";
+export type { CatalogModel, ModelCatalog } from "./models";
+export type { ModelStage } from "./config";
+
+// GET /api/models
+export interface ModelsResult {
+  catalog: ModelCatalog;
+  stages: Record<ModelStage, string | null>;
+  localConfig: string;
+}
+
+// GET /api/resume
+export interface ResumeState {
+  stock: StockResume;
+  import: ImportState & { steps: { message: string; at: string }[] };
+  notes: { example: boolean; empty: boolean };
+  pdfName: string;
+  main: string;
+  limits: { files: number; bytes: number };
+}

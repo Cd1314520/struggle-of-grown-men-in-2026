@@ -48,6 +48,7 @@ import {
   reserveManualLease,
   type FillCheckpoint,
 } from "./questions";
+import { interruptedImport, runImport, type ImportRun } from "./resume-import";
 import { scanSources } from "./scan";
 import { FILL_STAGE, PARKED, to } from "./status";
 import { trackMailbox } from "./track";
@@ -232,6 +233,8 @@ export class Scheduler {
   private nextNewAt: number;
   // Activation is asynchronous; keep ownership even if the gate is resolved meanwhile.
   private readonly manualActivations = new Map<number, number>();
+  // The resume import under way, if any.
+  private importRun: ImportRun | null = null;
 
   constructor(deps: Partial<SchedulerDeps> = {}) {
     this.run = watchCapacity(deps.runWorker ?? runWorker);
@@ -283,6 +286,26 @@ export class Scheduler {
       await recheckOpenQuestions(this.run);
       this.pump();
     });
+  }
+
+  // Turns the files readied by beginImport or reviseImport into a draft resume (src/resume-import.ts).
+  importResume() {
+    return this.exclusive("import", async () => {
+      const control: ImportRun = { handle: null, cancelled: false };
+      this.importRun = control;
+      try {
+        await runImport(this.run, control);
+      } finally {
+        this.importRun = null;
+      }
+    });
+  }
+
+  cancelImport(): boolean {
+    if (!this.importRun?.handle) return false;
+    this.importRun.cancelled = true;
+    this.importRun.handle.abort();
+    return true;
   }
 
   // ---- fill sessions and the browsers they hold
@@ -455,6 +478,7 @@ export class Scheduler {
 
   // Puts right what a restart interrupted, then keeps the schedule.
   start() {
+    interruptedImport();
     dedupeExisting();
     preferUsListings();
     requeueInterruptedPrep();

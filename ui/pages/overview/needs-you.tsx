@@ -8,8 +8,8 @@ import {
   MessageSquareText,
   MousePointerClick,
   Send,
+  ListChecks,
   TriangleAlert,
-  UserRound,
   type LucideIcon,
 } from "lucide-react";
 import type { Summary } from "../../../src/api-types";
@@ -89,15 +89,18 @@ export function attentionRows(s: Summary): Row[] {
     },
     { key: "review", label: "Review", hint: "Assessed matches waiting for your approval", count: a.review, href: "#review", icon: Inbox, tone: "accent" },
   ];
+  // Setup counts the profile among its steps; the files left are named, as they are what most often remains.
   const problems = s.profileProblems;
-  if (problems.length)
+  if (s.setupRemaining)
     rows.push({
-      key: "profile",
-      label: "Finish your profile",
-      hint: `${problems.map(p => PROFILE_LABEL[p] ?? p).join(", ")} ${problems.length === 1 ? "needs" : "need"} setting up`,
-      count: problems.length,
-      href: "#profile",
-      icon: UserRound,
+      key: "setup",
+      label: "Finish setting up",
+      hint: problems.length
+        ? `${problems.map(p => PROFILE_LABEL[p] ?? p).join(", ")} ${problems.length === 1 ? "needs" : "need"} filling in`
+        : "A few steps are left before the app can apply",
+      count: s.setupRemaining,
+      href: "#setup",
+      icon: ListChecks,
       tone: "warning",
     });
   return rows.filter(r => r.count > 0);

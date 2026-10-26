@@ -25,7 +25,8 @@ questionDigest:
 # real = apply to the roles in the Real phase section of profile/targets.md.
 phase: practice
 
-# Models per stage. null = whatever omp's default role resolves to.
+# Models per stage. null = whatever omp's default role resolves to. Settings → Models changes them
+# without a restart, writing the choice to config.local.yml.
 models:
   triage: openai-codex/gpt-6-luna # pass over raw titles
   discover: openai-codex/gpt-6.1-sol # web search for companies and postings
@@ -35,6 +36,7 @@ models:
   fill: openai-codex/gpt-6.1-sol # form filling in the browser
   track: openai-codex/gpt-6.1-sol
   recheck: openai-codex/gpt-6.1-sol # answers parked questions the profile now settles
+  import: openai-codex/gpt-6.1-sol # turns uploaded resume files into the Typst resume (Resume page)
 
 # Scoring weights and thresholds live in profile/rubric.yml.
 
