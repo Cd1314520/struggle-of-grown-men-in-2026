@@ -9,6 +9,7 @@ import * as gmail from "./gmail";
 import type { ModelCatalog } from "./models";
 import { isExample, profileProblems } from "./profile";
 import { stockResume } from "./resume";
+import { harnessOf, type HarnessId } from "./worker";
 
 export type SetupStepId = "tools" | "models" | "machine" | "resume" | "profile" | "gmail" | "scan";
 export interface SetupCheck {
@@ -31,9 +32,14 @@ export interface SetupResult {
   localConfig: string; // where the machine's own settings are written
 }
 
+// Whether any stage's model runs on harness `h`.
+const onHarness = (h: HarnessId) => MODEL_STAGES.some(stage => harnessOf(config.models[stage] ?? null) === h);
+
 // The programs the app starts, as the service's PATH finds them.
 const PROGRAMS: { name: string; purpose: string; required: () => boolean }[] = [
-  { name: "omp", purpose: "Runs every agent", required: () => true },
+  { name: "omp", purpose: "Runs the agents on omp's models", required: () => onHarness("omp") },
+  { name: "claude", purpose: "Runs the agents on Claude Code's models (claude-code/…)", required: () => onHarness("claude-code") },
+  { name: "npx", purpose: "Starts Playwright's browser tools for a Claude Code fill", required: () => harnessOf(config.models.fill) === "claude-code" },
   { name: "typst", purpose: "Compiles the stock and tailored resumes", required: () => true },
   { name: "google-chrome", purpose: "The browsers applications are filled in", required: () => true },
   { name: "Xvfb", purpose: "Virtual displays for the browsers", required: () => true },
@@ -61,30 +67,33 @@ function tools() {
   );
 }
 
-// A stage's model is known when omp lists it under that exact name. omp also matches names loosely
-// ("opus"), so an unlisted name is a warning, not a failure.
+// A stage's model is known when its harness lists it under that exact name. omp also matches names
+// loosely ("opus"), and Claude Code takes any full model name, so an unlisted name is a warning, not a
+// failure.
 function models(catalog: ModelCatalog | null) {
-  if (!catalog) return step("models", [check("catalog", "Model provider", false, "Checking what omp can reach…", false)]);
+  if (!catalog) return step("models", [check("catalog", "Model provider", false, "Checking what omp and Claude Code can reach…", false)]);
   const known = new Set(catalog.models.flatMap(m => [m.selector, m.selector.slice(m.provider.length + 1)]));
   const reachable = catalog.models.length > 0;
+  const harness = (h: HarnessId, label: string) => {
+    const error = catalog.errors[h];
+    const count = catalog.models.filter(m => harnessOf(m.selector) === h).length;
+    return check(`harness.${h}`, label, !error, error ?? `${count} models`, onHarness(h));
+  };
   return step("models", [
     check(
       "catalog",
       "Model provider",
       reachable,
       reachable
-        ? `omp can reach ${catalog.models.length} models from ${new Set(catalog.models.map(m => m.provider)).size} providers`
-        : (catalog.error ?? "omp lists no models: log in to a provider"),
+        ? `${catalog.models.length} models from ${new Set(catalog.models.map(m => m.provider)).size} providers`
+        : Object.values(catalog.errors).join("; ") || "No models listed: log in to omp or Claude Code",
     ),
+    harness("omp", "omp"),
+    harness("claude-code", "Claude Code"),
     ...MODEL_STAGES.map(stage => {
       const model = config.models[stage] ?? null;
-      return check(
-        `stage.${stage}`,
-        stage,
-        model === null || !reachable || known.has(model),
-        model === null ? "omp's default model" : known.has(model) || !reachable ? model : `${model} is not in omp's list`,
-        false,
-      );
+      const ok = model === null || !reachable || known.has(model) || harnessOf(model) === "claude-code";
+      return check(`stage.${stage}`, stage, ok, model === null ? "omp's default model" : ok ? model : `${model} is not in omp's list`, false);
     }),
   ]);
 }

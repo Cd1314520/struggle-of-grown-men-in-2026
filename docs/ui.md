@@ -29,8 +29,8 @@ Routes are hash based: `#review/123?sort=score&filter=remote`. A list keeps grou
 | `GET /api/activity?feed=highlights\|all&kind=&before=` | one page of the event log |
 | `GET /api/blockers` | every stop, newest first |
 | `GET /api/stats` | aggregates for the Overview (`src/stats.ts`) |
-| `GET /api/setup?refresh` | `SetupResult`: each setup step and its checks (`src/setup.ts`); `refresh` reads omp's model list again |
-| `GET /api/models?refresh`, `PUT /api/models/:stage` | omp's model catalog and each stage's model; a PUT (`{ model }`, null for omp's default) writes `config.local.yml` (`src/models.ts`) |
+| `GET /api/setup?refresh` | `SetupResult`: each setup step and its checks (`src/setup.ts`); `refresh` reads the model lists (omp and Claude Code) again |
+| `GET /api/models?refresh`, `PUT /api/models/:stage` | the model catalog (omp's and Claude Code's, with `errors` per harness) and each stage's model; a PUT (`{ model }`, null for omp's default) writes `config.local.yml` (`src/models.ts`) |
 | `GET /api/resume` | `ResumeState`: the stock resume (pages, compile error), the import under way and its latest steps, the notes. Pages: `/api/resume/{stock,draft}.png?page=N` and `.pdf` |
 | `POST /api/resume/import` (form: `files`, `note`), `/import/{revise,accept,discard,cancel}`, `/api/resume/example` | the resume import (`src/resume-import.ts`) |
 

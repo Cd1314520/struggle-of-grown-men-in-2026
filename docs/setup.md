@@ -6,7 +6,9 @@ The app is a [Bun](https://bun.sh) program (the version in `.bun-version`) and s
 
 | Program | Used for |
 |---|---|
-| `omp` | every agent worker (`omp --mode rpc`); the fill prompt was verified against v18.8.7 (see [browser.md](browser.md)) |
+| `omp` | agent workers on omp's models (`omp --mode rpc`); the fill prompt was verified against v18.8.7 (see [browser.md](browser.md)) |
+| `claude` | agent workers on `claude-code/…` models (`claude -p`, signed in with `claude auth login`); see [harnesses.md](harnesses.md) |
+| `npx` | Playwright's browser tools, for a fill on a `claude-code/…` model |
 | `google-chrome` | the browsers applications are filled in |
 | `Xvfb`, `x11vnc`, `websockify` with noVNC in `/usr/share/novnc` | the virtual displays and their live view |
 | `typst` | compiling the stock and tailored resumes |
@@ -18,7 +20,7 @@ The app is a [Bun](https://bun.sh) program (the version in `.bun-version`) and s
 
 ## Install
 
-The app's **Setup** page (`#setup`) walks a new install through what follows and checks each step against the machine as it is: the programs on the service's `PATH`, a model provider omp can reach, `config.local.yml`, the resume, the profile, Gmail and the first scan. The sidebar counts the required steps left.
+The app's **Setup** page (`#setup`) walks a new install through what follows and checks each step against the machine as it is: the programs on the service's `PATH` (omp or Claude Code, whichever the stages use), a model provider one of them can reach, `config.local.yml`, the resume, the profile, Gmail and the first scan. The sidebar counts the required steps left.
 
 ```bash
 bun install                      # also points git at .githooks (pre-commit runs `bun run check`)
@@ -70,4 +72,4 @@ If you reach the app under another name, set `publicUrl` to it.
    - `employers.yml`: employers settled by hand: `frontier` (the real targets, never spent on practice) and `practice`.
    - `companies.yml`: company boards to watch (`ats`: greenhouse, lever, ashby, workable, recruitee, smartrecruiters, workday). The discover step adds to it. A Workday slug is `<tenant>.<wdN>/<site>`; an optional `search:` narrows a large employer to matching titles.
 2. **Gmail**: in Google Cloud, enable the Gmail API, create a Web OAuth client with redirect URI `<publicUrl>/oauth/callback`, save its JSON as `profile/gmail-client.json`, then Settings → Connect Gmail and sign in as the `mailbox` you configured. Scope is `gmail.modify`.
-3. **`config.yml`**: phase, models per stage, schedule, daily caps, and `confirmBeforeSubmit` (gate 2). Settings → Models picks each stage's model from what `omp models` lists (prices per million tokens beside each) and writes the choice to `config.local.yml`; it takes effect from that stage's next run, with no restart. A model omp does not list can still be typed by name. **`config.local.yml`** (not tracked; start from `config.local.example.yml`) is laid over it and holds what identifies you or this machine: `publicUrl`, `vncUrl`, `mailbox` and `resume.pdfName`.
+3. **`config.yml`**: phase, models per stage, schedule, daily caps, and `confirmBeforeSubmit` (gate 2). Settings → Models picks each stage's model from what `omp models` lists (prices per million tokens beside each) and Claude Code's aliases (`claude-code/…`; see [harnesses.md](harnesses.md)) and writes the choice to `config.local.yml`; it takes effect from that stage's next run, with no restart. A model neither lists can still be typed by name. **`config.local.yml`** (not tracked; start from `config.local.example.yml`) is laid over it and holds what identifies you or this machine: `publicUrl`, `vncUrl`, `mailbox` and `resume.pdfName`.

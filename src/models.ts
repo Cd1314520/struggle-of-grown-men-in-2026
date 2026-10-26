@@ -1,15 +1,17 @@
-// The models agents run on: which ones omp can reach, and the choice per stage. A choice made in the
+// The models agents run on: which ones omp and Claude Code can reach, and the choice per stage. A choice made in the
 // app is written to config.local.yml (laid over config.yml) and to the loaded config, so the next
 // worker of that stage uses it without a restart.
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import YAML from "yaml";
 import { config, LOCAL_CONFIG, MODEL_STAGES, overlay, ROOT, type ModelStage } from "./config";
+import { claudeCatalog } from "./claude";
 import { configProblems } from "./config-check";
 import { errorMessage } from "./errors";
+import type { HarnessId } from "./worker";
 
 export interface CatalogModel {
-  selector: string; // what --model takes: "<provider>/<id>"
+  selector: string; // what a stage names: "<provider>/<id>", or "claude-code/<model>" for Claude Code
   provider: string;
   name: string;
   contextWindow: number | null;
@@ -18,19 +20,31 @@ export interface CatalogModel {
 }
 export interface ModelCatalog {
   models: CatalogModel[];
-  error: string | null; // why omp could not list them; any model name may still be typed
+  // Why a harness could not list its models; any model name may still be typed.
+  errors: Partial<Record<HarnessId, string>>;
   at: string;
 }
 
 export const isModelStage = (v: unknown): v is ModelStage => MODEL_STAGES.some(s => s === v);
 
-// `omp models --json` reads the providers this machine is logged in to. It takes a second or two, so
-// the list is kept for a while; `refresh` asks again (after `omp login`, say).
+// `omp models --json` reads the providers this machine is logged in to, and `claude auth status`
+// whether Claude Code is signed in. That takes a second or two, so the list is kept for a while;
+// `refresh` asks again (after `omp login` or `claude auth login`, say).
 const KEEP_MS = 10 * 60_000;
 let cached: ModelCatalog | null = null;
 export async function modelCatalog(refresh = false): Promise<ModelCatalog> {
   if (cached && !refresh && Date.now() - Date.parse(cached.at) < KEEP_MS) return cached;
   const at = new Date().toISOString();
+  const [omp, claude] = await Promise.all([ompCatalog(), claudeCatalog()]);
+  const errors: ModelCatalog["errors"] = {};
+  if (omp.error) errors.omp = omp.error;
+  if (claude.error) errors["claude-code"] = claude.error;
+  cached = { models: [...omp.models, ...claude.models], errors, at };
+  return cached;
+}
+
+async function ompCatalog(): Promise<{ models: CatalogModel[]; error: string | null }> {
+  if (!Bun.which("omp")) return { models: [], error: "omp is not installed" };
   try {
     const proc = Bun.spawn(["omp", "models", "--json"], { stdout: "pipe", stderr: "pipe" });
     const timer = setTimeout(() => {
@@ -39,14 +53,13 @@ export async function modelCatalog(refresh = false): Promise<ModelCatalog> {
     const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
     clearTimeout(timer);
     if (code !== 0) throw new Error(err.trim().split("\n").at(-1) || `omp models exited with code ${code}`);
-    cached = { models: parseCatalog(out), error: null, at };
+    return { models: parseCatalog(out), error: null };
   } catch (err) {
-    cached = { models: [], error: errorMessage(err), at };
+    return { models: [], error: errorMessage(err) };
   }
-  return cached;
 }
 
-// The list as last read, without waiting for omp: null until the first read finishes.
+// The list as last read, without waiting: null until the first read finishes.
 export const cachedCatalog = () => cached;
 
 // The chat models in omp's JSON listing.

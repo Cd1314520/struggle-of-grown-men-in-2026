@@ -4,7 +4,7 @@ import { isBoardUrl, linkedinDescription, probeEmployer } from "./boards";
 import { config } from "./config";
 import { findTwin, jobsByStatus, kvGet, kvSet, logEvent, relocateJob, updateJob } from "./db";
 import { countOne, usedToday } from "./limits";
-import { arg, S, schema, type RunWorker } from "./omp";
+import { arg, S, schema, type RunWorker } from "./worker";
 import { to } from "./status";
 import { addCompanyTool, render, workDir } from "./worker-tools";
 

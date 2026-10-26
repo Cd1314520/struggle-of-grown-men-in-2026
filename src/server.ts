@@ -30,7 +30,7 @@ import {
 } from "./db";
 import * as gmail from "./gmail";
 import { startCdpProxy } from "./cdp-proxy";
-import { killAllWorkers } from "./omp";
+import { killAllWorkers } from "./worker";
 import { MAIN, pagePng, PDF_NAME, resumeFiles, stockPdf, stockResume, workingPdf } from "./resume";
 import { cachedCatalog, isModelStage, modelCatalog, setModel, stageModels } from "./models";
 import { acceptImport, beginImport, discardImport, draftPdf, importState, importSteps, MAX_BYTES, MAX_FILES, reviseImport } from "./resume-import";

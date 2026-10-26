@@ -7,7 +7,7 @@ import { config, readProfile } from "./config";
 import { kvGet, kvSet, logEvent } from "./db";
 import { errorMessage } from "./errors";
 import { due } from "./limits";
-import { arg, S, schema, type RunWorker } from "./omp";
+import { arg, S, schema, type RunWorker } from "./worker";
 import { answerGate, listQuestionGroups, type QuestionGroup } from "./questions";
 import { lowStakesRule, readPrompt, render, workDir } from "./worker-tools";
 

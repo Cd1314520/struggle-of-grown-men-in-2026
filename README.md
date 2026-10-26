@@ -1,6 +1,6 @@
 # auto-apply
 
-Local job scanner, resume tailor and application filler with two manual gates. A small Bun app owns state and scheduling; every piece of agent work is an `omp --mode rpc` process that reports back through host tools.
+Local job scanner, resume tailor and application filler with two manual gates. A small Bun app owns state and scheduling; every piece of agent work is an agent process, on omp (`omp --mode rpc`) or Claude Code (`claude -p`) as each stage's model says, that reports back through host tools.
 
 ## Start here
 
@@ -16,6 +16,7 @@ systemctl --user status auto-apply
 | [docs/operations.md](docs/operations.md) | auto apply, parked applications and Questions, the daily digest, the observation journal, Workday recovery |
 | [docs/pipeline.md](docs/pipeline.md) | sources and scanning, duplicates, freshness, resumes |
 | [docs/browser.md](docs/browser.md) | the browsers, the pacing proxy, and the fingerprint audit |
+| [docs/harnesses.md](docs/harnesses.md) | omp and Claude Code as worker harnesses: how a stage picks one, what each is given, what differs |
 | [docs/database.md](docs/database.md) | schema and migrations, backups, status history, fill state, application steps, retention |
 
 Settings live in [`config.yml`](config.yml), with what identifies you or this machine in an untracked `config.local.yml` laid over it; both are checked when the app starts. The documentation names the keys and leaves the values to the file.
@@ -34,13 +35,13 @@ Before the full assessment, prep skips without a model a job whose employer alre
 
 An employer is judged once. In the practice phase, a job at an employer an earlier full assessment judged a tech company at scale (or on the frontier list in `profile/employers.yml`) only gets the screen for the real rubric's plain requirements, then is held without a full assessment; in the real phase, a job at an employer judged anything else is skipped. `rememberedEmployer` in `src/employers.ts` reads the earlier judgments; one tech-company-at-scale judgment outranks the rest, and the lists in `profile/employers.yml` outrank them all. A job you pick out by hand is always assessed in full.
 
-| Worker | Built-in omp tools | Host tools |
+| Worker | Built-in tools (omp's names; [harnesses](docs/harnesses.md)) | Host tools |
 |---|---|---|
 | triage | read, write | `triage_result` |
 | discover | + web_search | `add_company`, `save_job` |
 | screen | none | `screen_result` |
 | prep | + edit, bash (typst) | `submit_checklist`, `finish_prep` |
-| fill | read, write, eval (browser) | `get_account`, `gmail_*`, `ask_user`, `confirm_submit`, `need_manual`, `verify_status`, `report_result` |
+| fill | read, write, eval (browser) | `prefill` (Claude Code only), `get_account`, `gmail_*`, `ask_user`, `confirm_submit`, `need_manual`, `verify_status`, `report_result` |
 | track | read, write | `gmail_*`, `add_step`, `update_step`, `record_outcome`, `note` |
 | import | read, write, edit, bash (typst) | `finish_import` |
 
@@ -55,10 +56,10 @@ An employer is judged once. In the practice phase, a job at an employer an earli
 - `src/server.ts`: the HTTP API. `createHandler(scheduler)` answers requests; `main()` starts the server, the proxies and the scheduler, and only runs when the file is the entry point.
 - `ui/`: the web UI, a React and Tailwind app that `src/ui.ts` bundles on request, with no build step.
 - `docs/ui.md`: how `ui/` is laid out, the API it reads, and the design rules every page keeps.
-- `src/omp.ts`: RPC client. `prompts/`: one prompt per worker.
+- `src/worker.ts`: the harness layer every worker goes through; `src/omp.ts` (RPC client) and `src/claude.ts` (Claude Code, with its MCP host-tool server) are the two harnesses. `src/cdp-tab.ts`: a browser tab the app drives itself, for prefill under Claude Code. `prompts/`: one prompt per worker.
 - `src/schema.ts`: database migrations and how a connection is opened. `src/db.ts`: jobs, status history, events and kv.
 - `src/status.ts`: the job statuses, their groups, and what each move between them writes. Every status change goes through `to`. `src/fill-state.ts`: where an application stands between approval and a recorded outcome.
-- `src/setup.ts`: what a new install still needs, for the Setup page. `src/models.ts`: omp's model list and the model per stage. `src/resume-import.ts`: uploaded files into the stock resume. `profile.example/`: the templates a new `profile/` is seeded from.
+- `src/setup.ts`: what a new install still needs, for the Setup page. `src/models.ts`: the models omp and Claude Code list, and the model per stage. `src/resume-import.ts`: uploaded files into the stock resume. `profile.example/`: the templates a new `profile/` is seeded from.
 - `src/config.ts`: reads `config.yml`; `src/config-check.ts` is what the file must look like. `src/template.ts`: fills a prompt's placeholders.
 - `deploy/systemd/`: the service and timer units. `docs/`: everything this page links to.
 - `data/`: SQLite DB, per-job resume copies, omp sessions, Chrome profile (git-ignored; holds site passwords and Gmail tokens).

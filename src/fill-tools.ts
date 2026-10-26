@@ -4,6 +4,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveAccount } from "./accounts";
 import { CAUSE_GUIDE, recordBlocker, WORKER_CAUSES } from "./blockers";
+import { connectTab } from "./cdp-tab";
 import type { JobBrowser } from "./chrome";
 import { db, notifyJobChange, writeJob, type Job } from "./db";
 import { errorMessage } from "./errors";
@@ -19,7 +20,8 @@ import {
   type FillRuntime,
   type FillSession,
 } from "./fill-session";
-import { arg, S, schema, type HostTool, type ToolArgs } from "./omp";
+import { prefill } from "./prefill";
+import { arg, S, schema, type HostTool, type ToolArgs } from "./worker";
 import {
   cancelJobGates,
   evidenceProblem,
@@ -286,4 +288,27 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
     tool.handler = args => (ownsFill(rt, session) ? handler(args) : "ERROR: stale or parked fill worker; no action recorded.");
   }
   return tools;
+}
+
+// The prefill script (src/prefill.ts), run by the app on the application's tab, for a harness that has
+// no JavaScript session to run it in itself (Claude Code). `factsPath` is what it fills from.
+export function prefillTool(rt: FillRuntime, ctx: FillContext, factsPath: string): HostTool {
+  const looked = new Set<string>();
+  return {
+    description:
+      "Fill the plain fields of the application form on the tab's current page from the candidate details, at a person's pace. Replies with what it filled, every field it left, and whether to call it again. Takes up to a few minutes.",
+    parameters: schema({ tab_id: S.str("Exact CDP tab id from application_tabs") }),
+    handler: async args => {
+      if (ctx.isVerification) return "ERROR: prefill is not available in verification-only mode.";
+      const tabId = arg.str(args, "tab_id");
+      if (!ownsFill(rt, ctx.session)) throw new Error("stale fill worker");
+      if (!ctx.jobBrowser.ownsTarget(tabId)) throw new Error("tab is outside this application's browser scope");
+      const tab = await connectTab(ctx.jobBrowser.port, tabId);
+      try {
+        return await prefill(tab, factsPath, { looked });
+      } finally {
+        tab.close();
+      }
+    },
+  };
 }

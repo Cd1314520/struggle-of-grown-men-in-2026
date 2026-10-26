@@ -6,7 +6,7 @@ import { appliedLocation, insertJob, jobsByStatus, kvGet, kvSet, logEvent, updat
 import { employersText } from "./employers";
 import { errorMessage } from "./errors";
 import { due } from "./limits";
-import { arg, S, schema, type RunWorker } from "./omp";
+import { arg, S, schema, type RunWorker } from "./worker";
 import { requireProfile } from "./profile";
 import { screenOut } from "./screen";
 import { to } from "./status";

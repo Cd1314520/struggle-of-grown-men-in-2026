@@ -10,7 +10,7 @@ import { appendFileSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path";
 import type { JobBrowser } from "../../../src/chrome";
 import type { Browser } from "../../../src/fill-session";
-import type { RunWorker, WorkerHandle, WorkerOptions } from "../../../src/omp";
+import type { RunWorker, WorkerHandle, WorkerOptions } from "../../../src/worker";
 
 const REPO = resolve(import.meta.dir, "../../..");
 const STATE = process.env["VERIFY_STATE"];

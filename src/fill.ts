@@ -8,13 +8,15 @@ import { isCapacityError } from "./errors";
 import { jobsWithCheckpoint, logEvent, updateJob, type Job } from "./db";
 import { endVerification, isSubmitting, isVerifying, queueDraftRecovery, rememberSlot } from "./fill-state";
 import { endSession, ownsFill, stopFailedFill, type FillRuntime, type FillSession } from "./fill-session";
-import { fillTools } from "./fill-tools";
+import { fillTools, prefillTool } from "./fill-tools";
 import * as gmail from "./gmail";
 import { buildFacts } from "./prefill";
 import { getOpenGate, parkGate, readCheckpoint, recordCheckpoint, resumeContext } from "./questions";
 import { freezeResume, frozenResume } from "./resume";
 import { isSettled, to, wasSent } from "./status";
-import { lowStakesRule, render } from "./worker-tools";
+import { fillTemplate } from "./template";
+import { harnessOf } from "./worker";
+import { lowStakesRule, readPrompt, render } from "./worker-tools";
 
 // The prefill script the worker imports into its JavaScript session.
 const PREFILL_MODULE = join(import.meta.dir, "prefill.ts");
@@ -117,16 +119,43 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     savedAt: new Date().toISOString(),
   };
   recordCheckpoint(job.id, session.checkpoint);
-  const tools = fillTools(rt, { job, session, dir, mailbox, isVerification, jobBrowser });
   // What the prefill script fills from (src/prefill.ts), written fresh so profile edits reach the next fill.
   const prefillFacts = join(dir, "prefill.json");
   writeFileSync(
     prefillFacts,
     JSON.stringify(buildFacts((YAML.parse(readProfile("personal.yml")) ?? {}) as Record<string, unknown>, mailbox, frozen.pdf), null, 1),
   );
+  // An omp worker drives omp's browser tool and runs the prefill script in its JavaScript session; a
+  // Claude Code one drives Playwright's MCP tools, and the app runs the prefill script for it.
+  const onClaude = harnessOf(config.models.fill) === "claude-code";
+  const ctx = { job, session, dir, mailbox, isVerification, jobBrowser };
+  const tools = fillTools(rt, ctx);
+  if (onClaude) tools["prefill"] = prefillTool(rt, ctx, prefillFacts);
+  const guide = onClaude ? "browser-claude" : "browser-omp";
+  const vars = {
+    ...job,
+    resumePdf: frozen.pdf,
+    mailbox,
+    personal: readProfile("personal.yml"),
+    answers: readProfile("answers.md"),
+    lowStakes: lowStakesRule(),
+    resumeContext: JSON.stringify(context, null, 2),
+    browserTabId: session.browser.tabId,
+    continuationNote: job.note ?? "(none)",
+    recovery: isVerification ? VERIFY_BRIEF : job.resume_sha || context.checkpoint ? RESUME_BRIEF : FIRST_BRIEF,
+    description: job.description || "(not captured; read it from the URL)",
+    captchaAttempts: 3,
+    approval:
+      job.approved_by === "auto"
+        ? "Approved by the candidate's standing auto-apply rules; they have not reviewed this application."
+        : "The candidate has reviewed and approved this application.",
+    submitRule: SUBMIT_RULE,
+    prefillModule: PREFILL_MODULE,
+    prefillFacts,
+  };
   session.handle = rt.runWorker({
     name: "fill",
-    builtins: ["read", "write", "eval"],
+    builtins: onClaude ? ["read", "write"] : ["read", "write", "eval"],
     jobId: job.id,
     model: config.models.fill,
     cwd: dir,
@@ -134,27 +163,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     cdpPort: session.browser.port,
     maxTime: isVerification ? "10m" : "24h",
     env: { DISPLAY: browser.display },
-    prompt: render("fill", {
-      ...job,
-      resumePdf: frozen.pdf,
-      mailbox,
-      personal: readProfile("personal.yml"),
-      answers: readProfile("answers.md"),
-      lowStakes: lowStakesRule(),
-      resumeContext: JSON.stringify(context, null, 2),
-      browserTabId: session.browser.tabId,
-      continuationNote: job.note ?? "(none)",
-      recovery: isVerification ? VERIFY_BRIEF : job.resume_sha || context.checkpoint ? RESUME_BRIEF : FIRST_BRIEF,
-      description: job.description || "(not captured; read it from the URL)",
-      captchaAttempts: 3,
-      approval:
-        job.approved_by === "auto"
-          ? "Approved by the candidate's standing auto-apply rules; they have not reviewed this application."
-          : "The candidate has reviewed and approved this application.",
-      submitRule: SUBMIT_RULE,
-      prefillModule: PREFILL_MODULE,
-      prefillFacts,
-    }),
+    prompt: render("fill", { ...vars, browser: fillTemplate(readPrompt(guide), vars, `prompts/${guide}.md`).trimEnd() }),
     tools,
   });
   const result = await session.handle.done;

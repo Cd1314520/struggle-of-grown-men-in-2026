@@ -64,6 +64,9 @@ describe("capacity refusals", () => {
   it("are told apart from other worker errors", () => {
     expect(isCapacityError("Codex error event: Codex is at capacity, please try again later (code=turn_rate_limit_exceeded)")).toBe(true);
     expect(isCapacityError("HTTP 429 Too Many Requests")).toBe(true);
+    expect(isCapacityError("You've hit your session limit · resets 3pm")).toBe(true);
+    expect(isCapacityError('API Error: 529 {"type":"error","error":{"type":"overloaded_error"}}')).toBe(true);
+    expect(isCapacityError("stopped after its time allowance of 20m")).toBe(false);
     expect(isCapacityError("omp exited with code 1 before finishing.")).toBe(false);
     expect(isCapacityError("no report")).toBe(false);
     expect(isCapacityError(undefined)).toBe(false);

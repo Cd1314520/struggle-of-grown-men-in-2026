@@ -6,7 +6,7 @@ import { addCompany, ATS, fetchCompany, isAts, isCampusBoard, type Posting } fro
 import { config, DATA, PROMPTS } from "./config";
 import { errorMessage } from "./errors";
 import * as gmail from "./gmail";
-import { arg, S, schema, type HostTool } from "./omp";
+import { arg, S, schema, type HostTool } from "./worker";
 import { fillTemplate } from "./template";
 
 export const readPrompt = (name: string) => readFileSync(join(PROMPTS, `${name}.md`), "utf8");

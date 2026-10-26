@@ -9,7 +9,7 @@ import { jobDir } from "./config";
 import { getJob, logEvent, type Job } from "./db";
 import { errorMessage } from "./errors";
 import { authorizeSubmit, isSubmitting } from "./fill-state";
-import { S, type RunWorker, type WorkerHandle } from "./omp";
+import { S, type RunWorker, type WorkerHandle } from "./worker";
 import { consumeSubmitApproval, parkGate, recordCheckpoint, type FillCheckpoint, type GateInput } from "./questions";
 import { frozenResume } from "./resume";
 

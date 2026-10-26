@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { mock } from "bun:test";
-import type { WorkerHandle, WorkerOptions } from "../../src/omp";
+import type { WorkerHandle, WorkerOptions } from "../../src/worker";
 import type { JobBrowser } from "../../src/chrome";
 import type { Browser } from "../../src/fill-session";
 

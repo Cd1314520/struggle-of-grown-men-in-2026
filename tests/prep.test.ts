@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { config } from "../src/config";
 import { getJob, insertJob, kvSet, updateJob } from "../src/db";
 import { countOne, usedToday } from "../src/limits";
-import type { RunWorker, ToolArgs, WorkerOptions } from "../src/omp";
+import type { RunWorker, ToolArgs, WorkerOptions } from "../src/worker";
 import { prep } from "../src/prep";
 import { screenChecklistText, screenVerdict } from "../src/rubric";
 import { to } from "../src/status";

@@ -73,6 +73,8 @@ interface TargetConnection {
   infos: Map<string, TargetInfo>;
   autoAttach: Record<string, unknown> | null;
   monitors: Map<number, string>;
+  // createTarget replies held until the new page's attachment is announced, as Chrome orders them.
+  held: Map<number, string>;
   watched: Set<string>;
   autoSessions: Set<string>;
   announced: Set<string>;
@@ -320,6 +322,13 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
     const requestId = inject(connOf(ws), {}, "Target.attachToTarget", { targetId: id, flatten: true });
     state.monitors.set(requestId, id);
   }
+  // Sends `reply` once the attachment in flight for target `id` has been announced, or now if there is none.
+  function afterAttach(ws: ServerWebSocket<ProxyClient>, id: string, reply: string) {
+    const state = targetsOf(ws);
+    const pending = [...state.monitors].find(([, target]) => target === id)?.[0];
+    if (pending === undefined) ws.send(reply);
+    else state.held.set(pending, reply);
+  }
   function retireSession(ws: ServerWebSocket<ProxyClient>, sessionId: string) {
     const state = targetsOf(ws);
     const target = state.sessions.get(sessionId);
@@ -364,6 +373,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
                 infos: new Map(),
                 autoAttach: null,
                 monitors: new Map(),
+                held: new Map(),
                 watched: new Set(),
                 autoSessions: new Set(),
                 announced: new Set(),
@@ -372,6 +382,8 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
             : undefined;
         return server.upgrade(req, { data: { path: url.pathname + url.search, targets } }) ? undefined : new Response("upgrade failed", { status: 400 });
       }
+      // Playwright asks for `/json/version/`; Chrome answers either spelling.
+      if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, "");
       if (scope) {
         const actionId = /^\/json\/(?:activate|close)\/([^/]+)$/.exec(url.pathname)?.[1];
         if (actionId !== undefined && !ownsTarget(actionId)) return new Response("target is outside this application", { status: 403 });
@@ -484,6 +496,8 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
           if (msg.id !== undefined && conn.injected.delete(msg.id)) {
             const target = state?.monitors.get(msg.id);
             state?.monitors.delete(msg.id);
+            const held = state?.held.get(msg.id);
+            state?.held.delete(msg.id);
             if (msg.error && state) {
               logEvent("error", "Scoped CDP internal command failed; browser connection closed");
               ws.close();
@@ -492,6 +506,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
               state.autoSessions.add(msg.result["sessionId"]);
               if (state.autoAttach) inject(conn, { sessionId: msg.result["sessionId"] }, "Target.setAutoAttach", state.autoAttach);
             }
+            if (held !== undefined && !msg.error) ws.send(held);
             return;
           }
           if (!state) {
@@ -534,6 +549,8 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
               const info = state.infos.get(id);
               if (info) announce(ws, info);
               watch(ws, id);
+              afterAttach(ws, id, JSON.stringify({ id: msg.id, sessionId: msg.sessionId, result: msg.result }));
+              return;
             } else if (request.method === "Target.setAutoAttach" && !request.sessionId && !state.pageId && request.params["autoAttach"] === true) {
               if (typeof msg.result?.["sessionId"] !== "string") {
                 ws.close();
@@ -585,6 +602,9 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
               if (watchedTarget !== target) continue;
               state.monitors.delete(requestId);
               conn.injected.delete(requestId);
+              const held = state.held.get(requestId);
+              state.held.delete(requestId);
+              if (held !== undefined) ws.send(held);
             }
             // Ownership outlives discovery for lost-tab checkpoints.
             if (!ownsTarget(target)) return;

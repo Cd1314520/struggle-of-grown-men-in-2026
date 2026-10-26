@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 const { DATA, PROFILE, RESUME_DIR, ROOT, STOCK_MAIN } = await import("../../src/config");
 const imp = await import("../../src/resume-import");
-type RunWorker = import("../../src/omp").RunWorker;
+type RunWorker = import("../../src/worker").RunWorker;
 type WorkerOptions = Parameters<RunWorker>[0];
 
 mkdirSync(RESUME_DIR, { recursive: true });

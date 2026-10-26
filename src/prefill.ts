@@ -1,6 +1,8 @@
 // Prefill: fills the plain fields of an application form before the fill agent reads it, so the agent
-// spends its turns only on what needs judgment. The fill agent imports this module into its own
-// JavaScript session and calls `prefill(tab, factsPath)` with its browser tab (prompts/fill.md).
+// spends its turns only on what needs judgment. An omp fill agent imports this module into its own
+// JavaScript session and calls `prefill(tab, factsPath)` with its browser tab (prompts/browser-omp.md);
+// for a Claude Code one, which has no such session, the app runs it over CDP (src/cdp-tab.ts) when the
+// agent calls the `prefill` host tool.
 //
 // It fills only what the candidate details settle with no judgment: name, contact, address, links,
 // current job, school, the resume upload, and the plain eligibility, EEO, referral, source and text
@@ -9,10 +11,10 @@
 // the agent is told to: one field at a time, top to bottom, clicking and then typing, with every
 // input paced by the browser's proxy like the agent's own.
 //
-// Runs inside omp's JavaScript session, not the app: it must import nothing from the app.
+// Runs inside omp's JavaScript session as well as the app: it must import nothing from the app.
 import { readFileSync } from "node:fs";
 
-// The part of omp's browser tab this uses.
+// The part of omp's browser tab this uses (src/cdp-tab.ts gives the same).
 export interface Tab {
   evaluate(code: string): Promise<unknown>;
   click(selector: string): Promise<unknown>;
@@ -357,11 +359,12 @@ export function reportText(r: Report): string {
  * what it left. Stops starting new fields after `budgetMs`; it then reports `more: true`, and calling
  * it again carries on, skipping what is done.
  */
-export async function prefill(tab: Tab, factsPath: string, opts: { budgetMs?: number } = {}): Promise<string> {
-  return reportText(await prefillForm(tab, factsPath, opts.budgetMs ?? 100_000));
+export async function prefill(tab: Tab, factsPath: string, opts: { budgetMs?: number; looked?: Set<string> } = {}): Promise<string> {
+  return reportText(await prefillForm(tab, factsPath, opts.budgetMs ?? 100_000, opts.looked ?? looked));
 }
 
-async function prefillForm(tab: Tab, factsPath: string, budgetMs: number): Promise<Report> {
+// `looked`: pages already scrolled through by this worker. omp's session holds this module for one worker; the app passes one set per worker.
+async function prefillForm(tab: Tab, factsPath: string, budgetMs: number, looked: Set<string>): Promise<Report> {
   const facts = JSON.parse(readFileSync(factsPath, "utf8")) as Facts;
   const until = Date.now() + budgetMs;
   const url = String(await tab.evaluate("location.href"));

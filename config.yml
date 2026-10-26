@@ -25,7 +25,8 @@ questionDigest:
 # real = apply to the roles in the Real phase section of profile/targets.md.
 phase: practice
 
-# Models per stage. null = whatever omp's default role resolves to. Settings → Models changes them
+# Models per stage. null = whatever omp's default role resolves to. A claude-code/<model> one (claude-code/opus,
+# claude-code/sonnet, ...) runs on Claude Code instead of omp (docs/harnesses.md). Settings → Models changes them
 # without a restart, writing the choice to config.local.yml.
 models:
   triage: openai-codex/gpt-6-luna # pass over raw titles

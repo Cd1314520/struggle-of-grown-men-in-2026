@@ -6,7 +6,7 @@ import { basename, join } from "node:path";
 import { config, DATA, PROFILE, readProfile, RESUME_DIR, STOCK_MAIN } from "./config";
 import { lastEventId, logEvent, workerEvents } from "./db";
 import { errorMessage } from "./errors";
-import { arg, S, schema, type RunWorker, type WorkerHandle } from "./omp";
+import { arg, S, schema, type RunWorker, type WorkerHandle } from "./worker";
 import { MAIN, pageCount, PDF_NAME } from "./resume";
 import { readPrompt } from "./worker-tools";
 import { fillTemplate } from "./template";

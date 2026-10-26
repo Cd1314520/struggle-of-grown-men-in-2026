@@ -1,9 +1,9 @@
-// Models: which model each kind of agent work runs on. The list is what omp can reach on this machine; a
-// choice is saved to config.local.yml and used from that stage's next run.
+// Models: which model each kind of agent work runs on. The list is what omp and Claude Code can reach on
+// this machine; a choice is saved to config.local.yml and used from that stage's next run.
 import { FileCog, RefreshCw, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import type { CatalogModel, ModelStage } from "../../../src/api-types";
+import type { CatalogModel, ModelCatalog, ModelStage } from "../../../src/api-types";
 import { Button, Callout, Combobox, Skeleton, type ComboOption } from "../../components/ui";
 import { api, queryClient, refreshAll, useModels } from "../../lib/api";
 import { SettingRow, SettingsCard, SettingsSection } from "./parts";
@@ -22,6 +22,11 @@ export const STAGES: readonly { stage: ModelStage; label: string; description: s
 ];
 
 const DEFAULT = "__default__";
+// Each harness: its name, and how to sign it in on this machine.
+const HARNESSES: { id: keyof ModelCatalog["errors"]; label: string; login: string }[] = [
+  { id: "omp", label: "omp", login: "omp login" },
+  { id: "claude-code", label: "Claude Code", login: "claude auth login" },
+];
 const price = (n: number) => (n >= 10 ? n.toFixed(0) : n >= 1 ? n.toFixed(1).replace(/\.0$/, "") : n.toFixed(2));
 const option = (m: CatalogModel): ComboOption => ({
   value: m.selector,
@@ -59,8 +64,8 @@ function StageRow({
       setSaving(false);
     }
   };
-  // A model named in the config that omp does not list still shows as chosen.
-  const all = value && !options.some(o => o.value === value) ? [...options, { value, label: value, group: "Not in omp's list" }] : options;
+  // A model named in the config that is not listed still shows as chosen.
+  const all = value && !options.some(o => o.value === value) ? [...options, { value, label: value, group: "Not listed" }] : options;
   return (
     <SettingRow stack label={label} description={description}>
       <Combobox
@@ -115,33 +120,36 @@ export function Models() {
     <SettingsSection
       id="models"
       title="Models"
-      description="Which model each kind of agent work runs on. Every agent runs through omp, so the list is what omp can reach here."
+      description="Which model each kind of agent work runs on. A claude-code model runs through Claude Code (claude -p) as signed in on this machine; any other through omp. The list is what the two can reach here."
     >
-      {data?.catalog.error ? (
-        <Callout
-          tone="warning"
-          icon={<TriangleAlert />}
-          title="omp couldn't list its models"
-          action={
-            <Button size="sm" icon={<RefreshCw />} loading={refreshing} onClick={() => void refresh()}>
-              Try again
-            </Button>
-          }
-        >
-          {data.catalog.error}. Log in to a provider with <code className="font-mono text-xs">omp login</code> on this machine. A model can still be typed by
-          name.
-        </Callout>
-      ) : (
-        data && (
-          <div className="-mt-1 flex items-center gap-3 text-sm text-fg-muted">
-            <span className="flex-1">
-              {data.catalog.models.length} models from {new Set(data.catalog.models.map(m => m.provider)).size} providers.
-            </span>
-            <Button size="sm" variant="ghost" icon={<RefreshCw />} loading={refreshing} onClick={() => void refresh()}>
-              Refresh list
-            </Button>
-          </div>
-        )
+      {HARNESSES.map(h => {
+        const error = data?.catalog.errors[h.id];
+        return error ? (
+          <Callout
+            key={h.id}
+            tone="warning"
+            icon={<TriangleAlert />}
+            title={`${h.label} couldn't list its models`}
+            action={
+              <Button size="sm" icon={<RefreshCw />} loading={refreshing} onClick={() => void refresh()}>
+                Try again
+              </Button>
+            }
+          >
+            {error}. Sign in with <code className="font-mono text-xs">{h.login}</code> on this machine, if you mean to use it. A model can still be typed by
+            name.
+          </Callout>
+        ) : null;
+      })}
+      {data && data.catalog.models.length > 0 && (
+        <div className="-mt-1 flex items-center gap-3 text-sm text-fg-muted">
+          <span className="flex-1">
+            {data.catalog.models.length} models from {new Set(data.catalog.models.map(m => m.provider)).size} providers.
+          </span>
+          <Button size="sm" variant="ghost" icon={<RefreshCw />} loading={refreshing} onClick={() => void refresh()}>
+            Refresh list
+          </Button>
+        </div>
       )}
       {isPending ? (
         <Skeleton className="h-72 rounded-xl" />

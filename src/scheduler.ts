@@ -30,7 +30,7 @@ import { beginAttempt, dropManualLease, endVerification, isRecovering, isSubmitt
 import { backedOff, backOff, clearBackoff, countOne, due, usedToday } from "./limits";
 import { preferUsListings } from "./listings";
 import { locateEmployerPostings, locatePerDay } from "./locate";
-import { runWorker, type RunWorker } from "./omp";
+import { runWorker, type RunWorker } from "./worker";
 import { needsJudgment, parsePracticeAssessment } from "./practice";
 import { prep } from "./prep";
 import { profileProblems } from "./profile";

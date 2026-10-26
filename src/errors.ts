@@ -4,4 +4,4 @@ export const errorMessage = (err: unknown): string => (err instanceof Error ? er
 // The model provider turned the request away for load or quota, not because of the job: the same
 // work can run again once it has capacity.
 export const isCapacityError = (message: string | null | undefined): boolean =>
-  !!message && /at capacity|rate[ _-]?limit|too many requests|\b429\b|overloaded|usage limit/i.test(message);
+  !!message && /at capacity|rate[ _-]?limit|too many requests|\b429\b|overloaded|usage limit|hit your (?:\w+ )?limit/i.test(message);

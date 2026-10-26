@@ -3,7 +3,7 @@
 import { config } from "./config";
 import { applicationsAwaitingOutcome, kvGet, kvSet, logEvent, type Job } from "./db";
 import * as gmail from "./gmail";
-import { arg, S, schema, type RunWorker } from "./omp";
+import { arg, S, schema, type RunWorker } from "./worker";
 import { addStep, changeStep, getStep, openSteps, recordOutcome, STEP_KINDS, stepMs, type Step } from "./steps";
 import { gmailTools, render, workDir } from "./worker-tools";
 

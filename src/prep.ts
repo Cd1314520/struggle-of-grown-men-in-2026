@@ -6,7 +6,7 @@ import { appliedLocation, employerApplications, getJob, jobSources, kvGet, logEv
 import { deferApproval, forgetDeferredApproval } from "./deferred-approvals";
 import { countOne, uncountOne, usedToday } from "./limits";
 import { placeOf } from "./location";
-import { arg, S, schema, type RunWorker } from "./omp";
+import { arg, S, schema, type RunWorker } from "./worker";
 import { employerListing, employersText, rememberedEmployer } from "./employers";
 import { isCapacityError } from "./errors";
 import { assessPractice, EMPLOYER_LABELS, EMPLOYER_TYPES, type PracticeAssessment } from "./practice";
