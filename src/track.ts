@@ -112,7 +112,9 @@ export async function trackMailbox(run: RunWorker) {
         handler: args =>
           attempt(() => {
             const step = getStep(arg.int(args, "step_id"));
-            if (!step || !listed(step.job_id)) return "ERROR: unknown step id.";
+            const job = step && listed(step.job_id);
+            if (!step || !job) return "ERROR: unknown step id.";
+            if (job.status === "rejected_by_company") return "ERROR: that application was rejected, which closed its steps.";
             const state = arg.oneOf(args, "state", MAIL_STEP_STATES),
               note = arg.str(args, "note");
             const scheduledAt = arg.optStr(args, "scheduled_at");
@@ -135,6 +137,7 @@ export async function trackMailbox(run: RunWorker) {
             const status = arg.oneOf(args, "status", ENDINGS),
               note = arg.str(args, "note");
             recordOutcome(job.id, status, note);
+            job.status = status; // so later mail in this run cannot add steps to it
             logEvent("mail", `${status}: ${note}`, job.id, "track");
             return "Recorded.";
           }),

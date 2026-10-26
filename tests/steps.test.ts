@@ -108,6 +108,25 @@ describe("application steps", () => {
   `);
   });
 
+  it("returns an application to waiting when its only steps are removed as mistakes", () => {
+    scenario(`
+    job(1);
+    const a = steps.addStep(getJob(1), { kind: "questionnaire", title: "Feedback survey", source: "mail", message_id: "m1" }).id;
+    const b = steps.addStep(getJob(1), { kind: "other", title: "Create an account", source: "mail", message_id: "m1" }).id;
+    steps.removeStep(a);
+    assert.equal(getJob(1).status, "interview");
+    steps.removeStep(b);
+    assert.equal(getJob(1).status, "submitted");
+
+    // A removed step leaves an ended application alone.
+    job(2);
+    const c = steps.addStep(getJob(2), { kind: "other", title: "x", source: "mail" }).id;
+    steps.recordOutcome(2, "rejected_by_company", "not moving forward");
+    steps.removeStep(c);
+    assert.equal(getJob(2).status, "rejected_by_company");
+  `);
+  });
+
   it("lists steps still to do that are due within the window", () => {
     scenario(`
     job(1);
@@ -143,6 +162,29 @@ describe("the mailbox agent's brief", () => {
       "   step " + d + ' · interview · "Screen" · held 2026-10-20T15:00:00.000Z: waiting on Acme',
       "2 | Acme | Engineer 2 | 2026-10-01",
     ].join(String.fromCharCode(10)));
+  `);
+  });
+
+  it("keeps a rejection read earlier in the run from being undone by later mail", () => {
+    scenario(`
+    const { kvSet } = await import(${JSON.stringify(join(import.meta.dir, "../src/db.ts"))});
+    const { trackMailbox } = await import(${JSON.stringify(join(import.meta.dir, "../src/track.ts"))});
+    kvSet("gmail.refresh", "token");
+    job(1);
+    const a = steps.addStep(getJob(1), { kind: "assessment", title: "OA", source: "mail" }).id;
+    const replies = [];
+    await trackMailbox(opts => {
+      const call = (name, args) => replies.push(opts.tools[name].handler(args));
+      call("record_outcome", { job_id: 1, status: "rejected_by_company", note: "not moving forward" });
+      call("add_step", { job_id: 1, kind: "questionnaire", title: "Survey", message_id: "m2" });
+      call("update_step", { step_id: a, state: "done", note: "got it" });
+      return { done: Promise.resolve({ status: "completed", lastText: "" }), abort: () => undefined };
+    });
+    assert.equal(replies[0], "Recorded.");
+    assert.match(replies[1], /^ERROR: .*in process/);
+    assert.match(replies[2], /^ERROR: .*rejected/);
+    assert.equal(getJob(1).status, "rejected_by_company");
+    assert.deepEqual(steps.jobSteps(1).map(s => s.state), ["closed"]);
   `);
   });
 });

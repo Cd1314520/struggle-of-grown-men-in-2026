@@ -8,7 +8,7 @@
 //   closed     the employer followed up, or the application ended
 //   expired    the deadline or link ran out
 //   cancelled  dropped, by the employer or by the user
-import { db, notifyJobChange, writeJob, type Job } from "./db";
+import { db, getJob, notifyJobChange, writeJob, type Job } from "./db";
 import { to, type Status } from "./status";
 
 export const STEP_KINDS = ["questionnaire", "assessment", "schedule", "interview", "info_request", "other"] as const;
@@ -152,11 +152,15 @@ export function changeStep(id: number, change: StepChange): Step {
   return getStep(id) ?? next;
 }
 
-// For a step entered by mistake, by the agent or the user.
+// For a step entered by mistake, by the agent or the user. With no steps left, the application is
+// back to waiting on the employer, as reopening would leave it.
 export function removeStep(id: number) {
   const step = getStep(id);
   if (!step) return;
-  db.query("DELETE FROM application_steps WHERE id = ?").run(id);
+  db.transaction(() => {
+    db.query("DELETE FROM application_steps WHERE id = ?").run(id);
+    if (getJob(step.job_id)?.status === "interview" && !jobSteps(step.job_id).length) writeJob(step.job_id, to.outcome("submitted", `removed: ${step.title}`));
+  }).immediate();
   notifyJobChange(step.job_id);
 }
 
