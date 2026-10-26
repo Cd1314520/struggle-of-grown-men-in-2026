@@ -1,6 +1,7 @@
 // Fill: one worker drives one browser through one application, from the frozen resume to a recorded outcome.
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import YAML from "yaml";
 import { checkAutoApprovedPractice } from "./auto";
 import { browserSlot, config, jobDir, readProfile } from "./config";
 import { isCapacityError } from "./errors";
@@ -9,10 +10,14 @@ import { endVerification, isSubmitting, isVerifying, queueDraftRecovery, remembe
 import { endSession, ownsFill, stopFailedFill, type FillRuntime, type FillSession } from "./fill-session";
 import { fillTools } from "./fill-tools";
 import * as gmail from "./gmail";
+import { buildFacts } from "./prefill";
 import { getOpenGate, parkGate, readCheckpoint, recordCheckpoint, resumeContext } from "./questions";
 import { freezeResume, frozenResume } from "./resume";
 import { isSettled, to, wasSent } from "./status";
 import { lowStakesRule, render } from "./worker-tools";
+
+// The prefill script the worker imports into its JavaScript session.
+const PREFILL_MODULE = join(import.meta.dir, "prefill.ts");
 
 // What the worker is told about where this application stands.
 const VERIFY_BRIEF =
@@ -113,6 +118,12 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   };
   recordCheckpoint(job.id, session.checkpoint);
   const tools = fillTools(rt, { job, session, dir, mailbox, isVerification, jobBrowser });
+  // What the prefill script fills from (src/prefill.ts), written fresh so profile edits reach the next fill.
+  const prefillFacts = join(dir, "prefill.json");
+  writeFileSync(
+    prefillFacts,
+    JSON.stringify(buildFacts((YAML.parse(readProfile("personal.yml")) ?? {}) as Record<string, unknown>, mailbox, frozen.pdf), null, 1),
+  );
   session.handle = rt.runWorker({
     name: "fill",
     builtins: ["read", "write", "eval"],
@@ -141,6 +152,8 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
           ? "Approved by the candidate's standing auto-apply rules; they have not reviewed this application."
           : "The candidate has reviewed and approved this application.",
       submitRule: SUBMIT_RULE,
+      prefillModule: PREFILL_MODULE,
+      prefillFacts,
     }),
     tools,
   });
