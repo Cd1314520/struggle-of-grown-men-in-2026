@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { boardHost, boardOf, fetchCompany, htmlToText, jsonLdDescription } from "../src/ats";
+import { boardHost, boardOf, fetchCompany, htmlToText, isCampusBoard, jsonLdDescription } from "../src/ats";
 
 describe("posting text", () => {
   it("drops elements hidden from the page, with everything inside them", () => {
@@ -77,6 +77,24 @@ describe("boards from a posting's URL", () => {
     expect(boardHost({ name: "A", ats: "adp", slug: "a" })).toBe(boardHost({ name: "B", ats: "adp", slug: "b" }));
     expect(boardHost({ name: "A", ats: "icims", slug: "careers-a" })).not.toBe(boardHost({ name: "B", ats: "icims", slug: "careers-b" }));
     expect(boardHost({ name: "A", ats: "oracle", slug: "a.fa.us2.oraclecloud.com/CX" })).toBe("a.fa.us2.oraclecloud.com");
+  });
+
+  it("knows a campus board, which is never watched", () => {
+    for (const [name, slug] of [
+      ["Manhattan Associates", "manh.wd5/Campus"],
+      ["ID.me University Recruiting", "idmeuniversityrecruiting"],
+      ["Barrios Technology", "collegerecruitment-barrios"],
+      ["Acme", "acme.wd1/Early_Careers"],
+      ["Acme Internships", "acme"],
+    ] as [string, string][])
+      expect(isCampusBoard({ name, slug })).toBe(true);
+    for (const [name, slug] of [
+      ["HUB International", "hubinternational.wd1/HUBInternational"],
+      ["College Board", "collegeboard.wd1/Careers"],
+      ["Gradient Robotics", "gradientrobotics"],
+      ["EASTERN CT STATE UNIVERSITY", "easternctstateuniversity"],
+    ] as [string, string][])
+      expect(isCampusBoard({ name, slug })).toBe(false);
   });
 });
 

@@ -53,9 +53,13 @@ export function loadCompanies(): Company[] {
   }
 }
 
+// A board of only internships and new-grad programmes, which the targets rule out: never watched.
+const CAMPUS = /campus|(university|college)[\s_-]*(recruit|hiring)|early[\s_-]*careers?|internships?|\binterns?\b|new[\s_-]*grads?\b/i;
+export const isCampusBoard = (c: Pick<Company, "name" | "slug">) => CAMPUS.test(c.name) || CAMPUS.test(c.slug);
+
 export function addCompany(c: Company): boolean {
   const all = loadCompanies();
-  if (all.some(sameBoard(c))) return false;
+  if (isCampusBoard(c) || all.some(sameBoard(c))) return false;
   all.push(c);
   writeFileSync(companiesPath, YAML.stringify({ companies: all }));
   return true;
