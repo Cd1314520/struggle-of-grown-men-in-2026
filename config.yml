@@ -29,15 +29,15 @@ phase: practice
 # claude-code/sonnet, ...) runs on Claude Code instead of omp (docs/harnesses.md). Settings → Models changes them
 # without a restart, writing the choice to config.local.yml.
 models:
-  triage: openai-codex/gpt-6-luna # pass over raw titles
-  discover: openai-codex/gpt-6.1-terra # web search for companies and postings
-  locate: openai-codex/gpt-6.1-terra # web search for the employer's own posting of a LinkedIn/Indeed job
-  screen: openai-codex/gpt-6-luna # reads each posting for plain dealbreakers before prep
-  prep: openai-codex/gpt-6.1-terra # scoring + resume tailoring
-  fill: openai-codex/gpt-6.1-terra # form filling in the browser
-  track: openai-codex/gpt-6.1-terra
-  recheck: openai-codex/gpt-6.1-terra # answers parked questions the profile now settles
-  import: openai-codex/gpt-6.1-terra # turns uploaded resume files into the Typst resume (Resume page)
+  triage: claude-code/claude-haiku-5-5 # pass over raw titles
+  discover: claude-code/opus # web search for companies and postings
+  locate: claude-code/opus # web search for the employer's own posting of a LinkedIn/Indeed job
+  screen: claude-code/claude-haiku-5-5 # reads each posting for plain dealbreakers before prep
+  prep: claude-code/opus # scoring + resume tailoring
+  fill: claude-code/opus # form filling in the browser
+  track: claude-code/opus
+  recheck: claude-code/opus # answers parked questions the profile now settles
+  import: claude-code/opus # turns uploaded resume files into the Typst resume (Resume page)
 
 # Scoring weights and thresholds live in profile/rubric.yml.
 
