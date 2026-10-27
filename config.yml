@@ -30,12 +30,12 @@ phase: practice
 # without a restart, writing the choice to config.local.yml.
 models:
   triage: claude-code/claude-haiku-5-5 # pass over raw titles
-  discover: claude-code/opus # web search for companies and postings
-  locate: claude-code/opus # web search for the employer's own posting of a LinkedIn/Indeed job
+  discover: claude-code/sonnet # web search for companies and postings
+  locate: claude-code/sonnet # web search for the employer's own posting of a LinkedIn/Indeed job
   screen: claude-code/claude-haiku-5-5 # reads each posting for plain dealbreakers before prep
-  prep: claude-code/opus # scoring + resume tailoring
+  prep: claude-code/sonnet # scoring + resume tailoring
   fill: claude-code/opus # form filling in the browser
-  track: claude-code/opus
+  track: claude-code/sonnet
   recheck: claude-code/opus # answers parked questions the profile now settles
   import: claude-code/opus # turns uploaded resume files into the Typst resume (Resume page)
 
