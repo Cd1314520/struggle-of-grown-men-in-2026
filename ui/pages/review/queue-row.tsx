@@ -1,9 +1,11 @@
-// One job in the review queue: the employer's mark, the role and who posts it, and fit over age at the right.
+// One job in the review queue: the employer's mark, the role, who posts it and where, and the fit at the
+// right. The age is the time band's over it.
 import { CircleCheck } from "lucide-react";
 import type { ListRow as Row } from "../../../src/api-types";
 import type { RowLink } from "../../components/list";
-import { CompanyMark, ListRow, Score, Time, Tooltip } from "../../components/ui";
+import { CompanyMark, ListRow, Tooltip } from "../../components/ui";
 import { place, plural, unent } from "../../lib/format";
+import { FitFact } from "../job/fit";
 
 export function QueueRow({
   job,
@@ -16,8 +18,17 @@ export function QueueRow({
   underCompany: boolean; // listed under its employer's heading: the line under the title gives the place instead
   link: RowLink;
 }) {
-  // The accent dot is the one sign of a fresh posting; the age beside it stays plain.
+  // The accent dot is the one sign of a fresh posting.
   const fresh = job.group === "new";
+  const where = !!job.location?.trim() && <span title={job.location}>{place(job.location)}</span>;
+  // Applied here before: a tick after the employer's name.
+  const applied = job.appliedThere > 0 && (
+    <Tooltip content={`You have applied here ${job.appliedThere === 1 ? "once" : `${job.appliedThere} times`}`}>
+      <span role="img" aria-label={`Applied here ${plural(job.appliedThere, "time")}`} className="flex text-fg-subtle">
+        <CircleCheck className="size-3.5" />
+      </span>
+    </Tooltip>
+  );
   return (
     <ListRow
       {...link}
@@ -33,25 +44,20 @@ export function QueueRow({
           {unent(job.title)}
         </>
       }
+      // Under its employer the place is all the line needs; otherwise the employer, then how many of its
+      // roles wait here or, with one, where it is.
       secondary={
-        <>
-          {underCompany ? <span title={job.location ?? undefined}>{place(job.location)}</span> : <span>{unent(job.company)}</span>}
-          {!underCompany && job.companyCount > 1 && <span className="tabular">{job.companyCount} to review</span>}
-          {job.appliedThere > 0 && (
-            <Tooltip content={`You have applied here ${job.appliedThere === 1 ? "once" : `${job.appliedThere} times`}`}>
-              <span role="img" aria-label={`Applied here ${plural(job.appliedThere, "time")}`} className="flex text-fg-subtle">
-                <CircleCheck className="size-3.5" />
-              </span>
-            </Tooltip>
-          )}
-        </>
+        underCompany ? (
+          where
+        ) : (
+          <>
+            <span>{unent(job.company)}</span>
+            {applied}
+          </>
+        )
       }
-      trail={
-        <>
-          <Score value={job.score} threshold={threshold} />
-          <Time at={job.opened_at} short />
-        </>
-      }
+      gist={!underCompany && (job.companyCount > 1 ? <span className="tabular">{job.companyCount} to review</span> : where)}
+      fact={<FitFact value={job.score} threshold={threshold} />}
     />
   );
 }

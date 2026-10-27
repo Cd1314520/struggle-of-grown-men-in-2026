@@ -139,3 +139,13 @@ export function Fit({ job, phase, threshold }: { job: JobDetail; phase: Phase; t
     </div>
   );
 }
+
+// A list row's one fact where the fit is what matters: "Fit 88", the number toned as everywhere else.
+export function FitFact({ value, threshold }: { value: number | null; threshold: number | null }) {
+  return (
+    <span className="flex items-baseline gap-1">
+      Fit
+      <Score value={value} threshold={threshold} />
+    </span>
+  );
+}

@@ -13,7 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { Summary } from "../../../src/api-types";
-import { ListIcon, ListPanel, ListRow, SkeletonRows } from "../../components/ui";
+import { ListBody, ListGroup, ListIcon, ListRow } from "../../components/ui";
 import { num } from "../../lib/format";
 import { PROFILE_LABEL } from "../../lib/labels";
 
@@ -102,18 +102,17 @@ export function attentionRows(s: Summary): Row[] {
 export function NeedsYou({ summary }: { summary: Summary | undefined }) {
   const rows = summary ? attentionRows(summary) : null;
   return (
-    <ListPanel frame="card" title="Needs you">
-      {!rows ? (
-        <SkeletonRows rows={3} />
-      ) : rows.length ? (
+    <ListBody label="Needs you" loading={!rows} className="border-b border-border">
+      <ListGroup label="Needs you" sticky={false} />
+      {rows?.length ? (
         rows.map(r => (
           <ListRow
             key={r.key}
             href={r.href}
             lead={<ListIcon icon={r.icon} tone={r.tone} />}
             title={r.label}
-            snippet={r.hint}
-            trail={
+            gist={r.hint}
+            fact={
               <span className="flex items-center gap-1.5">
                 <span className="tabular text-base font-semibold text-fg">{num(r.count)}</span>
                 <ChevronRight className="size-4 text-fg-subtle transition-transform group-hover:translate-x-0.5" />
@@ -122,8 +121,8 @@ export function NeedsYou({ summary }: { summary: Summary | undefined }) {
           />
         ))
       ) : (
-        <ListRow lead={<ListIcon icon={CircleCheck} tone="success" />} title="All clear" snippet="New matches land in Review as soon as they are assessed." />
+        <ListRow lead={<ListIcon icon={CircleCheck} tone="success" />} title="All clear" gist="New matches land in Review as soon as they are assessed." />
       )}
-    </ListPanel>
+    </ListBody>
   );
 }

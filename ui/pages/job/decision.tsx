@@ -27,7 +27,6 @@ import { toast } from "sonner";
 import type { JobDetail } from "../../../src/api-types";
 import {
   Button,
-  Card,
   Clamp,
   ConfirmDialog,
   Dialog,
@@ -820,12 +819,12 @@ function Evidence({ job }: { job: JobDetail }) {
   );
 }
 
-// A gate the agent stopped at, or the work in flight: a card above the job's content, the only framed
-// block in a job.
+// A gate the agent stopped at, or the work in flight: the band above the job's tabs (detail.tsx frames it),
+// the one tinted block in a job.
 export function DecisionCard({ d, job, busy }: { d: Decision; job: JobDetail; busy: string | null }) {
   const hasActions = !!d.primary || d.secondary.length > 0;
   return (
-    <Card className="p-4 sm:p-5" data-decision={d.title}>
+    <section data-decision={d.title}>
       <div className="flex items-start gap-3">
         <ListIcon icon={d.icon} tone={d.tone} />
         <div className="min-w-0 flex-1 pt-0.5">
@@ -866,7 +865,7 @@ export function DecisionCard({ d, job, busy }: { d: Decision; job: JobDetail; bu
           {d.evidence && <Evidence job={job} />}
         </div>
       )}
-    </Card>
+    </section>
   );
 }
 
@@ -874,29 +873,30 @@ export function DecisionCard({ d, job, busy }: { d: Decision; job: JobDetail; bu
 // With no room for its text the bar's buttons share its width.
 const FILL = "max-sm:h-9 @max-lg:flex-1 max-sm:[&_kbd]:hidden";
 
-// On a page of its own it floats over the foot of the job's card, clear of the phone's tab bar.
-export function DecisionBar({ d, busy, floating }: { d: Decision; busy: string | null; floating: boolean }) {
+// On a page of its own it docks at the foot of the window across the sheet, clear of the phone's tab bar.
+export function DecisionBar({ d, busy, docked }: { d: Decision; busy: string | null; docked: boolean }) {
   return (
     <div
       className={cn(
-        "@container flex items-center gap-3 bg-surface/95 backdrop-blur",
-        floating
-          ? "sticky bottom-[calc(4.25rem+env(safe-area-inset-bottom))] mx-3 mt-2 mb-3 animate-slide-up rounded-xl border border-border py-2.5 pr-2.5 pl-4 shadow-lg sm:mx-4 sm:mb-4 lg:bottom-5"
-          : "border-t border-border px-4 py-3 sm:px-6",
+        "border-t border-border bg-surface/95 backdrop-blur",
+        docked ? "sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 animate-slide-up px-(--list-x) py-3 lg:bottom-0" : "px-4 py-3 sm:px-6",
       )}
       data-decision={d.title}
     >
-      {/* Where the buttons leave too little room to read it (a phone, a narrow panel), the buttons fill the
-          bar: the header already says what the job waits on. */}
-      <div className={cn("min-w-0 flex-1", (d.primary ?? d.secondary.length) && "hidden @lg:block")}>
-        <p className="truncate text-sm font-medium text-fg">{d.title}</p>
-        {d.lead && <div className="line-clamp-2 text-sm text-fg-muted">{d.lead}</div>}
+      {/* The rule runs across the sheet; the buttons end where the job's content does. */}
+      <div className="@container flex max-w-3xl items-center gap-3">
+        {/* Where the buttons leave too little room to read it (a phone, a narrow panel), the buttons fill the
+            bar: the header already says what the job waits on. */}
+        <div className={cn("min-w-0 flex-1", (d.primary ?? d.secondary.length) && "hidden @lg:block")}>
+          <p className="truncate text-sm font-medium text-fg">{d.title}</p>
+          {d.lead && <div className="line-clamp-2 text-sm text-fg-muted">{d.lead}</div>}
+        </div>
+        <MoreMenu acts={d.menu} busy={busy} />
+        {d.secondary.map(x => (
+          <ActButton key={x.key + x.label} act={x} busy={busy} className={FILL} />
+        ))}
+        {d.primary && <ActButton act={d.primary} busy={busy} variant="primary" className={FILL} />}
       </div>
-      <MoreMenu acts={d.menu} busy={busy} />
-      {d.secondary.map(x => (
-        <ActButton key={x.key + x.label} act={x} busy={busy} className={FILL} />
-      ))}
-      {d.primary && <ActButton act={d.primary} busy={busy} variant="primary" className={FILL} />}
     </div>
   );
 }

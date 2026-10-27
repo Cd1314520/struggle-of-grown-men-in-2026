@@ -2,30 +2,34 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import { Button, ListFooter, Tooltip } from "../../components/ui";
+import { Button, ListFooter, Tooltip, type WorkspaceBarProps } from "../../components/ui";
 import { api } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { clock, dateTime, parseAt } from "../../lib/format";
 import { href } from "../../lib/router";
 import type { FeedJob } from "./feed";
 
-// What every tab's panel is headed by: the tabs, and below lg the Run menu beside them.
+// What every tab's bar holds: the page's title and tabs, and the Run menu at the far right.
 export interface ActivityHead {
   tabs: ReactNode;
   run: ReactNode;
 }
 
-// The buttons beside the tabs below lg: a tab's own, then Run. The panel lifts its actions 6px off the
-// tabs' line; these sit back down, so a button is centred on the tab labels and ends on the line they rest on.
-export function headActions(head: ActivityHead, own?: ReactNode) {
-  return (
-    (head.run || own) && (
-      <div className="-mb-1.5 flex items-center gap-1.5">
-        {own}
+// A tab's bar: the page's title, its tabs and Run, and whatever the tab adds (its search, filters,
+// segments). `hint` is the tab's one-line description, behind the bar's info button.
+export function activityBar(head: ActivityHead, own: Omit<WorkspaceBarProps, "title" | "tabs"> = {}): WorkspaceBarProps {
+  return {
+    title: "Activity",
+    tabs: head.tabs,
+    hint: "What the agents did, and the runs you can start by hand.",
+    ...own,
+    actions: (
+      <>
+        {own.actions}
         {head.run}
-      </div>
-    )
-  );
+      </>
+    ),
+  };
 }
 
 // "4:18 AM", with the full date on hover. Its size and colour come from where it sits: a row's trail, a log cell.

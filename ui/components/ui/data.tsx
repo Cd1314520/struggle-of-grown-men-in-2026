@@ -65,7 +65,7 @@ export function CompanyMark({ name, size = "md", className }: { name: string; si
   );
 }
 
-// "3h ago", with the exact time on hover. `short` is a row's trail: "3h", "2d", "now".
+// "3h ago", with the exact time on hover. `short` is a row's fact: "3h", "2d", "now".
 export function Time({ at, short, className, prefix = "" }: { at: string | number | null | undefined; short?: boolean; className?: string; prefix?: string }) {
   if (!at) return null;
   const ms = typeof at === "number" ? at : parseAt(at);
@@ -76,32 +76,6 @@ export function Time({ at, short, className, prefix = "" }: { at: string | numbe
         {short ? agoShort(ms) : ago(ms)}
       </time>
     </Tooltip>
-  );
-}
-
-// A number with its label, for stat rows.
-export function Stat({ label, value, hint, className }: { label: ReactNode; value: ReactNode; hint?: ReactNode; className?: string }) {
-  return (
-    <div className={cn("flex flex-col gap-1", className)}>
-      <span className="text-sm text-fg-muted">{label}</span>
-      <span className="tabular text-2xl font-semibold tracking-[-0.01em] text-fg">{value}</span>
-      {hint && <span className="text-xs text-fg-subtle">{hint}</span>}
-    </div>
-  );
-}
-
-// Numbers in a line, with no tiles and no borders: an Applications or Overview header's stats.
-export function StatRow({ items, className }: { items: readonly { label: ReactNode; value: ReactNode; hint?: ReactNode }[]; className?: string }) {
-  return (
-    <dl className={cn("flex flex-wrap gap-x-10 gap-y-3", className)}>
-      {items.map((s, i) => (
-        <div key={i} className="flex flex-col">
-          <dt className="text-sm text-fg-muted">{s.label}</dt>
-          <dd className="tabular text-xl font-semibold text-fg">{s.value}</dd>
-          {s.hint && <dd className="text-xs text-fg-muted">{s.hint}</dd>}
-        </div>
-      ))}
-    </dl>
   );
 }
 

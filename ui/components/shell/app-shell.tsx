@@ -149,13 +149,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   ]);
   return (
     <div className="min-h-dvh bg-canvas">
+      {/* The one grey on screen: the nav is a rail beside the white sheet of the page. */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-border bg-canvas lg:block">
         <SidebarContent />
       </aside>
       <div className="lg:pl-60">
         <OfflineBanner />
         <TopBar />
-        <main className="min-h-[calc(100dvh-3rem)] lg:min-h-dvh">{children}</main>
+        <main className="min-h-[calc(100dvh-3rem)] bg-surface lg:min-h-dvh">{children}</main>
       </div>
       <TabBar />
       <Sheet open={shell.menuOpen} onOpenChange={shell.setMenuOpen} side="left" title="Navigation" className="bg-canvas">

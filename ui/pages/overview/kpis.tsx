@@ -1,7 +1,8 @@
-// The four numbers that say whether the machine is working, in the funnel's order, in a line over the charts.
+// The four numbers that say whether the machine is working, in the funnel's order: a band across the sheet,
+// divided by rules, two by two on a phone.
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import type { Summary } from "../../../src/api-types";
-import { Card, Skeleton, StatRow } from "../../components/ui";
+import { Skeleton } from "../../components/ui";
 import { useStats } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { num } from "../../lib/format";
@@ -27,42 +28,49 @@ function Delta({ now, before, good }: { now: number; before: number; good: boole
   );
 }
 
-export function Kpis({ summary }: { summary: Summary | undefined }) {
+// Each cell's rules: between the four in a line, or the two by two of a phone.
+const cell = (i: number) => cn("px-(--list-x) py-5 border-border", i < 3 && "sm:border-r", i % 2 === 0 && "max-sm:border-r", i < 2 && "max-sm:border-b");
+
+export function Kpis({ summary, className }: { summary: Summary | undefined; className?: string }) {
   const { data: st } = useStats();
+  const frame = cn("grid grid-cols-2 border-b border-border sm:grid-cols-4", className);
   if (!st || !summary)
     return (
-      <Card className="flex flex-wrap gap-x-10 gap-y-4 p-5">
+      <div className={frame}>
         {Array.from({ length: 4 }, (_, i) => (
-          <div key={i} className="space-y-2">
+          <div key={i} className={cn(cell(i), "space-y-2")}>
             <Skeleton className="h-3.5 w-24" />
-            <Skeleton className="h-6 w-14" />
+            <Skeleton className="h-7 w-14" />
             <Skeleton className="h-3 w-28" />
           </div>
         ))}
-      </Card>
+      </div>
     );
   const [sent, sentBefore] = weeks(st.applied),
     [found, foundBefore] = weeks(st.found);
   const rate = st.response.sent ? Math.round((st.response.heard / st.response.sent) * 100) : null;
-  // Review's count is in Needs you above: this one is the conversations under way instead.
+  // Review's count is in Needs you: this one is the conversations under way instead.
   const talking = summary.counts["interview"] ?? 0,
     offers = summary.counts["offer"] ?? 0;
+  const items = [
+    { label: "Found this week", value: num(found), hint: <Delta now={found} before={foundBefore} good={false} /> },
+    { label: "Applied this week", value: num(sent), hint: <Delta now={sent} before={sentBefore} good /> },
+    {
+      label: "Reply rate",
+      value: rate === null ? "–" : `${rate}%`,
+      hint: st.response.sent ? `${num(st.response.heard)} of ${num(st.response.sent)} replied` : "Nothing sent in 30 days",
+    },
+    { label: "In process", value: num(talking), hint: offers ? `${num(offers)} ${offers === 1 ? "offer" : "offers"}` : "No offers yet" },
+  ];
   return (
-    <Card className="p-5">
-      <StatRow
-        // Two by two on a phone, one line where there is room.
-        className="grid grid-cols-2 gap-x-6 gap-y-5 sm:flex sm:gap-x-10"
-        items={[
-          { label: "Found this week", value: num(found), hint: <Delta now={found} before={foundBefore} good={false} /> },
-          { label: "Applied this week", value: num(sent), hint: <Delta now={sent} before={sentBefore} good /> },
-          {
-            label: "Reply rate",
-            value: rate === null ? "–" : `${rate}%`,
-            hint: st.response.sent ? `${num(st.response.heard)} of ${num(st.response.sent)} replied` : "Nothing sent in 30 days",
-          },
-          { label: "In process", value: num(talking), hint: offers ? `${num(offers)} ${offers === 1 ? "offer" : "offers"}` : "No offers yet" },
-        ]}
-      />
-    </Card>
+    <dl className={frame}>
+      {items.map((s, i) => (
+        <div key={s.label} className={cn(cell(i), "flex min-w-0 flex-col")}>
+          <dt className="text-sm text-fg-muted">{s.label}</dt>
+          <dd className="tabular mt-0.5 text-2xl font-semibold text-fg">{s.value}</dd>
+          <dd className="mt-0.5 text-xs text-fg-muted">{s.hint}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }

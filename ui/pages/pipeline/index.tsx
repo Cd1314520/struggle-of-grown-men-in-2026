@@ -10,22 +10,16 @@ import {
   CompanyMark,
   EmptyState,
   JobStatus,
-  ListColumns,
   ListNotice,
-  ListPanel,
   ListRow,
-  ListToolbar,
-  Narrow,
-  Page,
-  PageHeader,
   Pagination,
-  Score,
   SearchInput,
   Segments,
   Select,
   SkeletonRows,
   StatusLabel,
   Time,
+  Workspace,
 } from "../../components/ui";
 import { useSummary } from "../../lib/api";
 import { place, unent } from "../../lib/format";
@@ -34,6 +28,7 @@ import { useListParams } from "../../lib/list-params";
 import { TABLET, useMedia, WIDE } from "../../lib/media";
 import { href, setParams } from "../../lib/router";
 import { JobDetail } from "../job/detail";
+import { FitFact } from "../job/fit";
 import { stageSegments, STAGES } from "./stages";
 
 const STUCK = new Set(["needs_you", "questions", "failed"]);
@@ -53,7 +48,6 @@ function Stage({ row }: { row: Row }) {
 // The time that matters in each stage: how long it has waited on the owner, when the agent last
 // touched it, or when the posting appeared.
 const timeOf = (group: string, row: Row) => (group === "assessing" ? row.opened_at : row.updated_at);
-const TIME_HEADER: Record<string, string> = { applying: "Updated", assessing: "Found" };
 
 const EMPTY: Record<string, readonly [title: string, description: string]> = {
   needs_you: ["Nothing needs you", "Applications pause here for a cover letter, a submit confirmation, or your hands in the browser."],
@@ -90,63 +84,58 @@ export function PipelinePage() {
   const current = data?.groups.find(g => g.key === group);
   const empty = EMPTY[group];
   const threshold = summary?.threshold ?? null;
-  // Nothing in Assessing has a score yet: its trail is when the posting was found, and where it is takes
-  // the time's column, so a wide row is not a title and a lone "3h" a page apart. The facts' tracks grow
-  // with the panel too, so a short title does not leave them pinned to the far edge.
+  // Nothing in Assessing has a score yet: its fact is how long it has been there. Sorted longest waiting,
+  // a stage paused on the owner says for how long instead of the fit.
   const scored = group !== "assessing";
-  const columns = [mixed && "minmax(200px,0.7fr)", scored ? "minmax(104px,0.4fr)" : "minmax(200px,0.7fr)"].filter(Boolean).join(" ");
-  const when = TIME_HEADER[group] ?? "Waiting since";
+  const waiting = (group === "needs_you" || group === "questions") && !lp.sort;
 
   const panel = (
-    <ListPanel
+    <Workspace
       frame={compact ? "column" : "page"}
-      // Beside an open job the column is the page, so it takes the page's name. On its own the panel says
-      // what the stage holds ("Paused until you act"), as the selected segment right under it already names
-      // the stage. A phone has neither: that segment names and counts it.
-      title={compact ? "Pipeline" : !tablet ? undefined : (stage?.caption ?? "Pipeline")}
-      count={compact ? data?.all : tablet ? current?.count : undefined}
       aria-label="Applications in the pipeline"
+      bodyRole="table"
       bodyLabel={stage?.label ?? "Applications"}
       aria-rowcount={data?.total}
       loading={record.query.isPlaceholderData}
-      toolbar={
-        <ListToolbar
-          search={
-            <SearchInput
-              ref={search}
-              value={lp.search}
-              onValueChange={lp.setSearch}
-              placeholder={tablet ? `Search ${((compact ? stage?.short : stage?.label) ?? "this stage").toLowerCase()}` : "Search"}
-              aria-label="Search this stage"
-            />
-          }
-          controls={
-            <Select
-              prefix="Sort"
-              collapse
-              value={lp.sort ?? "default"}
-              onValueChange={v => {
-                lp.setSort(v === "default" ? null : v);
-              }}
-              options={sortsFor(group)}
-            />
-          }
-          segments={
-            <Segments
-              aria-label="Stages"
-              value={group}
-              onValueChange={key => {
-                setParams({ group: key, page: null, sort: null });
-              }}
-              segments={stageSegments(data ? new Map(data.groups.map(g => [g.key, g.count])) : null)}
-            />
-          }
-        />
-      }
+      bar={{
+        title: "Pipeline",
+        count: data?.all,
+        hint: "Applications the agent is working on, and the ones paused until you act.",
+        search: (
+          <SearchInput
+            ref={search}
+            value={lp.search}
+            onValueChange={lp.setSearch}
+            placeholder={tablet ? `Search ${((compact ? stage?.short : stage?.label) ?? "this stage").toLowerCase()}` : "Search"}
+            aria-label="Search this stage"
+          />
+        ),
+        controls: (
+          <Select
+            prefix="Sort"
+            collapse
+            value={lp.sort ?? "default"}
+            onValueChange={v => {
+              lp.setSort(v === "default" ? null : v);
+            }}
+            options={sortsFor(group)}
+          />
+        ),
+        segments: (
+          <Segments
+            aria-label="Stages"
+            value={group}
+            onValueChange={key => {
+              setParams({ group: key, page: null, sort: null });
+            }}
+            segments={stageSegments(data ? new Map(data.groups.map(g => [g.key, g.count])) : null)}
+          />
+        ),
+      }}
       notice={
         group === "questions" &&
         !!current?.count && (
-          // A narrow panel has room for the link alone, which then says it all.
+          // A narrow list has room for the link alone, which then says it all.
           <ListNotice
             icon={<MessageSquareText />}
             {...(tablet &&
@@ -174,17 +163,6 @@ export function PipelinePage() {
           </ListNotice>
         )
       }
-      columns={
-        rows.length > 0 && (
-          <ListColumns
-            columns={columns}
-            lead
-            label="Role"
-            cells={[mixed && "Stage", scored ? when : "Location"].filter(Boolean)}
-            trail={scored ? "Fit" : when}
-          />
-        )
-      }
       footer={data && <Pagination variant="footer" noun="applications" offset={data.offset} limit={data.limit} total={data.total} onChange={record.setPage} />}
     >
       {!data ? (
@@ -200,7 +178,7 @@ export function PipelinePage() {
             }}
           />
         ) : (
-          <EmptyState size="sm" icon={<CircleCheck />} title={empty?.[0] ?? "Nothing here"} description={empty?.[1]} />
+          <EmptyState icon={<CircleCheck />} title={empty?.[0] ?? "Nothing here"} description={empty?.[1]} className="pt-24" />
         )
       ) : (
         rows.map(r => {
@@ -212,45 +190,15 @@ export function PipelinePage() {
               {...record.rowProps(r.id)}
               lead={<CompanyMark name={r.company} />}
               title={unent(r.title)}
-              secondary={
-                <>
-                  <span>{unent(r.company)}</span>
-                  {mixed && (
-                    <Narrow>
-                      <Stage row={r} />
-                    </Narrow>
-                  )}
-                </>
-              }
-              // The fit over the time, at every width: a wide row moves the time to its own column.
-              trail={
-                scored ? (
-                  <>
-                    <Score value={score} threshold={threshold} />
-                    <Narrow>
-                      <Time at={at} short />
-                    </Narrow>
-                  </>
-                ) : (
-                  <Time at={at} short />
-                )
-              }
-              columns={columns}
-              cells={[
-                mixed && <Stage row={r} />,
-                scored ? (
-                  <Time at={at} />
-                ) : (
-                  <span className="block truncate" title={r.location ?? undefined}>
-                    {place(r.location)}
-                  </span>
-                ),
-              ].filter(Boolean)}
+              secondary={unent(r.company)}
+              // What it waits on where the stages differ (Needs you's gates); else where it is.
+              gist={mixed ? <Stage row={r} /> : !!r.location?.trim() && <span title={r.location}>{place(r.location)}</span>}
+              fact={waiting ? <Time at={at} short prefix="Waiting " /> : scored ? <FitFact value={score} threshold={threshold} /> : <Time at={at} short />}
             />
           );
         })
       )}
-    </ListPanel>
+    </Workspace>
   );
 
   return (
@@ -261,14 +209,7 @@ export function PipelinePage() {
       onListClick={record.onListClick}
       detail={record.panel && <JobDetail key={record.panel.id} layout="panel" {...record.panel} />}
     >
-      {compact ? (
-        panel
-      ) : (
-        <Page>
-          <PageHeader title="Pipeline" description="Applications the agent is working on, and the ones paused until you act." descriptionOnPhone={false} />
-          {panel}
-        </Page>
-      )}
+      {panel}
     </ListDetail>
   );
 }

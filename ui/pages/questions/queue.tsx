@@ -1,8 +1,9 @@
 // The queue: every open question, newest posting first, under how long ago the posting opened.
 import { Fragment, useEffect } from "react";
 import type { QuestionGroup } from "../../../src/questions";
-import { CompanyMark, Count, ListGroup, ListRow, Time, Tooltip } from "../../components/ui";
+import { CompanyMark, ListGroup, ListRow, Time } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { plural } from "../../lib/format";
 import { href } from "../../lib/router";
 import { questionText, sections } from "./model";
 
@@ -24,19 +25,10 @@ function QueueRow({ group, selected, desktopOnly }: { group: QuestionGroup; sele
       // A question is the whole point of the row: it gets a third line at every width.
       title={questionText(group.text)}
       titleLines={3}
-      secondary={
-        <>
-          <span>{company}</span>
-          {many > 1 && (
-            <Tooltip content={`Asked by ${many} applications`}>
-              <span>
-                <Count value={many} />
-              </span>
-            </Tooltip>
-          )}
-        </>
-      }
-      trail={<Time at={group.createdAt} short />}
+      secondary={company}
+      // One answer resumes every application that asked it: how many is what matters past the employer.
+      gist={many > 1 && <span className="tabular">{plural(many, "application")}</span>}
+      fact={<Time at={group.createdAt} short />}
     />
   );
 }

@@ -390,7 +390,8 @@ export function FocusPane({
         </div>
       </div>
 
-      <footer className="hidden h-10 shrink-0 items-center gap-5 border-t border-border px-6 text-xs text-fg-muted lg:flex touch:hidden">
+      {/* Where the pane is too narrow for every key (a 1024px window), the last ones clip rather than widen the page. */}
+      <footer className="hidden h-10 shrink-0 items-center gap-5 overflow-hidden border-t border-border px-6 text-xs whitespace-nowrap text-fg-muted lg:flex touch:hidden">
         <span className="flex items-center gap-1.5">
           <Kbd>J</Kbd>
           <Kbd>K</Kbd>

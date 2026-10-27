@@ -8,7 +8,7 @@ import { plural } from "../../lib/format";
 // Each page as an image. `version` changes whenever the PDF does, so a new one is fetched.
 export function Sheets({ src, pages, version, pdf, label }: { src: string; pages: number | null; version: string; pdf: string; label: string }) {
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-6">
       {Array.from({ length: Math.max(1, pages ?? 1) }, (_, i) => (
         <Sheet key={`${version}-${i}`} src={`${src}?page=${i + 1}&v=${encodeURIComponent(version)}`} pdf={pdf} alt={`${label}, page ${i + 1}`} />
       ))}

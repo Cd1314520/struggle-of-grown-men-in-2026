@@ -5,20 +5,19 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactN
 import { toast } from "sonner";
 import {
   Button,
-  Callout,
   ConfirmDialog,
   EmptyState,
+  ListBody,
   ListNotice,
-  ListPanel,
-  ListToolbar,
   Markdown,
-  Page,
-  PageHeader,
   SectionNav,
   Select,
   Skeleton,
   StatusDot,
   Textarea,
+  Workspace,
+  WorkspaceBody,
+  WorkspaceSection,
 } from "../../components/ui";
 import { api, queryClient, refreshAll, useProfileFile, useSummary } from "../../lib/api";
 import { combo, useHotkeys } from "../../lib/hotkeys";
@@ -30,7 +29,7 @@ import { draftStore, needsFilling, PLACEHOLDER, PROFILE_DESC, PROFILE_GIST } fro
 
 const label = (file: string) => PROFILE_LABEL[file] ?? file;
 
-// The file's panel head: its name, what it is for, and Edit (or Save and Cancel).
+// The file's section head: its name, what it is for, and Edit (or Save and Cancel).
 interface Head {
   title: ReactNode;
   description: ReactNode;
@@ -38,12 +37,29 @@ interface Head {
   notice: ReactNode;
 }
 
+// companies.yml as a list: its search in the section's head, the rows edge to edge, the pages under them.
 function Companies({ boards, head }: { boards: readonly Board[]; head: Head }) {
   const b = useBoards(boards);
   return (
-    <ListPanel frame="card" {...head} count={b.count} bodyLabel="Companies" toolbar={<ListToolbar search={b.search} />} footer={b.footer}>
-      {b.rows}
-    </ListPanel>
+    <WorkspaceSection
+      flush
+      title={head.title}
+      count={b.count}
+      description={head.description}
+      className="border-b-0"
+      actions={
+        <>
+          <div className="w-56 max-sm:flex-1">{b.search}</div>
+          {head.actions}
+        </>
+      }
+    >
+      {head.notice}
+      <ListBody label="Companies" className="border-t border-border">
+        {b.rows}
+      </ListBody>
+      {b.footer}
+    </WorkspaceSection>
   );
 }
 
@@ -122,11 +138,13 @@ function FileView({ file, needs }: { file: string; needs: boolean }) {
   };
   if (boards && !editing) return <Companies boards={boards} head={head} />;
   return (
-    <ListPanel frame="card" {...head} bodyRole="none">
-      {/* Its line is the header's, so the body never doubles it. */}
+    // Its head keeps to the file's measure, so Edit ends where the words do; Companies' rows run edge to edge
+    // and so does its head.
+    <WorkspaceSection flush title={head.title} description={head.description} actions={head.actions} className="border-b-0 [&>div:first-child]:max-w-[56rem]">
+      {head.notice}
       <div className="border-t border-border">
         {isPending ? (
-          <div className="space-y-3 p-5">
+          <div className="max-w-[56rem] space-y-3 px-(--list-x) py-6">
             <Skeleton className="h-5 w-1/3" />
             <Skeleton className="h-4 w-5/6" />
             <Skeleton className="h-4 w-2/3" />
@@ -145,7 +163,7 @@ function FileView({ file, needs }: { file: string; needs: boolean }) {
             spellCheck={false}
             aria-label={`Edit ${file}`}
             placeholder={desc}
-            className="block h-[calc(100dvh-16rem)] min-h-96 resize-none rounded-none rounded-b-xl border-0 bg-surface px-(--list-x) py-3 font-mono text-sm shadow-none hover:border-0 focus:ring-0"
+            className="block h-[calc(100dvh-14rem)] min-h-96 resize-none rounded-none border-0 bg-surface px-(--list-x) py-4 font-mono text-sm shadow-none hover:border-0 focus:ring-0"
           />
         ) : !text?.trim() ? (
           <EmptyState
@@ -157,14 +175,15 @@ function FileView({ file, needs }: { file: string; needs: boolean }) {
                 Write it
               </Button>
             }
+            className="pt-16"
           />
         ) : isMd ? (
-          <Markdown text={withoutTitle(text, label(file))} className="max-w-3xl px-(--list-x) py-5" />
+          <Markdown text={withoutTitle(text, label(file))} className="max-w-[56rem] px-(--list-x) py-6" />
         ) : (
           <CodeView text={text} file={file} />
         )}
       </div>
-    </ListPanel>
+    </WorkspaceSection>
   );
 }
 
@@ -192,34 +211,26 @@ export function ProfilePage() {
     };
   }, [file]);
 
-  return (
-    <Page>
-      <PageHeader title="Profile" description="What the agents know about you. Every assessment, resume and application reads from these files." />
-      {problems.length > 0 && (
-        <Callout tone="warning" icon={<TriangleAlert />} title="Setup isn't finished" className="mb-6">
-          Files marked with a dot are missing, empty or still templates. Nothing is assessed or applied until they're filled in.
-        </Callout>
-      )}
-      {!s || !file ? (
-        <Skeleton className="h-96 rounded-xl" />
-      ) : (
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-8">
-          <SectionNav
-            label="Profile files"
-            className="max-lg:hidden"
-            value={file}
-            items={files.map(f => ({
-              key: f,
-              href: href("profile", f),
-              label: (
-                <span className="flex items-center gap-2">
-                  {label(f)}
-                  {needsFilling(problems, f) && <StatusDot tone="warning" />}
-                </span>
-              ),
-              hint: PROFILE_GIST[f],
-            }))}
-          />
+  const fileNav = (
+    <>
+      <SectionNav
+        label="Profile files"
+        className="max-lg:hidden"
+        value={file ?? null}
+        items={files.map(f => ({
+          key: f,
+          href: href("profile", f),
+          label: (
+            <span className="flex items-center gap-2">
+              {label(f)}
+              {needsFilling(problems, f) && <StatusDot tone="warning" />}
+            </span>
+          ),
+          hint: PROFILE_GIST[f],
+        }))}
+      />
+      {file && (
+        <div className="px-(--list-x) py-2 lg:hidden">
           <Select
             aria-label="Profile file"
             value={file}
@@ -228,13 +239,38 @@ export function ProfilePage() {
               else navigate(`profile/${f}`);
             }}
             options={files.map(f => ({ value: f, label: `${label(f)}${needsFilling(problems, f) ? " (to fill in)" : ""}` }))}
-            className="w-full justify-between lg:hidden"
+            className="w-full justify-between"
           />
-          <div className="min-w-0 flex-1">
-            <FileView key={file} file={file} needs={needsFilling(problems, file)} />
-          </div>
         </div>
       )}
+    </>
+  );
+
+  return (
+    <Workspace
+      // Below lg the bar holds nothing but the h1 (the top bar names the page): its rule would double the top bar's.
+      className="max-lg:[&>:first-child]:border-b-0"
+      bar={{ title: "Profile", hint: "What the agents know about you. Every assessment, resume and application reads from these files." }}
+      notice={
+        problems.length > 0 && (
+          <ListNotice tone="warning" icon={<TriangleAlert />}>
+            <span className="font-medium">Setup isn&apos;t finished.</span> Files marked with a dot are missing, empty or still templates. Nothing is assessed
+            or applied until they&apos;re filled in.
+          </ListNotice>
+        )
+      }
+    >
+      <WorkspaceBody asideSide="left" asideWidth="nav" aside={fileNav}>
+        {!s || !file ? (
+          <div className="space-y-3 px-(--list-x) py-6">
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-64 w-full max-w-[56rem]" />
+          </div>
+        ) : (
+          <FileView key={file} file={file} needs={needsFilling(problems, file)} />
+        )}
+      </WorkspaceBody>
       <ConfirmDialog
         open={leaving !== null}
         onOpenChange={o => {
@@ -249,6 +285,6 @@ export function ProfilePage() {
           if (leaving) navigate(leaving);
         }}
       />
-    </Page>
+    </Workspace>
   );
 }

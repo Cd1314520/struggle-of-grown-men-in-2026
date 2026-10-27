@@ -1,11 +1,11 @@
 // Whether the machine is healthy: one row per subsystem with its state, and a way to its settings.
-import { ArrowRight } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Summary } from "../../../src/api-types";
 import type { DigestStatus } from "../../../src/digest";
-import { Button, ListPanel, ListRow, SkeletonRows, StatusLabel } from "../../components/ui";
+import { ListBody, ListRow, StatusLabel } from "../../components/ui";
 import { ago, cap, MINUTE, num } from "../../lib/format";
 import type { Tone } from "../../lib/labels";
+import { RailHead } from "./rail";
 
 interface Row {
   name: string;
@@ -88,25 +88,20 @@ function rows(s: Summary): Row[] {
 
 export function Health({ summary }: { summary: Summary | undefined }) {
   return (
-    <ListPanel
-      frame="card"
-      title="System"
-      actions={
-        <Button asChild variant="ghost" size="sm" className="-mr-2">
-          <a href="#settings">
-            Settings
-            <ArrowRight />
-          </a>
-        </Button>
-      }
-    >
-      {!summary ? (
-        <SkeletonRows rows={5} lead={false} />
-      ) : (
+    <ListBody label="System" loading={!summary}>
+      <RailHead label="System" link={{ href: "#settings", label: "Settings" }} />
+      {summary &&
         rows(summary).map(r => (
-          <ListRow key={r.name} title={r.name} snippet={r.detail} trail={<StatusLabel tone={r.state[1]} label={r.state[0]} pulse={r.pulse} />} />
-        ))
-      )}
-    </ListPanel>
+          <ListRow
+            key={r.name}
+            title={r.name}
+            // The detail is the fact worth reading ("Last ran 55m ago across 1,813 sources"): it wraps to a second
+            // line in the narrow rail rather than being cut.
+            gist={<span data-detail>{r.detail}</span>}
+            className="[&_div:has(>[data-detail])]:line-clamp-2 [&_div:has(>[data-detail])]:whitespace-normal"
+            fact={<StatusLabel tone={r.state[1]} label={r.state[0]} pulse={r.pulse} />}
+          />
+        ))}
+    </ListBody>
   );
 }

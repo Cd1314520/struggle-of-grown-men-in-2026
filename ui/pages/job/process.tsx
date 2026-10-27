@@ -24,7 +24,6 @@ import type { JobDetail } from "../../../src/api-types";
 import type { Step, StepKind } from "../../../src/steps";
 import {
   Button,
-  Card,
   ConfirmDialog,
   Field,
   Input,
@@ -422,7 +421,7 @@ export function NextSteps({ job, a }: { job: JobDetail; a: JobActions }) {
     </Button>
   );
   return (
-    <Card className="p-4 sm:p-5" data-decision="Next steps">
+    <section data-decision="Next steps">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <h3 className="text-lg font-semibold text-fg">Next steps</h3>
@@ -490,6 +489,6 @@ export function NextSteps({ job, a }: { job: JobDetail; a: JobActions }) {
           </MenuContent>
         </Menu>
       </div>
-    </Card>
+    </section>
   );
 }

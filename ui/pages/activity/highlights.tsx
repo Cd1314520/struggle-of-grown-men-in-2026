@@ -2,12 +2,12 @@
 import { ArrowUpRight, Bot } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ActivityResult } from "../../../src/api-types";
-import { Clamp, EmptyState, Linkified, ListGroup, ListPanel, ListRow, ListToolbar, Segments, SkeletonRows } from "../../components/ui";
+import { Clamp, EmptyState, Linkified, ListGroup, ListRow, Segments, SkeletonRows, Workspace } from "../../components/ui";
 import { host, num, plural } from "../../lib/format";
 import { setParams, useRoute } from "../../lib/router";
 import { feed, isKindFilter, KIND_FILTERS, type FeedRow, type KindFilter } from "./feed";
 import { KindIcon } from "./kind-icon";
-import { byDay, Clock, Fold, headActions, JobLink, LoadOlder, useActivityPages, type ActivityHead } from "./parts";
+import { activityBar, byDay, Clock, Fold, JobLink, LoadOlder, useActivityPages, type ActivityHead } from "./parts";
 
 // No link of its own: the row holds the job's link, or the jobs and boards it happened to.
 function Row({ row }: { row: FeedRow }) {
@@ -28,8 +28,8 @@ function Row({ row }: { row: FeedRow }) {
           )}
         </Clamp>
       }
-      // The clock is the trail, as the same row's time is on Overview; the day it belongs to is the band above.
-      trail={
+      // The clock is the fact, as the same row's time is on Overview; the day it belongs to is the label above.
+      fact={
         <>
           <Clock at={row.at} />
           {repeats && <span title={`${num(row.n)} times this day`}>{`×${num(row.n)}`}</span>}
@@ -59,7 +59,9 @@ function Row({ row }: { row: FeedRow }) {
           </div>
         )
       }
-      snippet={row.detail}
+      // The words run to the time, as every list's do: the snippet's measure is lifted.
+      snippet={row.detail && <div data-detail>{row.detail}</div>}
+      className="[&_div:has(>[data-detail])]:max-w-none"
     />
   );
 }
@@ -92,34 +94,31 @@ export function Highlights({ head }: { head: ActivityHead }) {
   };
 
   return (
-    <ListPanel
-      tabs={head.tabs}
-      actions={headActions(head)}
-      toolbar={
-        <ListToolbar
-          segments={
-            <Segments
-              aria-label="Show"
-              value={filter}
-              onValueChange={v => {
-                setParams({ kind: v === "all" ? null : v });
-              }}
-              segments={(Object.keys(KIND_FILTERS) as KindFilter[]).map(k => ({ value: k, label: KIND_FILTERS[k].label }))}
-            />
-          }
-        />
-      }
+    <Workspace
+      bar={activityBar(head, {
+        segments: (
+          <Segments
+            aria-label="Show"
+            value={filter}
+            onValueChange={v => {
+              setParams({ kind: v === "all" ? null : v });
+            }}
+            segments={(Object.keys(KIND_FILTERS) as KindFilter[]).map(k => ({ value: k, label: KIND_FILTERS[k].label }))}
+          />
+        ),
+      })}
       footer={rows.length > 0 && <LoadOlder more={q.hasNextPage} loading={loadingOlder || q.isFetchingNextPage} onLoad={() => void loadOlder()} />}
+      bodyRole="table"
       bodyLabel="Highlights"
     >
       {q.isPending || (!rows.length && q.hasNextPage) ? (
         <SkeletonRows rows={8} />
       ) : !rows.length ? (
         <EmptyState
-          size="sm"
           icon={<Bot />}
           title={filter === "all" ? "No activity yet" : "Nothing here yet"}
           description={filter === "all" ? "What the agents do shows here as they work." : `No ${KIND_FILTERS[filter].label.toLowerCase()} entries in the log.`}
+          className="pt-24"
         />
       ) : (
         days.map(d => (
@@ -131,6 +130,6 @@ export function Highlights({ head }: { head: ActivityHead }) {
           </div>
         ))
       )}
-    </ListPanel>
+    </Workspace>
   );
 }

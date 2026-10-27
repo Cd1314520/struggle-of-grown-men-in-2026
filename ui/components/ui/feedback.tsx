@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
 
-// What an empty list or page says: an icon, one line, an optional nudge and action. `sm` sits inside a card.
+// What an empty list or page says: an icon, one line, an optional nudge and action. `md` on the sheet,
+// under the bar; `sm` inside a section.
 export function EmptyState({
   icon,
   title,
@@ -49,23 +50,31 @@ export function Skeleton({ className }: { className?: string }) {
   );
 }
 
-// Rows of placeholder while a list loads, shaped like ListRow: a mark, two lines and a trail. `dense`
-// is the log's one line; `lead={false}` drops the mark.
+// Rows of placeholder while a list loads, shaped like ListRow: a mark, two lines and the fact, each with
+// its inset hairline. `dense` is the log's one line; `lead={false}` drops the mark.
 export function SkeletonRows({ rows = 8, dense, lead = true, className }: { rows?: number; dense?: boolean; lead?: boolean; className?: string }) {
+  const mark = lead && !dense;
   return (
-    <div aria-hidden className={cn("divide-y divide-border", className)}>
+    <div aria-hidden className={className}>
       {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className={cn("flex items-center gap-3 px-[var(--list-x,1rem)]", dense ? "min-h-10 py-2" : "min-h-14 py-3 touch:min-h-16")}>
-          {lead && !dense && <Skeleton className="size-8 shrink-0 rounded-md" />}
+        <div
+          key={i}
+          className={cn(
+            "relative flex items-center gap-3 px-[var(--list-x,1rem)] after:absolute after:right-0 after:bottom-0 after:h-px after:bg-border",
+            mark ? "after:left-[calc(var(--list-x,1rem)+2.75rem)]" : "after:left-[var(--list-x,1rem)]",
+            dense ? "min-h-10 py-2" : "min-h-16 py-3 touch:min-h-[4.5rem]",
+          )}
+        >
+          {mark && <Skeleton className="size-8 shrink-0 rounded-md" />}
           {dense ? (
             <Skeleton className="h-3 flex-1" />
           ) : (
             <div className="flex-1 space-y-2">
               <Skeleton className="h-3.5 w-2/5" />
-              <Skeleton className="h-3 w-1/4" />
+              <Skeleton className="h-3 w-1/3" />
             </div>
           )}
-          {!dense && <Skeleton className="h-3.5 w-10" />}
+          {!dense && <Skeleton className="h-3.5 w-14" />}
         </div>
       ))}
     </div>

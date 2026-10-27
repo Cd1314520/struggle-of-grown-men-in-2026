@@ -4,7 +4,7 @@
 import { ArrowRight, Inbox, PanelRight } from "lucide-react";
 import { useRef, type ReactNode } from "react";
 import { FilterMenu, GroupSegments, ListDetail, NoMatch, useOpenRecord } from "../../components/list";
-import { Button, CompanyMark, EmptyState, ListGroup, ListPanel, ListToolbar, Pagination, SearchInput, Select, SkeletonRows } from "../../components/ui";
+import { Button, CompanyMark, EmptyState, ListGroup, Pagination, SearchInput, Select, SkeletonRows, Workspace } from "../../components/ui";
 import { useSummary } from "../../lib/api";
 import { plural, unent } from "../../lib/format";
 import { useListParams } from "../../lib/list-params";
@@ -57,54 +57,52 @@ export function ReviewPage() {
         )
       }
     >
-      {/* A phone's panel has no head: the top bar names the page and the tab bar's badge and the All segment
-          count it, so the queue starts right under the search. The heading stays for screen readers. */}
-      {!tablet && <h1 className="sr-only">Review</h1>}
-      <ListPanel
+      {/* The queue is always the column. A phone's has no count line: the tab bar's badge and the All segment
+          count it, so the queue starts right under the search. The bar's h1 stays for screen readers. */}
+      <Workspace
         frame="column"
-        title={tablet ? "Review" : undefined}
-        count={tablet ? list?.all : undefined}
-        noun="waiting for you"
         aria-label="Jobs to review"
+        bodyRole="table"
         bodyLabel="Queue"
         aria-rowcount={list?.total}
         loading={query.isPlaceholderData}
-        toolbar={
-          <ListToolbar
-            search={
-              <SearchInput
-                ref={search}
-                value={lp.search}
-                onValueChange={lp.setSearch}
-                // A phone's box, beside Filter and Sort, has room for the word alone.
-                placeholder={tablet ? "Search title, company or place" : "Search"}
-                aria-label="Search the queue"
+        bar={{
+          title: "Review",
+          count: list?.all,
+          ...(tablet && { noun: "waiting for you" }),
+          search: (
+            <SearchInput
+              ref={search}
+              value={lp.search}
+              onValueChange={lp.setSearch}
+              // A phone's box, beside Filter and Sort, has room for the word alone.
+              placeholder={tablet ? "Search title, company or place" : "Search"}
+              aria-label="Search the queue"
+            />
+          ),
+          controls: (
+            <>
+              <FilterMenu
+                filters={list?.filters ?? []}
+                active={lp.filters}
+                onToggle={lp.toggleFilter}
+                onClear={() => {
+                  setParams({ filter: null, page: null });
+                }}
               />
-            }
-            controls={
-              <>
-                <FilterMenu
-                  filters={list?.filters ?? []}
-                  active={lp.filters}
-                  onToggle={lp.toggleFilter}
-                  onClear={() => {
-                    setParams({ filter: null, page: null });
-                  }}
-                />
-                <Select
-                  prefix="Sort"
-                  collapse
-                  value={lp.sort ?? "newest"}
-                  onValueChange={v => {
-                    lp.setSort(v === "newest" ? null : v);
-                  }}
-                  options={SORTS}
-                />
-              </>
-            }
-            segments={list && list.total > 0 && <GroupSegments label="When the posting opened" groups={list.groups} value={lp.group} onChange={lp.setGroup} />}
-          />
-        }
+              <Select
+                prefix="Sort"
+                collapse
+                value={lp.sort ?? "newest"}
+                onValueChange={v => {
+                  lp.setSort(v === "newest" ? null : v);
+                }}
+                options={SORTS}
+              />
+            </>
+          ),
+          segments: list && list.total > 0 && <GroupSegments label="When the posting opened" groups={list.groups} value={lp.group} onChange={lp.setGroup} />,
+        }}
         footer={list && <Pagination variant="footer" noun="jobs" offset={list.offset} limit={list.limit} total={list.total} onChange={record.setPage} />}
       >
         {!list ? (
@@ -143,7 +141,7 @@ export function ReviewPage() {
             );
           })
         )}
-      </ListPanel>
+      </Workspace>
     </ListDetail>
   );
 }

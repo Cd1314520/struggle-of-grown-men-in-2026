@@ -2,10 +2,11 @@
 // Hand-drawn SVG at the container's pixel width, so text and bars are never scaled.
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { Stats } from "../../../src/api-types";
-import { Card, CardHeader, Segments, Skeleton } from "../../components/ui";
+import { Segments, Skeleton, WorkspaceSection } from "../../components/ui";
 import { useStats } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { num } from "../../lib/format";
+import { LABEL_HEAD } from "./rail";
 
 type Metric = "applied" | "responses" | "found";
 const METRICS: Record<Metric, { tab: string; title: string; unit: [one: string, many: string] }> = {
@@ -166,21 +167,20 @@ export function Trend() {
   const total = st ? st[metric].reduce((a, b) => a + b, 0) : 0;
   const unit = METRICS[metric].unit;
   return (
-    <Card>
-      <CardHeader
-        title={METRICS[metric].title}
-        titleAs="h2"
-        description={st ? `${num(total)} ${total === 1 ? unit[0] : unit[1]} in the last 30 days` : "Last 30 days"}
-        actions={
-          <Segments
-            aria-label="Metric"
-            value={metric}
-            onValueChange={setMetric}
-            segments={(Object.keys(METRICS) as Metric[]).map(m => ({ value: m, label: METRICS[m].tab }))}
-          />
-        }
-      />
-      <div className="px-5 pt-1 pb-4">{st ? <Chart stats={st} metric={metric} /> : <Skeleton className="h-[200px]" />}</div>
-    </Card>
+    <WorkspaceSection
+      className={LABEL_HEAD}
+      title={METRICS[metric].title}
+      description={st ? `${num(total)} ${total === 1 ? unit[0] : unit[1]} in the last 30 days` : "Last 30 days"}
+      actions={
+        <Segments
+          aria-label="Metric"
+          value={metric}
+          onValueChange={setMetric}
+          segments={(Object.keys(METRICS) as Metric[]).map(m => ({ value: m, label: METRICS[m].tab }))}
+        />
+      }
+    >
+      {st ? <Chart stats={st} metric={metric} /> : <Skeleton className="h-[200px]" />}
+    </WorkspaceSection>
   );
 }

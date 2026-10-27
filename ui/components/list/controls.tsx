@@ -5,8 +5,8 @@ import { Button, EmptyState, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparat
 import { cn } from "../../lib/cn";
 
 // One button rather than a row of chips. It names the filter when one is on, so what narrows the list
-// stays in sight without a second row. In a ListToolbar narrower than 28rem it keeps only its icon, with
-// an accent dot while a filter is on; the name stays for screen readers.
+// stays in sight without a second row. In a Workspace bar narrower than 80rem it keeps only
+// its icon, with an accent dot while a filter is on; the name stays for screen readers.
 export function FilterMenu({
   filters,
   active,
@@ -29,15 +29,15 @@ export function FilterMenu({
           icon={
             <span className="relative flex">
               <ListFilter />
-              {on.length > 0 && <span className="absolute -top-0.5 -right-0.5 hidden size-1.5 rounded-full bg-accent @max-md/toolbar:block" />}
+              {on.length > 0 && <span className="absolute -top-0.5 -right-0.5 hidden size-1.5 rounded-full bg-accent @max-[80rem]/bar:block" />}
             </span>
           }
           className={cn(
-            "max-w-48 min-w-0 @max-md/toolbar:w-8 @max-md/toolbar:px-0 touch:@max-md/toolbar:w-10",
+            "max-w-48 min-w-0 @max-[80rem]/bar:w-8 @max-[80rem]/bar:px-0 touch:@max-[80rem]/bar:w-10",
             on.length && "border-accent/25 bg-accent-soft text-accent-text hover:border-accent/40 hover:bg-accent-soft",
           )}
         >
-          <span className="truncate @max-md/toolbar:sr-only">{label}</span>
+          <span className="truncate @max-[80rem]/bar:sr-only">{label}</span>
         </Button>
       </MenuTrigger>
       <MenuContent className="w-60">

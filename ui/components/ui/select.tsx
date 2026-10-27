@@ -8,9 +8,9 @@ export interface Option<T extends string = string> {
   label: ReactNode;
 }
 
-// A compact select. `prefix` labels the trigger: "Sort: Newest". `collapse`: inside a ListToolbar
-// narrower than 28rem (a phone, a list column) the trigger keeps only an icon, and says the rest to
-// screen readers.
+// A compact select. `prefix` labels the trigger: "Sort: Newest". `collapse`: in a Workspace bar narrower
+// than 80rem (a phone, a list column, a page in a window under ~1520px), the
+// trigger keeps only an icon, and says the rest to screen readers.
 export function Select<T extends string>({
   value,
   onValueChange,
@@ -32,7 +32,7 @@ export function Select<T extends string>({
 }) {
   const current = options.find(o => o.value === value)?.label;
   const name = ariaLabel ?? (collapse && prefix && typeof current === "string" ? `${prefix}: ${current}` : prefix);
-  const wide = collapse && "@max-md/toolbar:hidden";
+  const wide = collapse && "@max-[80rem]/bar:hidden";
   return (
     <S.Root
       value={value}
@@ -45,11 +45,11 @@ export function Select<T extends string>({
         aria-label={name}
         className={cn(
           "inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-sm text-fg shadow-xs transition-[background-color,border-color,box-shadow] outline-none hover:border-border-strong hover:bg-subtle focus-visible:border-accent focus-visible:ring-3 focus-visible:ring-accent/15 disabled:pointer-events-none disabled:opacity-50 data-[state=open]:border-border-strong data-[state=open]:bg-subtle touch:h-10",
-          collapse && "@max-md/toolbar:w-8 @max-md/toolbar:justify-center @max-md/toolbar:px-0 touch:@max-md/toolbar:w-10",
+          collapse && "@max-[80rem]/bar:w-8 @max-[80rem]/bar:justify-center @max-[80rem]/bar:px-0 touch:@max-[80rem]/bar:w-10",
           className,
         )}
       >
-        {collapse && <ArrowUpDown aria-hidden className="hidden size-4 text-fg-muted @max-md/toolbar:block" />}
+        {collapse && <ArrowUpDown aria-hidden className="hidden size-4 text-fg-muted @max-[80rem]/bar:block" />}
         {prefix && <span className={cn("text-fg-subtle", wide)}>{prefix}</span>}
         <span className={cn("contents", wide)}>
           <S.Value />

@@ -1,5 +1,5 @@
 // The open job: header, the decision the app waits on, and tabs. Shown beside or over a list (layout
-// "panel"), or as the whole page at #job/<id> (layout "page", inside the page's card).
+// "panel"), or as the whole page at #job/<id> (layout "page", on the page's sheet under its bar).
 import { ArrowUpRight, Building2, ChevronDown, ChevronUp, Clock, Globe, Maximize2, MapPin, SearchX, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { JobDetail as Job } from "../../../src/api-types";
@@ -243,6 +243,10 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
 
   const panel = layout === "panel";
   const pad = "px-4 sm:px-6";
+  // The record reads as one column at every width, on a page and in a panel: the header, the lead, the
+  // tabs and their rule, every tab's content and the decision bar's buttons share one left and one right
+  // edge. Only the band's tint and the rules between parts run on across the sheet.
+  const measure = "max-w-3xl";
   const card =
     decision?.placement === "card" ? (
       <DecisionCard d={decision} job={job} busy={actions.busy} />
@@ -257,18 +261,26 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
     <div className={cn("flex min-h-0 flex-1 flex-col", settling && "pointer-events-none")}>
       <div className={cn(panel && "min-h-0 flex-1 overflow-y-auto overscroll-contain")} data-job-scroll>
         <div className={cn("pt-4 sm:pt-6", pad)}>
-          <Header
-            job={job}
-            threshold={threshold}
-            onScore={() => {
-              open("fit");
-            }}
-          />
+          <div className={measure}>
+            <Header
+              job={job}
+              threshold={threshold}
+              onScore={() => {
+                open("fit");
+              }}
+            />
+          </div>
         </div>
-        {lead && <div className={cn("mt-5 sm:mt-6", pad)}>{lead}</div>}
+        {/* What the agent stopped at is a tinted band across the job, ruled above and below: no card. */}
+        {lead && (
+          <div className={cn("mt-5 border-y border-border bg-subtle/50 py-5 sm:mt-6", pad)}>
+            <div className={measure}>{lead}</div>
+          </div>
+        )}
         <Tabs value={tab} onValueChange={open} className="mt-4 sm:mt-6">
-          <div className={cn("sticky z-10 bg-[var(--job-bg)]", panel ? "top-0" : "top-12 lg:top-0", pad)}>
-            <TabsList>
+          {/* On a page it sticks under the page's bar (static below lg, where the shell's top bar is the one). */}
+          <div className={cn("sticky z-10 bg-[var(--job-bg)]", panel ? "top-0" : "top-12 lg:top-[calc(3rem+1px)]", pad)}>
+            <TabsList className={measure}>
               {TABS.map(([k, label]) => (
                 <TabsTrigger key={k} value={k}>
                   {label}
@@ -276,14 +288,13 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
               ))}
             </TabsList>
           </div>
-          {/* One measure for every tab, so prose, check lists and properties share a right edge. */}
           <div className={cn("pt-6 pb-10", pad)}>
-            <div className="@container max-w-3xl">
+            <div className={cn("@container", measure)}>
               {TABS.map(([k]) => (
                 <TabsContent key={k} value={k} className="animate-in rounded-sm outline-offset-4">
                   {k === "overview" && (
                     <div className="flex flex-col gap-8">
-                      {!lead && card}
+                      {!lead && card && <div className="border-b border-border pb-8">{card}</div>}
                       <Overview job={job} phase={phase} openTab={open} />
                     </div>
                   )}
@@ -297,7 +308,7 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
           </div>
         </Tabs>
       </div>
-      {bar && <DecisionBar d={bar} busy={actions.busy} floating={!panel} />}
+      {bar && <DecisionBar d={bar} busy={actions.busy} docked={!panel} />}
       {dialogs}
     </div>
   );

@@ -5,11 +5,11 @@ import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { QuestionGroup } from "../../../src/questions";
 import { COLUMN, ListDetail, NoMatch, useRecordHistory } from "../../components/list";
-import { Button, EmptyState, ListNotice, ListPanel, ListToolbar, Page, PageHeader, SearchInput, Skeleton, SkeletonRows } from "../../components/ui";
+import { Button, EmptyState, ListNotice, SearchInput, Skeleton, SkeletonRows, Workspace } from "../../components/ui";
 import { api, queryClient, refreshAll, useQuestions } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { useHotkeys } from "../../lib/hotkeys";
-import { useMedia, WIDE } from "../../lib/media";
+import { TABLET, useMedia, WIDE } from "../../lib/media";
 import { navigate, useRoute } from "../../lib/router";
 import { FocusPane, type Answer } from "./focus";
 import { choices, drafts, elsewhere, isQuestion, matches, nextAfter } from "./model";
@@ -22,25 +22,12 @@ const open = (key: string | null) => {
   navigate(key ? `questions/${encodeURIComponent(key)}` : "questions", { replace: true });
 };
 
-// The other gates, counted, with the way to Pipeline where each is handled on its application: a line in
-// the queue's header, read as an alert. `inline`: a phone's, a link at the end of the count's line, so the
-// queue starts a notice higher.
-function Elsewhere({ groups, inline }: { groups: readonly QuestionGroup[]; inline?: boolean }) {
+// The other gates, counted, with the way to Pipeline where each is handled on its application: a line
+// under the bar, read as an alert.
+function Elsewhere({ groups }: { groups: readonly QuestionGroup[] }) {
   const { total, text } = elsewhere(groups);
   if (!total) return null;
   const detail = text.charAt(0).toUpperCase() + text.slice(1);
-  if (inline)
-    return (
-      <span role="alert" className="flex items-center gap-1.5 text-sm [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-warning-text">
-        <CircleAlert />
-        <Button asChild size="sm" variant="link" className="px-0 touch:px-0">
-          <a href="#pipeline?group=needs_you" title={detail}>
-            {total.toLocaleString()} more in Pipeline
-            <ArrowRight />
-          </a>
-        </Button>
-      </span>
-    );
   return (
     // The link rides in the text's line rather than as the notice's action, which a phone would push onto a
     // line of its own: one line keeps the queue high. Which gates they are is on hover and in Pipeline's stages.
@@ -60,13 +47,15 @@ function Elsewhere({ groups, inline }: { groups: readonly QuestionGroup[]; inlin
   );
 }
 
+const HINT = "What application forms asked that your profile can't answer.";
+
 function Loading() {
   return (
     <div className="flex lg:h-dvh">
       <div className={cn("w-full", COLUMN)}>
-        <ListPanel frame="column" title="Questions" count={undefined} toolbar={<ListToolbar search={<Skeleton className="h-8 w-full touch:h-10" />} />}>
+        <Workspace frame="column" aria-label="Questions" bar={{ title: "Questions", search: <Skeleton className="h-8 w-full touch:h-10" /> }}>
           <SkeletonRows rows={8} />
-        </ListPanel>
+        </Workspace>
       </div>
       <div className="hidden flex-1 flex-col gap-4 bg-surface px-10 pt-24 lg:flex">
         <Skeleton className="h-7 w-3/5" />
@@ -81,7 +70,8 @@ function Loading() {
 export function QuestionsPage() {
   const { parts } = useRoute();
   const routeKey = parts[0] ?? null;
-  const wide = useMedia(WIDE);
+  const wide = useMedia(WIDE),
+    tablet = useMedia(TABLET);
   const { data, isPending, isError, refetch } = useQuestions();
   const groups = useMemo(() => (data ?? []).filter(isQuestion), [data]);
   const [search, setSearch] = useState("");
@@ -169,8 +159,9 @@ export function QuestionsPage() {
   if (isPending) return <Loading />;
   if (isError)
     return (
-      <Page>
+      <Workspace bar={{ title: "Questions", hint: HINT }}>
         <EmptyState
+          className="pt-24"
           icon={<CircleAlert />}
           title="Couldn't load the questions"
           action={
@@ -183,21 +174,19 @@ export function QuestionsPage() {
             </Button>
           }
         />
-      </Page>
+      </Workspace>
     );
 
   if (!groups.length)
     return (
-      <Page>
-        <PageHeader title="Questions" description="What application forms asked that your profile can't answer." descriptionOnPhone={false} />
-        <ListPanel title="To answer" count={0} notice={<Elsewhere groups={data} />}>
-          <EmptyState
-            icon={<CheckCheck />}
-            title="All caught up"
-            description="Nothing is waiting on an answer. When an application asks something your profile can't answer, it lands here."
-          />
-        </ListPanel>
-      </Page>
+      <Workspace aria-label="Questions" bar={{ title: "Questions", count: 0, hint: HINT }} notice={<Elsewhere groups={data} />}>
+        <EmptyState
+          className="pt-24"
+          icon={<CheckCheck />}
+          title="All caught up"
+          description="Nothing is waiting on an answer. When an application asks something your profile can't answer, it lands here."
+        />
+      </Workspace>
     );
 
   return (
@@ -225,28 +214,21 @@ export function QuestionsPage() {
       }
       empty={<EmptyState icon={<PanelRight />} title="No question open" description="Pick a question from the queue to answer it." className="h-full" />}
     >
-      <ListPanel
+      {/* The count's own line is a tablet's: a phone's tab bar badge counts the questions, so the queue starts
+          right under the search and the notice. */}
+      <Workspace
         frame="column"
-        title="Questions"
-        count={groups.length}
-        noun="to answer"
+        aria-label="Questions"
         bodyRole="none"
-        toolbar={
-          <ListToolbar
-            search={
-              <SearchInput
-                ref={searchBox}
-                value={search}
-                onValueChange={setSearch}
-                placeholder="Filter by question or employer"
-                aria-label="Filter questions"
-              />
-            }
-          />
-        }
-        // Side by side the notice has the header's room; a phone keeps the queue high with a link by the count.
-        actions={!wide && <Elsewhere groups={data} inline />}
-        notice={wide && <Elsewhere groups={data} />}
+        bar={{
+          title: "Questions",
+          count: groups.length,
+          ...(tablet && { noun: "to answer" }),
+          search: (
+            <SearchInput ref={searchBox} value={search} onValueChange={setSearch} placeholder="Filter by question or employer" aria-label="Filter questions" />
+          ),
+        }}
+        notice={<Elsewhere groups={data} />}
       >
         {current ? (
           <Queue groups={shown} selected={current.key} desktopOnly={!routeKey} />
@@ -260,7 +242,7 @@ export function QuestionsPage() {
             }}
           />
         )}
-      </ListPanel>
+      </Workspace>
     </ListDetail>
   );
 }

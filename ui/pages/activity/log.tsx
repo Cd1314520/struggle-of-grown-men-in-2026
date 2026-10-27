@@ -2,16 +2,16 @@
 import { ScrollText } from "lucide-react";
 import { useMemo } from "react";
 import type { ActivityItem } from "../../../src/api-types";
-import { EmptyState, Linkified, ListColumns, ListGroup, ListPanel, ListRow, ListToolbar, Select, SkeletonRows } from "../../components/ui";
+import { EmptyState, Linkified, ListGroup, ListRow, Select, SkeletonRows, Workspace } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { dayLabel } from "../../lib/format";
 import { href, setParams, useRoute } from "../../lib/router";
-import { byDay, Clock, headActions, LoadOlder, useActivityPages, type ActivityHead } from "./parts";
+import { activityBar, byDay, Clock, LoadOlder, useActivityPages, type ActivityHead } from "./parts";
 
 const KINDS = ["step", "tool", "agent", "gate", "user", "auto", "error", "system", "mail", "recheck", "migration"] as const;
 const KIND_TEXT: Record<string, string> = { error: "text-danger-text", gate: "text-warning-text", user: "text-accent-text" };
-// Time, worker and kind, employer; the message takes the rest, so nothing is pinned to the far right.
-const COLUMNS = "64px 120px 160px";
+// The time and the worker and kind at fixed widths; the employer and the message flow after them, one line.
+const COLUMNS = "4.5rem 8rem";
 
 function Entry({ e }: { e: ActivityItem }) {
   return (
@@ -24,18 +24,16 @@ function Entry({ e }: { e: ActivityItem }) {
           {e.worker ?? "app"}
           <span className={cn("ml-1.5", KIND_TEXT[e.kind] ?? "text-fg-muted")}>{e.kind}</span>
         </span>,
-        e.job_id ? (
-          <a key="job" href={href("job", e.job_id)} className="hover:text-fg touch:-my-2 touch:py-2" title={e.title ?? undefined}>
-            {e.company ?? `Job ${e.job_id}`}
-          </a>
-        ) : (
-          <span key="job" />
-        ),
       ]}
       title={
         <span title={e.message}>
+          {e.job_id && (
+            <a href={href("job", e.job_id)} className="mr-2 font-medium text-fg hover:underline touch:-my-2 touch:py-2" title={e.title ?? undefined}>
+              {e.company ?? `Job ${e.job_id}`}
+            </a>
+          )}
           {/* One line on a desktop, however many lines the message has (a checkpoint's JSON); two on touch. */}
-          <Linkified text={e.message} className="whitespace-nowrap touch:whitespace-normal" />
+          <Linkified text={e.message} className="whitespace-nowrap text-fg-muted touch:whitespace-normal" />
         </span>
       }
     />
@@ -60,23 +58,20 @@ export function FullLog({ head }: { head: ActivityHead }) {
   );
 
   return (
-    <ListPanel
-      tabs={head.tabs}
-      // Beside the tabs where there is room; on a phone the Run menu has that place, and the kind goes under them.
-      actions={headActions(head) || kind}
-      toolbar={head.run && <ListToolbar controls={kind} />}
-      columns={days.length > 0 && <ListColumns dense columns={COLUMNS} label="Message" cells={["Time", "Worker", "Company"]} />}
+    <Workspace
+      bar={activityBar(head, { controls: kind })}
       footer={days.length > 0 && <LoadOlder more={q.hasNextPage} loading={q.isFetchingNextPage} onLoad={() => void q.fetchNextPage()} />}
+      bodyRole="table"
       bodyLabel="Full log"
     >
       {q.isPending ? (
         <SkeletonRows dense rows={14} />
       ) : !days.length ? (
         <EmptyState
-          size="sm"
           icon={<ScrollText />}
           title="The log is empty"
           description={valid ? `No ${shown} entries yet.` : "Entries appear as the workers run."}
+          className="pt-24"
         />
       ) : (
         days.map(d => (
@@ -88,6 +83,6 @@ export function FullLog({ head }: { head: ActivityHead }) {
           </div>
         ))
       )}
-    </ListPanel>
+    </Workspace>
   );
 }

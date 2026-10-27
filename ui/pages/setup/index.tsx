@@ -4,7 +4,7 @@ import { Check, ChevronDown, CircleCheck, Copy, ExternalLink, Minus, Radar, Refr
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { SetupCheck, SetupResult, SetupStep, SetupStepId } from "../../../src/api-types";
-import { Button, Callout, Disclosure, ListIcon, ListPanel, Page, PageHeader, SkeletonRows } from "../../components/ui";
+import { Button, Disclosure, ListIcon, ListNotice, SkeletonRows, Workspace } from "../../components/ui";
 import { api, queryClient, refreshAll, useSetup, useSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { href } from "../../lib/router";
@@ -197,30 +197,36 @@ function CheckRow({ c, optional }: { c: SetupCheck; optional: boolean }) {
   );
 }
 
-// One step, as a row of the list: a step still to do is open (what it is, its checks, how to do it, its
-// action); a done one is a line, its details behind a toggle.
+// One step, as a row of the list: its number (or a check), what it is, and where it stands at the right. A
+// step still to do is open under its title (its checks, how to do it, its action); a done one is a row, its
+// details behind a toggle.
 function StepRow({ step, n, current, result }: { step: SetupStep; n: number; current: boolean; result: SetupResult }) {
   const [open, setOpen] = useState(false);
   const copy = STEPS[step.id];
   const checks = step.checks.filter(copy.shown ?? (() => true));
   const action = copy.action?.({ primary: current, step, result });
   const list = checks.length > 0 && (
-    <ul className="mt-2">
+    <ul className="mt-1">
       {checks.map(c => (
         <CheckRow key={c.key} c={c} optional={!step.required} />
       ))}
     </ul>
   );
   const details = `setup-details-${step.id}`;
+  const body = !step.done || open;
   return (
     <li
       aria-current={current ? "step" : undefined}
-      className="grid scroll-mt-10 grid-cols-[2rem_minmax(0,1fr)_auto] items-start gap-x-3 border-t border-border px-(--list-x) py-3.5 touch:py-4"
+      className={cn(
+        "relative grid scroll-mt-14 grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-x-3 px-(--list-x) py-3 touch:py-3.5",
+        "after:absolute after:right-0 after:bottom-0 after:left-[calc(var(--list-x)+2.75rem)] after:h-px after:bg-border",
+        current && "bg-accent-soft/40 before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-accent",
+      )}
     >
       <ListIcon icon={step.done ? <Check /> : n} tone={step.done ? "success" : step.required ? "accent" : "neutral"} />
-      <div className="min-w-0 self-center">
+      <div className="min-w-0">
         <h3 className="text-base font-medium text-fg">{copy.title}</h3>
-        {!step.done && !step.required && <p className="text-sm text-fg-muted">Optional</p>}
+        <p className={cn("mt-0.5 max-w-[72ch] text-sm text-fg-muted", step.done && !open && "truncate")}>{copy.description}</p>
       </div>
       {step.done ? (
         <button
@@ -230,17 +236,18 @@ function StepRow({ step, n, current, result }: { step: SetupStep; n: number; cur
           onClick={() => {
             setOpen(!open);
           }}
-          className="group inline-flex h-8 items-center gap-1 self-start text-sm text-fg-muted hover:text-fg touch:-my-0.5 touch:h-9"
+          className="inline-flex h-8 items-center gap-1 pl-1 text-sm text-fg-muted hover:text-fg touch:h-9"
         >
           Details
           <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
         </button>
       ) : (
-        <span />
+        <span className={cn("pl-1 text-sm whitespace-nowrap", step.required ? "font-medium text-warning-text" : "text-fg-muted")}>
+          {step.required ? "To do" : "Optional"}
+        </span>
       )}
-      {(!step.done || open) && (
-        <div id={details} className={cn("col-start-2 col-end-4 min-w-0", step.done && "animate-in")}>
-          <p className="mt-0.5 text-sm text-fg-muted">{copy.description}</p>
+      {body && (list || (!step.done && (copy.how ?? action))) && (
+        <div id={details} className={cn("col-start-2 col-end-4 max-w-[56rem] min-w-0 pt-2", step.done && "animate-in")}>
           {list}
           {!step.done && (copy.how ?? action) && (
             <div className="mt-3 flex flex-col gap-3">
@@ -276,47 +283,59 @@ export function SetupPage() {
   const required = data?.steps.filter(st => st.required) ?? [];
   const done = required.filter(st => st.done).length;
   const current = data?.steps.find(st => !st.done && st.required) ?? data?.steps.find(st => !st.done);
+  // How far along: a line under the bar, and on a phone the bar's own line, beside Check again.
   const progress = data && (
     <>
-      <span className="tabular">
-        {done} of {required.length} done
+      <span className="tabular text-sm whitespace-nowrap text-fg-muted">
+        <span className="font-semibold text-fg">
+          {done} of {required.length}
+        </span>{" "}
+        <span className="max-sm:hidden">required steps </span>done
       </span>
-      <div className="mt-2 mb-1 h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-muted" aria-hidden>
+      <div className="h-1.5 max-w-48 min-w-8 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden>
         <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${(done / Math.max(1, required.length)) * 100}%` }} />
       </div>
     </>
   );
   return (
-    <Page width="narrow">
-      <PageHeader title="Setup" description="Everything a new install needs, checked against this machine as it is now. Work down the list." />
-      {data?.remaining === 0 && (
-        <Callout tone="success" icon={<CircleCheck />} title="Setup is complete" className="mb-6">
-          {s?.scanMinutes
-            ? `Boards are scanned every ${s.scanMinutes} minutes. Matches wait for you in Review; questions the agents can't answer wait in Questions.`
-            : "Scheduled scans are off: start one from the sidebar. Matches wait for you in Review."}
-        </Callout>
-      )}
-      <ListPanel
-        frame="card"
-        title="Steps"
-        description={progress}
-        bodyRole="none"
-        actions={
+    <Workspace
+      className="max-lg:[&_div:has(>[data-lead])]:flex-1"
+      bar={{
+        title: "Setup",
+        meta: data && (data.remaining ? `${data.remaining} to do` : "Complete"),
+        hint: "Everything a new install needs, checked against this machine as it is now. Work down the list.",
+        controls: progress && (
+          <div data-lead className="flex min-w-0 items-center gap-3 lg:hidden">
+            {progress}
+          </div>
+        ),
+        actions: (
           <Button size="sm" icon={<RefreshCw />} loading={checking} onClick={() => void recheck()}>
             Check again
           </Button>
-        }
-      >
-        {isPending || !data ? (
-          <SkeletonRows rows={6} className="border-t border-border" />
-        ) : (
-          <ol>
-            {data.steps.map((step, i) => (
-              <StepRow key={step.id} step={step} n={i + 1} current={step.id === current?.id} result={data} />
-            ))}
-          </ol>
-        )}
-      </ListPanel>
-    </Page>
+        ),
+      }}
+      strip={progress && <div className="flex h-12 shrink-0 items-center gap-4 border-b border-border px-(--list-x) max-lg:hidden">{progress}</div>}
+      notice={
+        data?.remaining === 0 && (
+          <ListNotice icon={<CircleCheck />}>
+            <span className="font-medium">Setup is complete.</span>{" "}
+            {s?.scanMinutes
+              ? `Boards are scanned every ${s.scanMinutes} minutes. Matches wait for you in Review; questions the agents can't answer wait in Questions.`
+              : "Scheduled scans are off: start one from the sidebar. Matches wait for you in Review."}
+          </ListNotice>
+        )
+      }
+    >
+      {isPending || !data ? (
+        <SkeletonRows rows={6} />
+      ) : (
+        <ol aria-label="Steps">
+          {data.steps.map((step, i) => (
+            <StepRow key={step.id} step={step} n={i + 1} current={step.id === current?.id} result={data} />
+          ))}
+        </ol>
+      )}
+    </Workspace>
   );
 }

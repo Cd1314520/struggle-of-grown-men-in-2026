@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Summary } from "../../../src/api-types";
 import { shellActions } from "../../components/shell/state";
-import { Button, Card, ConfirmDialog, Disclosure, Page, PageHeader, SectionNav, Skeleton, SkeletonRows, StatusLabel } from "../../components/ui";
+import { Button, ConfirmDialog, Disclosure, SectionNav, Skeleton, SkeletonRows, StatusLabel, Workspace, WorkspaceBody } from "../../components/ui";
 import { api, refreshAll, useSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { cap, num, plural } from "../../lib/format";
@@ -235,7 +235,7 @@ function DangerZone({ s }: { s: Summary }) {
     }
   };
   return (
-    <SettingsPanel id="danger" title="Danger zone" className="border-danger/30">
+    <SettingsPanel id="danger" title="Danger zone" tone="danger">
       <SettingRow
         stack
         label="Release held jobs"
@@ -277,26 +277,28 @@ export function SettingsPage() {
     if (ready && section) document.getElementById(section)?.scrollIntoView({ block: "start" });
   }, [ready, section]);
   return (
-    <Page width="narrow">
-      <PageHeader title="Settings" description="How the app runs: what it may do on its own, where mail goes, and the browser it applies with." />
-      <div className="flex flex-col gap-4 lg:flex-row lg:gap-8">
-        <Nav ready={ready} />
+    // Below lg the bar holds nothing but the h1 (the top bar names the page): its rule would double the top bar's.
+    <Workspace
+      className="max-lg:[&>:first-child]:border-b-0"
+      bar={{ title: "Settings", hint: "How the app runs: what it may do on its own, where mail goes, and the browser it applies with." }}
+    >
+      <WorkspaceBody asideSide="left" asideWidth="nav" aside={<Nav ready={ready} />}>
         {s ? (
-          <div className="flex min-w-0 flex-1 flex-col gap-8">
+          <>
             <General s={s} />
             <Models />
             <AutoApply s={s} />
             <Mail s={s} />
             <Browser s={s} />
             <DangerZone s={s} />
-          </div>
+          </>
         ) : (
-          <Card className="min-w-0 flex-1 py-2">
-            <Skeleton className="mx-5 my-3 h-5 w-28" />
+          <div className="py-6">
+            <Skeleton className="mx-(--list-x) mb-4 h-5 w-28" />
             <SkeletonRows lead={false} rows={5} />
-          </Card>
+          </div>
         )}
-      </div>
-    </Page>
+      </WorkspaceBody>
+    </Workspace>
   );
 }

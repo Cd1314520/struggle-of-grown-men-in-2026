@@ -1,7 +1,6 @@
 // The design system. Pages build from these and from nothing else that draws: no raw colours, no
 // sizes outside the type scale (see styles.css), no one-off buttons or badges.
 export * from "./button";
-export * from "./card";
 export * from "./checkbox";
 export * from "./clamp";
 export * from "./combobox";
@@ -22,3 +21,4 @@ export * from "./status";
 export * from "./pagination";
 export * from "./tabs";
 export * from "./tooltip";
+export * from "./workspace";

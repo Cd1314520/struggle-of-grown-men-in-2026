@@ -162,7 +162,7 @@ export function Mail({ s }: { s: Summary }) {
         </SettingRow>
       )}
       {result && (
-        <p role="status" className="animate-in border-t border-border px-(--list-x) py-3 text-sm text-fg">
+        <p role="status" className="animate-in py-3 text-sm text-fg">
           {result}
         </p>
       )}

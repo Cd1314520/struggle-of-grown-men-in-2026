@@ -144,7 +144,7 @@ export function Models() {
       }
     >
       {isPending ? (
-        <SkeletonRows lead={false} rows={4} className="border-t border-border" />
+        <SkeletonRows lead={false} rows={4} className="-mx-(--list-x)" />
       ) : (
         <>
           {group(true, "The pipeline")}

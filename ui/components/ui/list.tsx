@@ -1,157 +1,24 @@
-// Lists of records: the one list system. Every set of rows sits in a ListPanel (a titled surface with its
-// count, toolbar, rows and footer), and every row is a ListRow: a lead (mark or icon), a body (title, one
-// secondary line, a prose snippet) and a trail of at most two short facts. A row grows fact cells, under a
-// ListColumns header, only when its panel is at least 56rem wide (`@4xl/list`); below that, which is
-// every phone and every list beside an open record, the same row stacks. See docs/ui.md, "Lists".
-import { isValidElement, useId, type ComponentProps, type CSSProperties, type ElementType, type ReactNode } from "react";
+// Lists of records: the one list system. A list fills its Workspace edge to edge (workspace.tsx: the bar,
+// then the rows, then the footer), and every row is a ListRow: a lead (mark or icon), a title, one second
+// line (the meta, then the gist behind a dash) and ONE fact at the right. No columns, no header row, at any
+// width. Groups are small uppercase ListGroup labels. See docs/ui.md, "Lists".
+import { isValidElement, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 
-// Content that changes place with the panel's width: a reason in the snippet when narrow, in a cell when wide.
-export const Narrow = ({ children }: { children: ReactNode }) => <span className="contents @4xl/list:hidden">{children}</span>;
-export const Wide = ({ children }: { children: ReactNode }) => <span className="hidden @4xl/list:contents">{children}</span>;
-
-// The gutter every row, header, toolbar and footer shares, and the radius the last of them rounds to.
-// Children read them as px-(--list-x); outside a panel they fall back to 16px and square corners.
+// The gutter every row, group label, notice and footer shares: the Workspace sets it; outside one, 16px.
 const X = "px-[var(--list-x,1rem)]";
-const LAST = "last:rounded-b-[var(--list-r,0)]";
-const FRAME = {
-  page: "rounded-xl border border-border bg-surface shadow-xs [--list-r:calc(var(--radius-xl)-1px)] [--list-x:1rem] sm:[--list-x:1.25rem] max-sm:-mx-4 max-sm:rounded-none max-sm:border-x-0 max-sm:shadow-none max-sm:[--list-r:0]",
-  card: "rounded-xl border border-border bg-surface shadow-xs [--list-r:calc(var(--radius-xl)-1px)] [--list-x:1rem] sm:[--list-x:1.25rem]",
-  // The list beside an open record. From lg it fills the column: the header stays, the rows scroll, the
-  // footer is pinned. Below lg it is the page (the shell's tab bar takes the last 72px).
-  column: "bg-surface [--list-x:1rem] pb-24 max-lg:min-h-[calc(100dvh-3rem)] lg:flex lg:h-full lg:flex-col lg:pb-0",
-};
 
-export function ListPanel({
-  frame = "page",
-  title,
-  titleAs,
-  count,
-  noun,
-  description,
-  tabs,
-  actions,
-  toolbar,
-  notice,
-  columns,
-  footer,
-  loading,
-  bodyRole = "table",
-  bodyLabel,
-  className,
-  children,
-  "aria-label": ariaLabel,
-  "aria-rowcount": rowCount,
-}: {
-  frame?: "page" | "column" | "card";
-  title?: ReactNode; // the surface's name: h1 in "column", h2 otherwise
-  titleAs?: "h1" | "h2" | "h3";
-  count?: number | undefined; // beside the title; undefined while loading
-  noun?: string; // "column" below lg, where the title is for screen readers only: "334 waiting for you"
-  description?: ReactNode; // one line under the title
-  tabs?: ReactNode; // a <TabsList> heading the panel in place of the title (inside the page's <Tabs>)
-  actions?: ReactNode; // right of the title or tabs: a ⋯ menu, "View all", "Check again"
-  toolbar?: ReactNode; // a <ListToolbar>
-  notice?: ReactNode; // a <ListNotice>, under the toolbar
-  columns?: ReactNode; // a <ListColumns>, shown only when the panel is wide
-  footer?: ReactNode; // <Pagination variant="footer"> or <ListFooter>
-  loading?: boolean; // placeholder data on screen: the rows dim until the real page arrives
-  bodyRole?: "table" | "list" | "none"; // "none": the children bring their own (Questions' nav)
-  bodyLabel?: string; // the table's name: "Queue", "Held jobs"
-  className?: string;
-  children: ReactNode; // ListRow / ListGroup, or EmptyState / NoMatch / SkeletonRows
-  "aria-label"?: string; // names the section; otherwise its title does
-  "aria-rowcount"?: number | undefined;
-}) {
-  const id = useId();
-  const col = frame === "column";
-  const Title: ElementType = titleAs ?? (col ? "h1" : "h2");
-  const head = title !== undefined || count !== undefined || !!actions;
-  const named = !ariaLabel && title !== undefined && !tabs;
-  const countText = count !== undefined && (
-    <span className={cn("tabular font-normal", col ? "text-sm text-fg-muted lg:text-xl lg:text-fg-subtle" : "text-lg text-fg-subtle")}>
-      {count.toLocaleString()}
-      {col && noun && <span className="lg:hidden"> {noun}</span>}
-    </span>
-  );
-  return (
-    <section aria-label={ariaLabel} aria-labelledby={named ? id : undefined} className={cn("@container/list flex min-w-0 flex-col", FRAME[frame], className)}>
-      {(head || tabs || toolbar || notice) && (
-        <div className={cn("shrink-0", (!tabs || toolbar || notice) && "border-b border-border")}>
-          {tabs ? (
-            <div className={cn("flex items-end gap-3 border-b border-border [&_[role=tablist]]:min-w-0 [&_[role=tablist]]:border-b-0", X, "pt-1")}>
-              {tabs}
-              {actions && <div className="mb-1.5 ml-auto flex shrink-0 items-center gap-1.5 self-center">{actions}</div>}
-            </div>
-          ) : (
-            head && (
-              <div className={cn("flex min-h-8 items-start gap-3 pb-3", X, col ? "pt-4" : "pt-3 sm:pt-4")}>
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-h-8 items-center gap-2">
-                    {title !== undefined && (
-                      <Title id={id} className={cn("min-w-0 truncate font-semibold text-fg", col ? "text-xl tracking-[-0.01em] max-lg:sr-only" : "text-lg")}>
-                        {title}
-                      </Title>
-                    )}
-                    {countText}
-                  </div>
-                  {description && <div className="max-w-2xl text-sm text-fg-muted">{description}</div>}
-                </div>
-                {actions && <div className="flex min-h-8 shrink-0 items-center gap-1.5">{actions}</div>}
-              </div>
-            )
-          )}
-          {toolbar && <div className={cn((tabs || !head) && "pt-3")}>{toolbar}</div>}
-          {notice}
-        </div>
-      )}
-      <div
-        role={bodyRole === "none" ? undefined : bodyRole}
-        aria-label={bodyLabel}
-        aria-rowcount={rowCount}
-        className={cn(
-          // Up over the header's line, so the first row's top border is that line and nothing doubles.
-          "-mt-px min-w-0",
-          col ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:scroll-pb-4" : cn("overflow-clip", LAST),
-          loading && "opacity-60 transition-opacity",
-        )}
-      >
-        {columns}
-        {children}
-      </div>
-      {footer}
-    </section>
-  );
-}
-
-// Search, quick filters, sort and segments, attached under the panel's title. Narrow (every phone and
-// list column): the search and controls, then the segments under them. Wide: one row, segments left,
-// search and controls always right.
-export function ListToolbar({ search, controls, segments, className }: { search?: ReactNode; controls?: ReactNode; segments?: ReactNode; className?: string }) {
-  return (
-    <div className={cn("@container/toolbar pb-3", X, className)}>
-      <div className="flex flex-col gap-2.5 @3xl/toolbar:flex-row @3xl/toolbar:items-center @3xl/toolbar:gap-4">
-        {(search || controls) && (
-          <div className="flex min-w-0 items-center gap-2 @3xl/toolbar:order-2 @3xl/toolbar:ml-auto">
-            {search && <div className="min-w-0 flex-1 @3xl/toolbar:w-64 @3xl/toolbar:flex-none">{search}</div>}
-            {controls}
-          </div>
-        )}
-        {/* The segments' own box reaches 4px past the gutter, so a selected segment's ring is never clipped. */}
-        {segments && <div className="min-w-0 @3xl/toolbar:order-1 @3xl/toolbar:flex-1 [&>*]:-mx-1 [&>*]:px-1">{segments}</div>}
-      </div>
-    </div>
-  );
-}
-
-// The grid tracks of a row: lead | body | (cells, wide only) | trail. ListColumns builds the same.
+// The grid tracks of a row: lead | body | fact | actions.
 const LEAD = "2rem",
-  BODY = "minmax(0,1fr)",
-  TRAIL = "4rem"; // fixed when wide, so the cells line up under their header
+  BODY = "minmax(0,1fr)";
 const tracks = (...t: (string | false | undefined)[]) => t.filter(Boolean).join(" ");
+const shown = (n: ReactNode) => n !== undefined && n !== null && n !== false;
 
 const LINES = { 1: "line-clamp-1", 2: "line-clamp-2", 3: "line-clamp-3" } as const;
+// With a mouse from lg every row is two lines, a list column too: the title takes one (the open record
+// beside it, or the hover, shows the rest), the second line the other. On touch the title wraps.
+const DESK = { 1: "", 2: "lg:line-clamp-1 touch:line-clamp-2", 3: "lg:line-clamp-1 touch:line-clamp-3" } as const;
 const SNIPPET = { 2: "line-clamp-2", 3: "line-clamp-3" } as const;
 
 export type ListRowProps = Omit<ComponentProps<"a">, "title" | "ref"> & {
@@ -160,19 +27,22 @@ export type ListRowProps = Omit<ComponentProps<"a">, "title" | "ref"> & {
   lead?: ReactNode; // <CompanyMark> or <ListIcon>
   indent?: boolean; // keep the lead's room empty (rows under a company ListGroup)
   title: ReactNode;
-  titleLines?: 1 | 2 | 3 | "none"; // when stacked; default 2. "none": the title clamps itself (a Clamp)
+  titleLines?: 1 | 2 | 3 | "none"; // on touch; default 2 (always one line from lg with a mouse). "none": the title clamps itself (a Clamp)
   titleClassName?: string; // e.g. font-normal, when the title is agent prose rather than a name
-  secondary?: ReactNode; // one line: the first child truncates, the others keep their width
-  snippet?: ReactNode; // prose, clamped; a <Narrow> snippet leaves wide rows altogether
+  secondary?: ReactNode; // the second line's meta, usually the company: its first child truncates
+  gist?: ReactNode; // after the meta, behind a dash: the one thing that matters (the next step, the stage, the reason)
+  snippet?: ReactNode; // prose rows only (blockers, questions, highlights), clamped
   snippetLines?: 2 | 3; // default 2 on a desktop, 3 on touch
-  trail?: ReactNode; // at most two short facts (≤ 6 characters), stacked, right-aligned
-  cells?: readonly ReactNode[]; // fact cells, wide only (always, in a dense row)
-  columns?: string; // the cells' tracks, shared with ListColumns: "minmax(0,1.2fr) 180px 72px"
-  dense?: boolean; // the log: one line of cells then the message on a desktop, two lines on touch
+  fact?: ReactNode; // ONE short fact at the right, ≤ 12 characters: "Asked 3d", "Waiting 6h", "Fit 88", "4h"
+  actions?: ReactNode; // icon-sm buttons right of the fact, shown on hover (always on touch)
+  dense?: boolean; // the log: one line on a desktop, two lines on touch
+  cells?: readonly ReactNode[]; // a dense row only: its fixed-width leads before the title (the time, the kind)
+  columns?: string; // a dense row only: those leads' widths, "4.5rem 8rem"
 };
 
+// No boxed lines: each row draws an inset hairline under itself, from the title's x to the window's edge.
 const ROW =
-  "group relative scroll-mt-10 scroll-mb-4 border-t border-border text-sm text-fg outline-none transition-colors focus-visible:bg-subtle focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-inset";
+  "group relative scroll-mt-12 scroll-mb-12 text-sm text-fg outline-none transition-colors after:pointer-events-none after:absolute after:right-0 after:bottom-0 after:h-px after:bg-border focus-visible:bg-subtle focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-inset";
 
 export function ListRow({
   href,
@@ -183,9 +53,11 @@ export function ListRow({
   titleLines = 2,
   titleClassName,
   secondary,
+  gist,
   snippet,
   snippetLines,
-  trail,
+  fact,
+  actions,
   cells,
   columns,
   dense,
@@ -198,7 +70,7 @@ export function ListRow({
   const link = href !== undefined;
   const frame = cn(
     ROW,
-    link && "cursor-pointer hover:bg-subtle/70",
+    link && "cursor-pointer hover:bg-subtle",
     selected && "bg-accent-soft/60 before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-accent hover:bg-accent-soft/80",
   );
   const tooltip = typeof title === "string" ? title : undefined;
@@ -212,7 +84,7 @@ export function ListRow({
         style={{ "--row": tracks(columns, BODY), ...style } as CSSProperties}
         className={cn(
           frame,
-          "grid min-h-10 grid-cols-(--row) items-center gap-x-4 py-2 touch:flex touch:flex-wrap touch:items-baseline touch:gap-x-3 touch:gap-y-0.5 touch:py-2.5",
+          "grid min-h-10 grid-cols-(--row) items-center gap-x-3 py-2 after:left-[var(--list-x,1rem)] touch:flex touch:flex-wrap touch:items-baseline touch:gap-x-3 touch:gap-y-0.5 touch:py-2.5",
           X,
           className,
         )}
@@ -235,124 +107,92 @@ export function ListRow({
   }
 
   const hasLead = lead !== undefined || indent;
-  const hasTrail = trail !== undefined && trail !== null && trail !== false;
-  const wide = cells?.length ? tracks(hasLead && LEAD, BODY, columns, hasTrail && TRAIL) : undefined;
-  const narrowSnippet = isValidElement(snippet) && snippet.type === Narrow;
+  const hasFact = shown(fact),
+    hasActions = shown(actions);
   return (
     <Row
       role="row"
       href={href}
       aria-current={selected ? "true" : undefined}
-      style={{ "--row": tracks(hasLead && LEAD, BODY, hasTrail && "auto"), ...(wide && { "--row-wide": wide }), ...style } as CSSProperties}
+      style={{ "--row": tracks(hasLead && LEAD, BODY, hasFact && "auto", hasActions && "auto"), ...style } as CSSProperties}
       className={cn(
         frame,
-        "grid min-h-14 grid-cols-(--row) items-start gap-x-3 py-3 touch:min-h-16 touch:py-3.5",
-        wide && "@4xl/list:grid-cols-(--row-wide) @4xl/list:items-center @4xl/list:gap-x-4",
+        "grid min-h-16 grid-cols-(--row) items-center gap-x-3 py-3 touch:min-h-[4.5rem] touch:items-start touch:py-3.5",
+        // The hairline starts where the title does: past the 32px lead and its 12px gap.
+        hasLead ? "after:left-[calc(var(--list-x,1rem)+2.75rem)]" : "after:left-[var(--list-x,1rem)]",
         X,
         className,
       )}
       {...props}
     >
       {hasLead && (
-        <div role="cell" className="mt-0.5 flex size-8 items-center justify-center self-start">
+        <div role="cell" className="flex size-8 items-center justify-center touch:mt-0.5">
           {lead}
         </div>
       )}
       <div role="cell" className="min-w-0">
         <div
           title={tooltip}
-          className={cn("text-base font-medium break-words text-fg", titleLines !== "none" && cn(LINES[titleLines], "@4xl/list:line-clamp-1"), titleClassName)}
+          className={cn(
+            "text-base font-medium break-words text-fg",
+            titleLines !== "none" && cn(LINES[titleLines], DESK[titleLines], "@4xl/ws:line-clamp-1"),
+            titleClassName,
+          )}
         >
           {title}
         </div>
-        {secondary !== undefined && secondary !== null && secondary !== false && (
-          <div className="mt-0.5 flex min-w-0 items-center gap-2 text-sm text-fg-muted [&>*]:shrink-0 [&>:first-child]:min-w-0 [&>:first-child]:shrink [&>:first-child]:truncate">
-            {typeof secondary === "string" ? <span>{secondary}</span> : secondary}
+        {(shown(secondary) || shown(gist)) && (
+          // One line, the meta then the gist, truncating; a list column too. Only a phone (under 40rem, below
+          // lg) gives the gist a line of its own under the meta, rather than the two truncating to a word apiece.
+          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-fg-muted max-lg:@max-[40rem]/ws:flex-col max-lg:@max-[40rem]/ws:items-stretch max-lg:@max-[40rem]/ws:gap-0">
+            {shown(secondary) && (
+              <div
+                className={cn(
+                  "flex min-w-0 items-center gap-2 [&>*]:shrink-0 [&>:first-child]:min-w-0 [&>:first-child]:shrink [&>:first-child]:truncate",
+                  shown(gist) ? "max-w-[45%] shrink-0 max-lg:@max-[40rem]/ws:max-w-none" : "flex-1",
+                )}
+              >
+                {typeof secondary === "string" ? <span>{secondary}</span> : secondary}
+              </div>
+            )}
+            {shown(secondary) && shown(gist) && (
+              <span aria-hidden className="shrink-0 text-fg-subtle max-lg:@max-[40rem]/ws:hidden">
+                —
+              </span>
+            )}
+            {shown(gist) && (
+              <div className="min-w-0 flex-1 truncate max-lg:@max-[40rem]/ws:line-clamp-1 max-lg:@max-[40rem]/ws:whitespace-normal touch:max-lg:@max-[40rem]/ws:line-clamp-2">
+                {gist}
+              </div>
+            )}
           </div>
         )}
-        {snippet !== undefined && snippet !== null && snippet !== false && (
-          <div
-            className={cn(
-              "mt-1 text-sm break-words text-fg-muted",
-              snippetLines ? SNIPPET[snippetLines] : "line-clamp-2 touch:line-clamp-3",
-              narrowSnippet && "@4xl/list:hidden",
-            )}
-          >
+        {shown(snippet) && (
+          <div className={cn("mt-1 max-w-[72ch] text-sm break-words text-fg-muted", snippetLines ? SNIPPET[snippetLines] : "line-clamp-2 touch:line-clamp-3")}>
             {snippet}
           </div>
         )}
       </div>
-      {cells?.map((c, i) => (
-        <div key={i} role="cell" className="hidden min-w-0 text-sm text-fg-muted @4xl/list:block">
-          {c}
+      {hasFact && (
+        // On touch it sits level with the title's first line.
+        <div role="cell" className="tabular flex items-center gap-2 pl-1 text-sm whitespace-nowrap text-fg-muted touch:pt-0.5">
+          {fact}
         </div>
-      ))}
-      {hasTrail && (
-        // The first fact reads in text-fg at zero specificity, so a fact that colours itself (Score) keeps its tone.
+      )}
+      {hasActions && (
         <div
           role="cell"
-          className="tabular flex flex-col items-end gap-0.5 self-start pt-0.5 text-sm text-fg-muted [:where(&>:first-child)]:text-fg @4xl/list:self-center @4xl/list:pt-0"
+          className="flex items-center gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 touch:-mt-1 touch:opacity-100"
         >
-          {trail}
+          {actions}
         </div>
       )}
     </Row>
   );
 }
 
-// The header over a wide list's cells. A list has one if and only if it shows cells.
-export function ListColumns({
-  columns,
-  lead,
-  label,
-  cells,
-  trail,
-  dense,
-}: {
-  columns: string; // the same string the rows get
-  lead?: boolean; // the rows have a lead: the label starts over it
-  label: ReactNode; // over the body: "Role", "Application"
-  cells: readonly ReactNode[];
-  trail?: ReactNode; // "Fit"
-  dense?: boolean; // over dense rows: cells first, then the label; hidden on touch rather than when narrow
-}) {
-  const head = "min-w-0 truncate";
-  return (
-    <div
-      role="row"
-      style={{ "--row": dense ? tracks(columns, BODY) : tracks(lead && LEAD, BODY, columns, trail !== undefined && TRAIL) } as CSSProperties}
-      className={cn(
-        "h-9 grid-cols-(--row) items-center gap-x-4 border-t border-border bg-subtle/60 text-xs font-medium text-fg-muted",
-        dense ? "grid touch:hidden" : "hidden @4xl/list:grid",
-        X,
-      )}
-    >
-      {dense &&
-        cells.map((c, i) => (
-          <div key={i} role="columnheader" className={head}>
-            {c}
-          </div>
-        ))}
-      <div role="columnheader" className={cn(head, lead && !dense && "col-span-2")}>
-        {label}
-      </div>
-      {!dense &&
-        cells.map((c, i) => (
-          <div key={i} role="columnheader" className={head}>
-            {c}
-          </div>
-        ))}
-      {!dense && trail !== undefined && (
-        <div role="columnheader" className={cn(head, "text-right")}>
-          {trail}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// A group heading inside a list: a time band, an employer, a day. A row, so it reads as one ("Today 3").
-// Sticky under the phone's top bar, or at the top of the list's own scroll from lg.
+// A group label inside a list: a time band, an employer, a day. Small and uppercase on the sheet, no band.
+// A row, so it reads as one ("Your move 6"). It sticks under the bar (`--group-top`, set by the Workspace).
 export function ListGroup({
   label,
   count,
@@ -372,22 +212,22 @@ export function ListGroup({
     <div
       role="row"
       className={cn(
-        // Its bottom line lies over the next row's top one, so the band has a line under it while stuck.
-        "relative -mb-px flex h-9 min-w-0 items-center gap-2 border-y border-border bg-subtle text-sm font-semibold text-fg touch:h-10",
-        sticky && "sticky top-[calc(3rem-1px)] z-10 lg:top-0",
+        "relative flex h-9 min-w-0 items-end gap-2 bg-surface/95 pb-1.5 text-2xs font-semibold tracking-[0.06em] text-fg-muted uppercase backdrop-blur touch:h-10",
+        lead && "h-11 touch:h-11",
+        sticky && "sticky top-[var(--group-top,3rem)] z-10",
         X,
         className,
       )}
     >
       {lead}
-      <span className="min-w-0 truncate">{label}</span>
-      {count !== undefined && <span className="tabular shrink-0 font-normal text-fg-subtle">{count.toLocaleString()}</span>}
-      {hint && <span className="shrink-0 font-normal text-fg-subtle">{hint}</span>}
+      <span className={cn("min-w-0 truncate", lead && "pb-0.5")}>{label}</span>
+      {count !== undefined && <span className={cn("tabular shrink-0 font-normal text-fg-subtle", lead && "pb-0.5")}>{count.toLocaleString()}</span>}
+      {hint && <span className={cn("shrink-0 font-normal tracking-normal text-fg-subtle normal-case", lead && "pb-0.5")}>{hint}</span>}
     </div>
   );
 }
 
-// A one-line notice in the panel's header, under the toolbar: "20 more wait on you in Pipeline →".
+// A one-line notice across the list, under the bar: "20 more wait on you in Pipeline →". Full bleed, no box.
 export function ListNotice({
   tone = "neutral",
   icon,
@@ -404,8 +244,9 @@ export function ListNotice({
       role={tone === "warning" ? "alert" : "status"}
       className={cn(
         // Too long for one line on a phone, the action wraps to the right of a line of its own.
-        "mx-[var(--list-x,1rem)] mb-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-md bg-subtle px-3 py-2 text-sm text-fg [&>svg]:size-4 [&>svg]:shrink-0",
+        "flex min-h-10 flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-border py-2 text-sm text-fg [&>svg]:size-4 [&>svg]:shrink-0",
         tone === "warning" ? "[&>svg]:text-warning-text" : "[&>svg]:text-fg-subtle",
+        X,
       )}
     >
       {icon}
@@ -415,15 +256,15 @@ export function ListNotice({
   );
 }
 
-// The band under a list's rows: pagination, "Load older", "That's everything".
+// The slim line under a list's rows: pagination, "Load older", "That's everything". From lg it sticks to
+// the bottom of the list's scroll.
 export function ListFooter({ center, className, ...props }: ComponentProps<"div"> & { center?: boolean }) {
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center gap-3 border-t border-border bg-surface py-2.5 text-sm text-fg-muted",
-        center ? "justify-center" : "justify-between",
+        "z-10 flex min-h-11 shrink-0 items-center gap-3 border-t border-border bg-surface/95 py-1.5 text-sm text-fg-muted backdrop-blur lg:sticky lg:bottom-0",
+        center ? "justify-center text-fg-subtle" : "justify-between",
         X,
-        LAST,
         className,
       )}
       {...props}

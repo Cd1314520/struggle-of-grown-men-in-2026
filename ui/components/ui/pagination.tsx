@@ -44,7 +44,7 @@ function PageField({ page, pages, onGo }: { page: number; pages: number; onGo: (
 }
 
 // "1–50 of 3,640 jobs", the page to jump to, and previous and next. One line in a narrow list pane or on a
-// phone, where previous and next keep only their arrows. `footer` is a ListPanel's footer band.
+// phone, where previous and next keep only their arrows. `footer` is a list's ListFooter line.
 export function Pagination({
   offset,
   limit,

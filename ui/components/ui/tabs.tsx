@@ -3,11 +3,21 @@ import { useCallback, useLayoutEffect, useRef, useState, type ComponentProps, ty
 import { cn } from "../../lib/cn";
 
 // Underlined tabs: switching between different views (a job's Overview, Fit, Resume…; Archive's Held and
-// Rejected). A list's tabs head its ListPanel (`tabs`).
+// Rejected). A page's tabs sit in its Workspace bar (`tabs`, `variant="bar"`): 48px, the underline on the
+// bar's own rule.
 export const Tabs = T.Root;
 export const TabsContent = T.Content;
-export function TabsList({ className, ...props }: ComponentProps<typeof T.List>) {
-  return <T.List className={cn("flex h-10 items-stretch gap-5 overflow-x-auto border-b border-border", className)} {...props} />;
+export function TabsList({ className, variant, ...props }: ComponentProps<typeof T.List> & { variant?: "bar" }) {
+  return (
+    <T.List
+      className={cn(
+        "flex h-10 items-stretch gap-5 overflow-x-auto border-b border-border",
+        variant === "bar" && "relative top-px h-12 border-b-0 [&>[role=tab]]:mb-0 [&>[role=tab]]:h-12",
+        className,
+      )}
+      {...props}
+    />
+  );
 }
 // The list scrolls sideways and would clip an outline: keyboard focus shows as an accent underline and label.
 export function TabsTrigger({ className, count, children, ...props }: ComponentProps<typeof T.Trigger> & { count?: number | undefined }) {
@@ -56,7 +66,7 @@ export function useEdgeFade(ref: RefObject<HTMLDivElement | null>) {
   return mask ? { maskImage: mask } : undefined;
 }
 
-// A row of segments: narrowing one list to a group (Your move, Upcoming…), in its panel's toolbar. Each
+// A row of segments: narrowing one list to a group (Your move, Upcoming…), in its Workspace bar. Each
 // shows its count; a warning or danger count is tinted while it is above zero.
 export interface Segment<T extends string> {
   value: T;
