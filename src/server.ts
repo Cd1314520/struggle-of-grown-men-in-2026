@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ActivityResult, AppState, Attention, BlockersResult, JobDetail, ModelsResult, ResumeState, Summary } from "./api-types";
+import type { ActivityResult, AppState, Attention, BlockersResult, JobDetail, ModelsResult, ResumeState, SettingsResult, Summary } from "./api-types";
 import { feedNames, loadCompanies } from "./ats";
 import { jobBlockers, listBlockers } from "./blockers";
 import { isBoardUrl } from "./boards";
@@ -34,6 +34,7 @@ import { killAllWorkers } from "./worker";
 import { MAIN, pagePng, PDF_NAME, resumeFiles, stockPdf, stockResume, workingPdf } from "./resume";
 import { cachedCatalog, isModelStage, modelCatalog, setModel, stageModels } from "./models";
 import { acceptImport, beginImport, discardImport, draftPdf, importState, importSteps, MAX_BYTES, MAX_FILES, reviseImport } from "./resume-import";
+import { readBase, setSetting, settingsState } from "./settings";
 import { setupStatus } from "./setup";
 import { autoApply } from "./auto";
 import { currentThreshold } from "./rubric";
@@ -571,6 +572,35 @@ export function createHandler(scheduler: Scheduler) {
       }
       logEvent("user", `${stage} model set to ${model ?? "omp's default"}`);
       return json({ ok: true });
+    }
+
+    if (path === "/api/settings" && req.method === "GET") return json(settingsState() satisfies SettingsResult);
+    if (path === "/api/settings" && req.method === "PUT") {
+      const { path: key, value, reset } = await body();
+      if (!Array.isArray(key) || !key.length || !key.every(k => typeof k === "string" && /^\w+$/.test(k))) return fail("path must name a setting");
+      if (reset !== true && value === undefined) return fail("send a value, or reset: true for config.yml's");
+      // A public address under another name would refuse the very page that set it.
+      if (key.join(".") === "publicUrl") {
+        const host = new URL(req.url).hostname;
+        const next = reset === true ? (readBase() as Record<string, unknown>)["publicUrl"] : value;
+        const nextHost = typeof next === "string" && URL.canParse(next) ? new URL(next).hostname : null;
+        if (!LOOPBACK.has(host) && nextHost !== host)
+          return fail(
+            `you reach the app as ${host}: a public address under another name would lock this page out. Change it from this machine (localhost)`,
+            409,
+          );
+      }
+      let saved: { restart: boolean };
+      try {
+        saved = setSetting(key as string[], reset === true ? undefined : value);
+      } catch (err) {
+        return fail(errorMessage(err), 409);
+      }
+      logEvent(
+        "user",
+        `setting ${key.join(".")} ${reset === true ? "reset to config.yml's" : `set to ${JSON.stringify(value)}`}${saved.restart ? " (from the next restart)" : ""}`,
+      );
+      return json({ ok: true, ...saved });
     }
 
     if (path === "/api/resume" && req.method === "GET") return json(resumeState());

@@ -43,7 +43,7 @@ Runs as a systemd user service (`~/.config/systemd/user/auto-apply.service`, lin
 
 ```bash
 systemctl --user status auto-apply
-systemctl --user restart auto-apply      # after editing config.yml or code
+systemctl --user restart auto-apply      # after editing config.yml or code, or a setting that waits for a restart
 journalctl --user -u auto-apply -f
 ```
 
@@ -92,4 +92,4 @@ The app does not run on Windows itself (Xvfb, `setsid`, X11 sockets, systemd), b
    - `employers.yml`: employers settled by hand: `frontier` (the real targets, never spent on practice) and `practice`.
    - `companies.yml`: company boards to watch; it starts with the 1,800-odd boards found so far (`ats`: greenhouse, lever, ashby, workable, recruitee, smartrecruiters, workday). The discover step adds to it. A Workday slug is `<tenant>.<wdN>/<site>`; an optional `search:` narrows a large employer to matching titles.
 2. **Gmail**: in Google Cloud, enable the Gmail API, create a Web OAuth client with redirect URI `<publicUrl>/oauth/callback`, save its JSON as `profile/gmail-client.json`, then Settings → Connect Gmail and sign in as the `mailbox` you configured. Scope is `gmail.modify`.
-3. **`config.yml`**: phase, models per stage, schedule, daily caps, and `confirmBeforeSubmit` (gate 2). Settings → Models picks each stage's model from what `omp models` lists (prices per million tokens beside each) and Claude Code's aliases (`claude-code/…`; see [harnesses.md](harnesses.md)) and writes the choice to `config.local.yml`; it takes effect from that stage's next run, with no restart. A model neither lists can still be typed by name. **`config.local.yml`** (not tracked; start from `config.local.example.yml`) is laid over it and holds what identifies you or this machine: `publicUrl`, `vncUrl`, `mailbox` and `resume.pdfName`.
+3. **`config.yml`**: phase, models per stage, schedule, daily caps, and `confirmBeforeSubmit` (gate 2). The Settings page changes every one of them, writing to `config.local.yml`: from the next read, or for `port`, `chrome`, `concurrency.fill` and `resume` from the next restart, which the page says. Settings → Models picks each stage's model from what `omp models` lists (prices per million tokens beside each) and Claude Code's aliases (`claude-code/…`; see [harnesses.md](harnesses.md)) and writes the choice to `config.local.yml`; it takes effect from that stage's next run, with no restart. A model neither lists can still be typed by name. **`config.local.yml`** (not tracked; start from `config.local.example.yml`) is laid over it and holds what identifies you or this machine: `publicUrl`, `vncUrl`, `mailbox` and `resume.pdfName`.

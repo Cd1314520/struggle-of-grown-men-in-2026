@@ -1,13 +1,10 @@
 // The models agents run on: which ones omp and Claude Code can reach, and the choice per stage. A choice made in the
 // app is written to config.local.yml (laid over config.yml) and to the loaded config, so the next
 // worker of that stage uses it without a restart.
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import YAML from "yaml";
-import { config, LOCAL_CONFIG, MODEL_STAGES, overlay, ROOT, type ModelStage } from "./config";
+import { config, LOCAL_CONFIG, MODEL_STAGES, type ModelStage } from "./config";
 import { claudeCatalog } from "./claude";
-import { configProblems } from "./config-check";
 import { errorMessage } from "./errors";
+import { setSetting } from "./settings";
 import type { HarnessId } from "./worker";
 
 export interface CatalogModel {
@@ -89,22 +86,10 @@ export function parseCatalog(json: string): CatalogModel[] {
   });
 }
 
-// Sets `models.<stage>` in config.local.yml, keeping the file's comments and every other key, and in the
-// running config. null hands the stage back to omp's default. The file is checked as the app would read
-// it at start before it is replaced.
+// Sets `models.<stage>` in config.local.yml and in the running config (src/settings.ts). null hands the
+// stage back to omp's default.
 export function setModel(stage: ModelStage, model: string | null, file = LOCAL_CONFIG) {
-  const doc = existsSync(file) ? YAML.parseDocument(readFileSync(file, "utf8")) : new YAML.Document({});
-  if (doc.errors.length) throw new Error(`config.local.yml cannot be read: ${doc.errors[0]?.message ?? "invalid YAML"}`);
-  if (!YAML.isMap(doc.contents)) doc.contents = doc.createNode({});
-  doc.setIn(["models", stage], model);
-  const text = doc.toString();
-  const base: unknown = YAML.parse(readFileSync(join(ROOT, "config.yml"), "utf8"));
-  const problems = configProblems(overlay(base, YAML.parse(text)));
-  if (problems.length) throw new Error(`config.local.yml would not load: ${problems[0]}`);
-  const staged = join(dirname(file), ".config.local.yml.tmp");
-  writeFileSync(staged, text);
-  renameSync(staged, file);
-  config.models[stage] = model;
+  setSetting(["models", stage], model, file);
 }
 
 // Each stage's model as the loaded config has it.

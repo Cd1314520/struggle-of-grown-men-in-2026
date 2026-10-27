@@ -64,8 +64,11 @@ function loadConfig(): Config {
   const problems = configProblems(raw);
   if (problems.length)
     throw new Error(`config.yml (with config.local.yml, if there is one) cannot be used:\n${problems.map(problem => `  - ${problem}`).join("\n")}`);
+  started = structuredClone(raw) as Record<string, unknown>;
   return raw as Config;
 }
+// The files as the app started with them, before anything below or since changed the loaded config.
+export let started: Record<string, unknown> = {};
 export const config = loadConfig();
 config.questionDigest = {
   enabled: true,

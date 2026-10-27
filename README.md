@@ -19,7 +19,7 @@ systemctl --user status auto-apply
 | [docs/harnesses.md](docs/harnesses.md) | omp and Claude Code as worker harnesses: how a stage picks one, what each is given, what differs |
 | [docs/database.md](docs/database.md) | schema and migrations, backups, status history, fill state, application steps, retention |
 
-Settings live in [`config.yml`](config.yml), with what identifies you or this machine in an untracked `config.local.yml` laid over it; both are checked when the app starts. The documentation names the keys and leaves the values to the file.
+Settings live in [`config.yml`](config.yml), with what identifies you or this machine in an untracked `config.local.yml` laid over it; both are checked when the app starts. The Settings page changes any of them, writing to `config.local.yml`. The documentation names the keys and leaves the values to the file.
 
 ## Flow
 
@@ -60,6 +60,6 @@ An employer is judged once. In the practice phase, a job at an employer an earli
 - `src/schema.ts`: database migrations and how a connection is opened. `src/db.ts`: jobs, status history, events and kv.
 - `src/status.ts`: the job statuses, their groups, and what each move between them writes. Every status change goes through `to`. `src/fill-state.ts`: where an application stands between approval and a recorded outcome.
 - `src/setup.ts`: what a new install still needs, for the Setup page. `src/models.ts`: the models omp and Claude Code list, and the model per stage. `src/resume-import.ts`: uploaded files into the stock resume. `profile.example/`: the templates a new `profile/` is seeded from.
-- `src/config.ts`: reads `config.yml`; `src/config-check.ts` is what the file must look like. `src/template.ts`: fills a prompt's placeholders.
+- `src/config.ts`: reads `config.yml`; `src/config-check.ts` is what the file must look like; `src/settings.ts` changes a setting from the app. `src/template.ts`: fills a prompt's placeholders.
 - `deploy/systemd/`: the service and timer units. `deploy/wsl/`: what running under WSL2 adds. `docs/`: everything this page links to.
 - `data/`: SQLite DB, per-job resume copies, omp sessions, Chrome profile (git-ignored; holds site passwords and Gmail tokens).

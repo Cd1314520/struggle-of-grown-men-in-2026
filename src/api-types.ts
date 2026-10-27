@@ -144,6 +144,16 @@ export interface ModelsResult {
   localConfig: string;
 }
 
+// GET /api/settings: the settings as config.yml and config.local.yml have them, what the latter sets, those read
+// only at start (dotted prefixes), and which of those wait for a restart.
+export interface SettingsResult {
+  values: Record<string, unknown>;
+  local: unknown;
+  pending: string[];
+  restart: string[];
+  localConfig: string;
+}
+
 // GET /api/resume
 export interface ResumeState {
   stock: StockResume;

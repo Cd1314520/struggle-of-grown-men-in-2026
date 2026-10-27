@@ -125,7 +125,7 @@ const STEPS: Record<SetupStepId, StepCopy> = {
         <Code>cp config.local.example.yml config.local.yml</Code>
         <p>
           Set <Mono>publicUrl</Mono> when you reach the app under another name (a tailnet address, say): the app refuses requests to names it does not know, and
-          the Gmail sign-in returns there. Restart the service after editing. This file is at <Mono>{r.localConfig}</Mono>.
+          the Gmail sign-in returns there. Settings changes any of these too, writing this file: <Mono>{r.localConfig}</Mono>.
         </p>
       </>
     ),

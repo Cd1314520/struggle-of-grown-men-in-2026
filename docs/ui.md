@@ -30,6 +30,7 @@ Routes are hash based: `#review/123?sort=score&filter=remote`. A list keeps grou
 | `GET /api/blockers` | every stop, newest first |
 | `GET /api/stats` | aggregates for the Overview (`src/stats.ts`) |
 | `GET /api/setup?refresh` | `SetupResult`: each setup step and its checks (`src/setup.ts`); `refresh` reads the model lists (omp and Claude Code) again |
+| `GET /api/settings`, `PUT /api/settings` | every setting as `config.yml` with `config.local.yml` laid over it has it, what the latter sets, the settings read only at start (`restart`) and those saved but waiting for one (`pending`); a PUT (`{ path: [...keys], value }`, or `{ path, reset: true }` to hand it back to `config.yml`) is checked as the app would read it at start, written to `config.local.yml` and, unless read only at start, to the running config (`src/settings.ts`). A `publicUrl` that would stop answering the name the request came in under is refused unless the request comes from localhost |
 | `GET /api/models?refresh`, `PUT /api/models/:stage` | the model catalog (omp's and Claude Code's, with `errors` per harness) and each stage's model; a PUT (`{ model }`, null for omp's default) writes `config.local.yml` (`src/models.ts`) |
 | `GET /api/resume` | `ResumeState`: the stock resume (pages, compile error), the import under way and its latest steps, the notes. Pages: `/api/resume/{stock,draft}.png?page=N` and `.pdf` |
 | `POST /api/resume/import` (form: `files`, `note`), `/import/{revise,accept,discard,cancel}`, `/api/resume/example` | the resume import (`src/resume-import.ts`) |

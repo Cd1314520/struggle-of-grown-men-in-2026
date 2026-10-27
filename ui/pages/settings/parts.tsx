@@ -9,7 +9,7 @@ import { cn } from "../../lib/cn";
 export const MEASURED_HEAD = "[&>div:first-child]:max-w-[56rem]";
 
 // A section of the page: a titled region the nav scrolls to, its notices across the sheet, its rows inside
-// the reading measure, and a last line that says where its values are changed.
+// the reading measure, and a last line that says where its changes are saved.
 export function SettingsPanel({
   id,
   title,
@@ -85,12 +85,13 @@ export function SettingRow({
 // A fold in a section: the policy behind its values.
 export const SettingFold = ({ children }: { children: ReactNode }) => <div className="py-3">{children}</div>;
 
-// Said once per section, on its last line: these values are read, not set, here.
-export const FromConfig = ({ what = "these", file = "config.yml" }: { what?: string; file?: string }) => (
-  <span className="inline-flex items-center gap-1.5 text-xs text-fg-muted">
-    <FileCog className="size-3.5 shrink-0 text-fg-subtle" />
+// Said once per section, on its last line: where a change made here goes.
+export const SavedLocally = () => (
+  <span className="inline-flex items-start gap-1.5 text-xs text-fg-muted">
+    <FileCog className="mt-0.5 size-3.5 shrink-0 text-fg-subtle" />
     <span>
-      Change {what} in <code className="font-mono text-xs">{file}</code>
+      Changes are saved to <code className="font-mono text-xs">config.local.yml</code>, laid over <code className="font-mono text-xs">config.yml</code>. Reset
+      goes back to the latter.
     </span>
   </span>
 );

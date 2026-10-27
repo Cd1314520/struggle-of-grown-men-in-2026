@@ -1,26 +1,31 @@
-// Settings: each subsystem's state, its one action, and the policy behind it folded away. Values come from
-// config.yml; the page reads them and says where to change them.
-import { ExternalLink, Plus } from "lucide-react";
+// Settings: each subsystem's state, its one action, every value it runs with, and the policy behind it folded
+// away. A value changed here is saved to config.local.yml, laid over config.yml (see field.tsx).
+import { ExternalLink, Plus, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Summary } from "../../../src/api-types";
 import { shellActions } from "../../components/shell/state";
-import { Button, ConfirmDialog, Disclosure, SectionNav, Skeleton, SkeletonRows, StatusLabel, Workspace, WorkspaceBody } from "../../components/ui";
-import { api, refreshAll, useSummary } from "../../lib/api";
+import { Button, ConfirmDialog, Disclosure, ListNotice, SectionNav, Skeleton, SkeletonRows, StatusLabel, Workspace, WorkspaceBody } from "../../components/ui";
+import { api, refreshAll, useSettings, useSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
-import { cap, num, plural } from "../../lib/format";
+import { num, plural } from "../../lib/format";
 import type { Tone } from "../../lib/labels";
 import { href, useRoute } from "../../lib/router";
 import { Mail } from "./mail";
 import { Models } from "./models";
-import { FromConfig, SettingFold, SettingRow, SettingsPanel } from "./parts";
+import { ConfigRow } from "./field";
+import { SavedLocally, SettingFold, SettingRow, SettingsPanel } from "./parts";
+import { BrowserRows, Schedule, Server, Sources } from "./sections";
 
 const SECTIONS = [
   ["general", "General"],
   ["models", "Models"],
   ["auto-apply", "Auto apply"],
+  ["schedule", "Schedule & limits"],
+  ["sources", "Sources"],
   ["mail", "Mail & digest"],
   ["browser", "Browser"],
+  ["server", "Server"],
   ["danger", "Danger zone"],
 ] as const;
 type Section = (typeof SECTIONS)[number][0];
@@ -62,6 +67,22 @@ function Nav({ ready }: { ready: boolean }) {
   );
 }
 
+const PHASES = [
+  { value: "practice", label: "Practice" },
+  { value: "real", label: "Real" },
+] as const;
+
+// Settings the app reads only at start, saved but not yet in use.
+function RestartNotice() {
+  const { data } = useSettings();
+  if (!data?.pending.length) return null;
+  return (
+    <ListNotice tone="warning" icon={<RotateCw />}>
+      Saved changes to {data.pending.join(", ")} are used once the app restarts: <code className="font-mono text-xs">systemctl --user restart auto-apply</code>
+    </ListNotice>
+  );
+}
+
 function autoState(s: Summary): [Tone, string, string] {
   const a = s.autoApply;
   if (!a.enabled) return ["neutral", "Off", "Every application waits for your approval in Review."];
@@ -76,17 +97,17 @@ function autoState(s: Summary): [Tone, string, string] {
 function General({ s }: { s: Summary }) {
   const held = s.counts["held"] ?? 0;
   return (
-    <SettingsPanel id="general" title="General" footer={<FromConfig />}>
-      <SettingRow
+    <SettingsPanel id="general" title="General" footer={<SavedLocally />}>
+      <ConfigRow
+        path="phase"
         label="Phase"
         description={
           s.phase === "practice"
             ? "Applies only where your real search wouldn't, to practise. Everything else is held for the real search."
-            : "Applies to the jobs you're after."
+            : "Applies to the jobs you're after, the roles in the Real phase section of profile/targets.md."
         }
-      >
-        <span className="font-medium">{cap(s.phase)}</span>
-      </SettingRow>
+        field={{ kind: "choice", options: PHASES }}
+      />
       {s.phase === "practice" && (
         <SettingRow label="Held for the real search" description="They go back through triage once you switch phase.">
           <span className="tabular font-medium">{num(held)}</span>
@@ -96,21 +117,18 @@ function General({ s }: { s: Summary }) {
         </SettingRow>
       )}
       {s.threshold != null && (
-        <SettingRow label="Fit threshold" description="Postings that score below it are skipped.">
+        <SettingRow label="Fit threshold" description="Postings that score below it are skipped. Set in profile/rubric.yml, on the Profile page.">
           <span className="tabular font-medium">{s.threshold}</span>
         </SettingRow>
       )}
-      <SettingRow label="New applications a day" description="Blocked and failed starts count; resuming one already started doesn't. Resets at midnight UTC.">
-        <span className="tabular font-medium">{num(s.applyPerDay)}</span>
-      </SettingRow>
-      <SettingRow
+      <ConfigRow
+        path="confirmBeforeSubmit"
         label="Confirm before submitting"
         description={
           s.confirmBeforeSubmit ? "Applications you approve stop for your OK before they're sent." : "Applications you approve are sent without asking again."
         }
-      >
-        <span>{s.confirmBeforeSubmit ? "On" : "Off"}</span>
-      </SettingRow>
+        field={{ kind: "bool" }}
+      />
       <SettingRow stack label="Add a posting" description="Paste a job URL to have it assessed like any posting a scan finds.">
         <Button
           size="sm"
@@ -136,14 +154,37 @@ function AutoApply({ s }: { s: Summary }) {
     (autoSubmits ? " Eligible auto-approved jobs submit directly." : " Auto-approved jobs still require your OK before submitting.");
   const used = Math.min(1, a.perDay ? a.approvedToday / a.perDay : 0);
   return (
-    <SettingsPanel id="auto-apply" title="Auto apply" description="Approves practice jobs for you, so they skip Review." footer={<FromConfig />}>
+    <SettingsPanel id="auto-apply" title="Auto apply" description="Approves practice jobs for you, so they skip Review." footer={<SavedLocally />}>
       <SettingRow label="Status" description={note}>
         <StatusLabel tone={tone} label={label} className="text-fg" />
       </SettingRow>
-      <SettingRow label="Minimum fit">
-        <span className="tabular font-medium">{a.minScore}</span>
-      </SettingRow>
-      <SettingRow stack label="Approvals a day" description="Daily quotas reset at midnight UTC.">
+      <ConfigRow path="autoApply.enabled" label="Auto apply" description="Off: every application waits for you in Review." field={{ kind: "bool" }} />
+      <ConfigRow path="autoApply.phases" label="Runs in" field={{ kind: "choices", options: PHASES }} />
+      <ConfigRow
+        path="autoApply.minScore"
+        label="Minimum fit"
+        description="Align it with the practice interview-fit threshold: a score alone never makes a job practice."
+        field={{ kind: "number" }}
+      />
+      <ConfigRow
+        path="autoApply.allowConcerns"
+        label="Approve despite concerns"
+        description="Hard requirements and the evidence gates still apply."
+        field={{ kind: "bool" }}
+      />
+      <ConfigRow
+        path="autoApply.perDay"
+        label="Approvals a day"
+        description="New applications a day (Schedule & limits) still caps what starts."
+        field={{ kind: "number", unit: "a day" }}
+      />
+      <ConfigRow
+        path="autoApply.perEmployer"
+        label="Applications per employer"
+        description="Ever, sent or under way. Further passing roles there wait for your review."
+        field={{ kind: "number" }}
+      />
+      <SettingRow stack label="Approved today" description="Daily quotas reset at midnight UTC.">
         <div className="flex items-center gap-3">
           <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted" aria-hidden>
             <div className={cn("h-full rounded-full", used >= 1 ? "bg-warning" : "bg-accent")} style={{ width: `${used * 100}%` }} />
@@ -154,12 +195,12 @@ function AutoApply({ s }: { s: Summary }) {
           </span>
         </div>
       </SettingRow>
-      <SettingRow
+      <ConfigRow
+        path="autoApply.submit"
         label="Submits on its own"
         description={a.submit ? "Approved jobs are sent without your confirmation." : "Approved jobs still stop for your OK before they're sent."}
-      >
-        <span>{a.submit ? "Yes" : "No"}</span>
-      </SettingRow>
+        field={{ kind: "bool" }}
+      />
       <SettingFold>
         <Disclosure id="settings-auto" summary="How auto apply decides">
           <div className="space-y-3">
@@ -184,7 +225,7 @@ function AutoApply({ s }: { s: Summary }) {
 function Browser({ s }: { s: Summary }) {
   const slots = s.browsers;
   return (
-    <SettingsPanel id="browser" title="Browser" footer={<FromConfig />}>
+    <SettingsPanel id="browser" title="Browser" footer={<SavedLocally />}>
       <SettingRow
         stack
         label={slots.length > 1 ? "Browser slots" : "Browser"}
@@ -193,7 +234,7 @@ function Browser({ s }: { s: Summary }) {
             ? `Up to ${slots.length} browser slots run on this machine.`
             : slots.length
               ? "Chrome runs on this machine."
-              : "Chrome runs on this machine. Viewing it from here needs a VNC port in the config."
+              : "Chrome runs on this machine. Viewing it from here needs a live view port (below)."
         }
       >
         {slots.length
@@ -207,6 +248,7 @@ function Browser({ s }: { s: Summary }) {
             ))
           : undefined}
       </SettingRow>
+      <BrowserRows />
       <SettingFold>
         <Disclosure id="settings-browser" summary="Before you take over a browser">
           These are shared slot views, not application links. Ordinary parked applications release their slots; inspect their saved screenshot and checkpoint
@@ -285,11 +327,15 @@ export function SettingsPage() {
       <WorkspaceBody asideSide="left" asideWidth="nav" aside={<Nav ready={ready} />}>
         {s ? (
           <>
+            <RestartNotice />
             <General s={s} />
             <Models />
             <AutoApply s={s} />
+            <Schedule />
+            <Sources />
             <Mail s={s} />
             <Browser s={s} />
+            <Server />
             <DangerZone s={s} />
           </>
         ) : (

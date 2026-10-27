@@ -1,7 +1,9 @@
 # Settings for this machine and its owner (the public addresses, the mailbox, the resume's file name)
 # go in config.local.yml, which is not tracked: see config.local.example.yml.
 
-# App settings. Restart the server after editing.
+# App settings. Every one can be changed on the Settings page, which writes the change to config.local.yml;
+# most take effect at once (port, chrome, concurrency.fill and resume wait for a restart). Restart the
+# server after editing either file by hand.
 port: 8787
 
 # How you reach the app and the live browser view (served over the tailnet by `tailscale serve`).

@@ -8,7 +8,8 @@ import { Button, Disclosure, StatusLabel, Time, Tooltip } from "../../components
 import { api, queryClient } from "../../lib/api";
 import { plural } from "../../lib/format";
 import type { Tone } from "../../lib/labels";
-import { FromConfig, SettingFold, SettingRow, SettingsGroup, SettingsPanel } from "./parts";
+import { ConfigRow } from "./field";
+import { SavedLocally, SettingFold, SettingRow, SettingsGroup, SettingsPanel } from "./parts";
 
 function Gmail({ s }: { s: Summary }) {
   const copy = async () => {
@@ -24,7 +25,7 @@ function Gmail({ s }: { s: Summary }) {
       <SettingsGroup title="Gmail" />
       <SettingRow
         stack
-        label="Mailbox"
+        label="Gmail connection"
         description={
           s.gmail.connected
             ? "Applications create accounts and read emailed codes with it, and the digest goes out through it."
@@ -47,6 +48,12 @@ function Gmail({ s }: { s: Summary }) {
           </>
         )}
       </SettingRow>
+      <ConfigRow
+        path="mailbox"
+        label="Application mailbox"
+        description="The dedicated mailbox applications are sent from. Connecting any other Google account is refused."
+        field={{ kind: "text", type: "email", nullable: true, placeholder: "you@example.com" }}
+      />
       <SettingRow stack label="OAuth redirect URI" description="Google must list this address for the connection to work.">
         <code className="min-w-0 truncate font-mono text-xs text-fg">{s.redirectUri}</code>
         <Tooltip content="Copy">
@@ -136,7 +143,7 @@ export function Mail({ s }: { s: Summary }) {
               Refresh status
             </Button>
           </div>
-          <FromConfig what="the schedule" />
+          <SavedLocally />
         </>
       }
     >
@@ -145,6 +152,9 @@ export function Mail({ s }: { s: Summary }) {
       <SettingRow label="Status" description="One email a day with the questions waiting on you and the employers' steps falling due.">
         <StatusLabel tone={tone} label={label} pulse={d.deliveryState === "sending"} className="text-fg" />
       </SettingRow>
+      <ConfigRow path="questionDigest.enabled" label="Send the digest" field={{ kind: "bool" }} />
+      <ConfigRow path="questionDigest.time" label="Send at" description="In the digest's time zone." field={{ kind: "time" }} />
+      <ConfigRow path="questionDigest.timeZone" label="Time zone" field={{ kind: "zone" }} />
       <SettingRow label="Recipient" description="Only the verified, connected mailbox. Never anyone else.">
         <span className={d.recipient ? "truncate" : "text-fg-muted"}>{d.recipient ?? "No verified connected mailbox"}</span>
       </SettingRow>
@@ -170,11 +180,9 @@ export function Mail({ s }: { s: Summary }) {
         <Disclosure id="settings-digest" summary="How the digest works">
           <div className="space-y-2">
             <p>
-              Set <code className="font-mono">questionDigest.enabled</code>, <code className="font-mono">questionDigest.time</code> (HH:mm) and{" "}
-              <code className="font-mono">questionDigest.timeZone</code> in <code className="font-mono">config.yml</code>. Each send holds only groups not
-              delivered before, and the employers' steps still to do that fall due within 48 hours (each once per deadline). Delivery goes only to the verified
-              configured or connected Gmail mailbox, never an arbitrary recipient. The message contains grouped prompts, counts and links, not answer values or
-              credentials.
+              Each send holds only groups not delivered before, and the employers' steps still to do that fall due within 48 hours (each once per deadline).
+              Delivery goes only to the verified configured or connected Gmail mailbox, never an arbitrary recipient. The message contains grouped prompts,
+              counts and links, not answer values or credentials.
             </p>
             <p>
               Send now bypasses the daily schedule, not delivery deduplication. Adding another application to an unchanged notified group does not send it

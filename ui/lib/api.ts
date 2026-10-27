@@ -14,6 +14,7 @@ import type {
   ModelsResult,
   ModelStage,
   ResumeState,
+  SettingsResult,
   SetupResult,
   Stats,
   Summary,
@@ -96,6 +97,7 @@ export const api = {
   setup: (refresh = false) => request<SetupResult>(`/api/setup${refresh ? "?refresh" : ""}`),
   models: (refresh = false) => request<ModelsResult>(`/api/models${refresh ? "?refresh" : ""}`),
   resume: () => request<ResumeState>("/api/resume"),
+  settings: () => request<SettingsResult>("/api/settings"),
 
   // ---- writes. Each shows the server's refusal as a toast and rethrows it.
   jobAction: (id: number, body: { action: string; text?: string; gateId?: string | undefined }) => post(`/api/jobs/${id}/action`, { text: "", ...body }),
@@ -109,6 +111,9 @@ export const api = {
     post<AnswerResult>(`/api/questions/${encodeURIComponent(gateId)}/answer`, { answer, scope }),
   sendDigest: () => post<DigestResult>("/api/digest/send", {}),
   saveProfile: (file: string, text: string) => request<{ ok: true }>(`/api/profile/${file}`, { method: "PUT", body: text, raw: true }),
+  // `undefined` hands the setting back to config.yml's value.
+  setSetting: (path: readonly string[], value: unknown) =>
+    request<{ ok: true; restart: boolean }>("/api/settings", { method: "PUT", body: value === undefined ? { path, reset: true } : { path, value } }),
   setModel: (stage: ModelStage, model: string | null) => request<{ ok: true }>(`/api/models/${stage}`, { method: "PUT", body: { model } }),
   importResume: (files: readonly File[], note: string) => {
     const form = new FormData();
@@ -149,6 +154,7 @@ export const prefetchJobs = (ids: readonly (number | undefined)[]) => {
   for (const id of ids) if (id !== undefined) queryClient.query({ queryKey: ["job", id], queryFn: () => api.job(id) }).catch(() => undefined); // the open job shows its own error
 };
 export const useSetup = () => useQuery({ queryKey: ["setup"], queryFn: () => api.setup() });
+export const useSettings = () => useQuery({ queryKey: ["settings"], queryFn: api.settings });
 export const useModels = () => useQuery({ queryKey: ["models"], queryFn: () => api.models() });
 export const useResume = () => useQuery({ queryKey: ["resume"], queryFn: api.resume });
 export const useQuestions = () => useQuery({ queryKey: ["questions"], queryFn: api.questions });
