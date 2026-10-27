@@ -136,7 +136,7 @@ The web URL is `https://www.indeed.com/jobs?q=...&l=...` with `radius`, `fromage
 
 ### Inferences
 - The 10-versus-15 discrepancy is most likely organic versus displayed cards: `start` advances by 10 organic results while a rendered page shows about 15 cards including sponsored ones. Sponsored cards carry `sponsored: true` in the card JSON and can repeat across pages and queries, so dedupe on `jobkey` and treat the sponsored flag as informational.
-- For Houston / Austin, a single centre point with `radius=25` or `35` may cover both; the GraphQL route takes an arbitrary integer radius rather than the fixed web list.
+- For Houston, a single centre point with `radius=25` or `35` may cover both; the GraphQL route takes an arbitrary integer radius rather than the fixed web list.
 - For a 30-minute scan the GraphQL hour filter (e.g. `start: "24h"` or smaller) is finer than the web's `fromage=1` (whole days) or `fromage=last` (since last visit, cookie-dependent).
 
 ### Gaps
@@ -162,7 +162,7 @@ No source gives a safe daily budget for one residential IP; the figures below ar
 - Narrowing the window (e.g. GraphQL `start: "2h"` on each 30-minute scan, with a daily 24h sweep) cuts payload size but not request count.
 
 ### Gaps
-- Number of new junior/mid software postings per day in Houston / Austin on Indeed: not researched; needed to size detail fetches on the web route.
+- Number of new junior/mid software postings per day in Houston on Indeed: not researched; needed to size detail fetches on the web route.
 - No evidence on whether steady low-rate polling every 30 minutes, around the clock, from one IP is itself a flag on either route.
 
 ## 7. External "Apply on company site" URL versus Indeed Apply

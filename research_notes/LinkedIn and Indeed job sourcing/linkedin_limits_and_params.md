@@ -102,13 +102,13 @@ LinkedIn's commercial use limit explicitly does not count job searches, so it is
 - Other filters visible in scraper docs: salary tiers 40K-200K in 20K steps, and industry via `f_I` (codes obtained by inspecting the URL after applying the filter in the UI). — [py-linkedin-jobs-scraper README](https://github.com/spinlud/py-linkedin-jobs-scraper)
 
 ### Inferences
-- Practical way to get the Houston (or any metro) geoId without an API: run the search once by hand in a browser with the location typed and selected from the dropdown, then read `geoId=` from the resulting URL; store it in config per metro. Both a city-level ID ("Houston, Texas, United States") and a metro-area ID ("Greater Houston") are likely to exist; with `distance=25` or `50` around the city ID, the suburbs would be covered. This procedure is standard practice but is my inference; no fetched source spells it out.
+- Practical way to get the Houston (or any metro) geoId without an API: run the search once by hand in a browser with the location typed and selected from the dropdown, then read `geoId=` from the resulting URL; store it in config per metro. Both a city-level ID ("Houston, Texas, United States") and a metro-area ID ("Greater Houston") are likely to exist; `distance=25` or `50` around the city ID would cover the suburbs. This procedure is standard practice but is my inference; no fetched source spells it out.
 - JobSpy drives the guest endpoint with free-text `location` only (no `geoId`), so `location=Houston, TX` plus `distance` is sufficient to start; `geoId` is an optional precision improvement.
 - Since `f_TPR` is confirmed on the guest endpoint and accepts any hour multiple in JobSpy, a 30-minute scan can use `f_TPR=r3600` (or `r7200` for overlap safety) with `sortBy=DD` and dedupe by job ID, keeping each query to 1-2 pages.
 - Given the JobSpy vs jobspy-js disagreement on `f_WT`/`f_JT`, and no source confirming `f_E` on the guest endpoint, filter by experience level/job type/workplace client-side as a fallback (the detail fetch exposes seniority and employment type) and test whether the guest endpoint honours the parameters.
 
 ### Gaps
-- The geoId for Houston, TX (and for Greater Houston / Austin) was not found in any source; a search for a candidate value returned nothing usable. It must be read from the browser URL.
+- The geoId for Houston, TX (and for Greater Houston) was not found in any source; a search for a candidate value returned nothing usable. It must be read from the browser URL.
 - Allowed `distance` values: the LinkedIn UI offers a fixed set of radii, but no fetched source lists them or says whether arbitrary values are accepted or snapped.
 - No source confirms that sub-hour `f_TPR` values (e.g. `r1800`) are honoured on the guest endpoint specifically (the guides describe the logged-in UI URL), nor how accurate the window is for reposted jobs.
 - No fetched source directly tests `f_E`, `f_WT`, `f_JT`, `sortBy=DD` or `geoId` on `seeMoreJobPostings`. The mcp-jobsearch guide page itself could not be retrieved in full; its values above come from the search-result snippet.

@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import YAML from "yaml";
+import { isAts } from "../src/ats";
 import { config } from "../src/config";
 import { parseCatalog, setModel } from "../src/models";
 import { EXAMPLES, PLACEHOLDER, seedProfile } from "../src/profile";
@@ -24,7 +25,11 @@ describe("the example profile", () => {
     const rubric = loadRubric(join(EXAMPLES, "rubric.yml"));
     expect(rubric.practice.criteria.length).toBeGreaterThan(0);
     expect(rubric.real.criteria.length).toBeGreaterThan(0);
-    expect(YAML.parse(example("companies.yml"))).toEqual({ companies: [] });
+    // The boards ship filled in: each one a board a scan can read, none of them twice.
+    const boards = (YAML.parse(example("companies.yml")) as { companies: { name: string; ats: string; slug: string }[] }).companies;
+    expect(boards.length).toBeGreaterThan(1000);
+    expect(boards.filter(b => !b.name || !b.slug || !isAts(b.ats))).toEqual([]);
+    expect(new Set(boards.map(b => `${b.ats}/${b.slug}`)).size).toBe(boards.length);
     expect(YAML.parse(example("employers.yml"))).toEqual({ frontier: [], practice: [] });
     expect(YAML.parse(example("personal.yml"))).toHaveProperty("prefill");
   });
