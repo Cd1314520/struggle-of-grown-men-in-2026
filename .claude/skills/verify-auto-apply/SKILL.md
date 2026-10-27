@@ -42,7 +42,7 @@ Seeded jobs (no snapshot). Each company is `Verify Co A`..`I`; the word in the p
 |---|---|---|---|
 | 1 | Backend Engineer (straight through) | Review | `straight`: asks to submit (gate 2), then reports submitted |
 | 2 | Platform Engineer (asks a question) | Review | `question`: parks on a question, then as `straight` |
-| 3 | Data Engineer (wants a cover letter) | Review | `cover-letter`: parks for a letter, then as `straight` |
+| 3 | Data Engineer (requires a cover letter) | Review | `cover-letter`: drops the application (Archive, Skipped: `requires a cover letter: …`) |
 | 4 | Site Reliability Engineer (needs browser help) | Review | `manual`: hands off once (blocker cause CAPTCHA), then as `straight` |
 | 5 | Full Stack Developer (worker fails) | Review | `fail`: reports failure (blocker cause Site down) |
 | 6 | Support Engineer (reject me) | Review | `straight` |

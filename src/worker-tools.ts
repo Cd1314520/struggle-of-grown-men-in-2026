@@ -16,6 +16,7 @@ export const render = (name: string, vars: Record<string, string | number | null
 
 // What the fill and recheck agents may answer for the candidate without asking (prompts/low-stakes.md).
 export const lowStakesRule = () => readPrompt("low-stakes").trim();
+export const termsRule = () => readPrompt("terms").trim();
 
 export const workDir = () => {
   const dir = join(DATA, "work");

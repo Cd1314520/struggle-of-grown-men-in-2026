@@ -167,7 +167,7 @@ const { authorizeSubmit, isSubmitting, isVerifying, isRecovering } = await impor
 const core = await import("../../src/questions");
 const { jobBlockers } = await import("../../src/blockers");
 const { backedOff, usedToday } = await import("../../src/limits");
-const { Scheduler } = await import("../../src/scheduler");
+const { Scheduler, retryPassingHandoffs } = await import("../../src/scheduler");
 const scheduler = new Scheduler({ runWorker, browser });
 
 function must<T>(value: T | null | undefined, what: string): T {
@@ -424,17 +424,14 @@ if (scenario === "release" || scenario === "quick-answer") {
     assert.equal(jobRow(1).status, "filling");
     assert.equal(core.getOpenGate(1), null);
   }
-} else if (scenario === "cover-letter") {
-  const args = { ...navigation, prompt: "Required letter, plain text" };
-  const parking = call(first, "ask_cover_letter", args);
-  await until(() => core.getOpenGate(1) !== null);
-  assert.equal(core.respond(1, "My exact application letter."), true);
+} else if (scenario === "skip") {
+  const reply = await call(first, "skip_application", { requires: "cover_letter", note: "Cover Letter* (required upload)" });
+  assert.match(reply, /skipped/);
   first.exit();
-  await parking;
-  await until(() => workers.length === 2);
-  assert.match(await call(workerAt(1), "ask_cover_letter", args), /My exact application letter\./);
-  assert.equal(readFileSync(join(jobDir(1), "cover_letter.txt"), "utf8"), "My exact application letter.\n");
+  assert.equal(jobRow(1).status, "skipped");
+  assert.match(jobRow(1).note ?? "", /^requires a cover letter: Cover Letter\*/);
   assert.equal(core.getOpenGate(1), null);
+  await until(() => !scheduler.activeFillSession(1));
 } else if (scenario === "paced") {
   await call(first, "report_result", { outcome: "submitted", note: "Submitted" });
   first.exit();
@@ -476,6 +473,35 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(workerAt(1).options.jobId, 1, "the same draft resumes");
   assert.equal(jobRow(1).resume_sha, initialSha);
   assert.equal(usedToday("fill"), 1, "resuming is not a new application");
+} else if (scenario === "retry-browser" || scenario === "retry-site-down") {
+  const cause = scenario === "retry-browser" ? "browser" : "site_down";
+  const parking = call(first, "need_manual", { ...navigation, cause, reason: "Clicks time out; reads work" });
+  await until(() => core.getOpenGate(1) !== null);
+  first.exit();
+  await parking;
+  await until(() => !scheduler.activeFillSession(1));
+  if (cause === "site_down") {
+    retryPassingHandoffs();
+    assert.equal(jobRow(1).status, "needs_manual", "an outage gets a few hours before the retry");
+    db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 4 * 3600_000).toISOString());
+    db.query("UPDATE blockers SET at = datetime('now', '-4 hours') WHERE job_id = 1").run();
+  }
+  retryPassingHandoffs();
+  scheduler.pump();
+  await until(() => workers.length === 2);
+  assert.equal(workerAt(1).options.jobId, 1, "the same draft is tried again without the user");
+  assert.equal(jobRow(1).resume_sha, initialSha);
+  if (cause === "browser") {
+    const again = call(workerAt(1), "need_manual", { ...navigation, cause, reason: "Clicks still time out" });
+    await until(() => core.getOpenGate(1) !== null);
+    workerAt(1).exit();
+    await again;
+    await until(() => !scheduler.activeFillSession(1));
+    retryPassingHandoffs();
+    scheduler.pump();
+    assert.equal(jobRow(1).status, "needs_manual", "one retry only: the second stop waits for the user");
+    assert.equal(workers.length, 2);
+  }
 } else if (scenario === "manual-same-employer") {
   const parking = call(first, "need_manual", { ...navigation, cause: "other", reason: "CAPTCHA/session needs human" });
   await until(() => core.getOpenGate(1) !== null);

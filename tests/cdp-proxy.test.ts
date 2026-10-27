@@ -47,6 +47,7 @@ function parsePacket(text: string): Wire {
 interface TestHarnessOptions {
   nativeUa?: string | null;
   scopeTargetId?: string;
+  failMethods?: readonly string[]; // upstream answers these with an error
 }
 
 function createHarness(options: TestHarnessOptions = {}) {
@@ -116,7 +117,9 @@ function createHarness(options: TestHarnessOptions = {}) {
         } else if (msg.method === "Runtime.enable") {
           result = {};
         }
-        if (msg.id !== undefined) {
+        if (msg.id !== undefined && msg.method && options.failMethods?.includes(msg.method)) {
+          ws.send(JSON.stringify({ id: msg.id, sessionId: msg.sessionId, error: { code: -32000, message: `${msg.method} failed` } }));
+        } else if (msg.id !== undefined) {
           ws.send(JSON.stringify({ id: msg.id, sessionId: msg.sessionId, result }));
         }
       },
@@ -764,6 +767,80 @@ describe("CDP proxy scoped passive console capture", () => {
       assert.ok(forwarded);
       assert.equal(forwarded.params["returnByValue"], true);
       assert.equal(forwarded.params["generatePreview"], undefined);
+      client.ws.close();
+    } finally {
+      await harness.cleanup();
+    }
+  });
+});
+
+describe("CDP proxy keeps the driven page in front", () => {
+  const injected = (harness: ReturnType<typeof createHarness>, method: string) => harness.upstreamMessages.filter(m => m.method === method);
+
+  it("brings an application's page to the front and disables its print dialog before acting on it", async () => {
+    const harness = createHarness({ scopeTargetId: "job-tab" });
+    try {
+      const client = await harness.connectClient();
+      assert.equal(injected(harness, "Page.bringToFront").length, 0, "enabling a domain does not act on the page");
+
+      const reply = await client.send("Runtime.evaluate", { expression: "1 + 1" });
+      assert.equal(reply.error, undefined);
+      const methods = harness.upstreamMessages.map(m => m.method);
+      const acted = methods.lastIndexOf("Runtime.evaluate");
+      assert.ok(methods.indexOf("Page.bringToFront") < acted, "front before the command");
+      assert.deepEqual(
+        injected(harness, "Page.addScriptToEvaluateOnNewDocument").map(m => m.params["source"]),
+        ["window.print = () => {};"],
+      );
+      assert.ok(injected(harness, "Runtime.evaluate").some(m => m.params["expression"] === "window.print = () => {};"));
+
+      // Driving the same page again straight away needs nothing more.
+      await client.send("Runtime.callFunctionOn", { functionDeclaration: "function () {}", objectId: "x" });
+      await client.send("Input.dispatchKeyEvent", { type: "keyUp", key: "a" });
+      assert.equal(injected(harness, "Page.bringToFront").length, 1);
+      assert.equal(injected(harness, "Page.addScriptToEvaluateOnNewDocument").length, 1);
+      client.ws.close();
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  it("brings the page back after a while, in case a popup took the front", async () => {
+    const harness = createHarness({ scopeTargetId: "job-tab" });
+    const realNow = Date.now;
+    try {
+      const client = await harness.connectClient();
+      await client.send("Runtime.evaluate", { expression: "1" });
+      const later = realNow() + 2500;
+      Date.now = () => later;
+      await client.send("Runtime.evaluate", { expression: "2" });
+      assert.equal(injected(harness, "Page.bringToFront").length, 2);
+      client.ws.close();
+    } finally {
+      Date.now = realNow;
+      await harness.cleanup();
+    }
+  });
+
+  it("keeps the connection when the browser refuses to bring the page forward", async () => {
+    const harness = createHarness({ scopeTargetId: "job-tab", failMethods: ["Page.bringToFront", "Page.addScriptToEvaluateOnNewDocument"] });
+    try {
+      const client = await harness.connectClient();
+      const reply = await client.send("Runtime.evaluate", { expression: "1" });
+      assert.equal(reply.error, undefined);
+      assert.equal(client.ws.readyState, WebSocket.OPEN);
+      client.ws.close();
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  it("leaves an unscoped connection's pages alone", async () => {
+    const harness = createHarness();
+    try {
+      const client = await harness.connectClient();
+      await client.send("Runtime.evaluate", { expression: "1" });
+      assert.equal(injected(harness, "Page.bringToFront").length, 0);
       client.ws.close();
     } finally {
       await harness.cleanup();

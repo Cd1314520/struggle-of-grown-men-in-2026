@@ -33,8 +33,10 @@ async function runScenarios(scenarios: string[]) {
 describe("durable parking lifecycle", () => {
   it("exits before releasing an ordinary question's slot and starts another job", () => runScenarios(["release"]));
   it("preserves a fast answer against old cleanup/callbacks and resumes the same frozen artifact", () => runScenarios(["quick-answer"]));
-  it("uses the provided per-application cover letter instead of reopening its gate", () => runScenarios(["cover-letter"]));
+  it("drops an application whose form requires a cover letter, without parking it", () => runScenarios(["skip"]));
   it("releases stopped manual blockers and resumes their frozen drafts later", () => runScenarios(["manual"]));
+  it("retries a browser stop once, at once, before it waits for the user", () => runScenarios(["retry-browser"]));
+  it("retries a site outage after a few hours", () => runScenarios(["retry-site-down"]));
   it("keeps a new application to a stopped blocker's employer waiting until that one is finished", () => runScenarios(["manual-same-employer"]));
   it("applies to the most recently opened posting first", () => runScenarios(["freshest-first"]));
   it("spreads new applications to older postings over the day, but not one opened today", () => runScenarios(["paced"]));

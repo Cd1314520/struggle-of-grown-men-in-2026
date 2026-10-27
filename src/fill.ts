@@ -16,7 +16,8 @@ import { freezeResume, frozenResume } from "./resume";
 import { isSettled, to, wasSent } from "./status";
 import { fillTemplate } from "./template";
 import { harnessOf } from "./worker";
-import { lowStakesRule, readPrompt, render } from "./worker-tools";
+import { deadEnd } from "./screen";
+import { lowStakesRule, readPrompt, render, termsRule } from "./worker-tools";
 
 // The prefill script the worker imports into its JavaScript session.
 const PREFILL_MODULE = join(import.meta.dir, "prefill.ts");
@@ -80,6 +81,14 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
       return;
     }
   }
+  // Locating the employer's own posting can lead to a portal no application gets through.
+  const portal = job.resume_sha ? null : deadEnd(job.url);
+  if (portal) {
+    session.active = false;
+    updateJob(job.id, to.skipped(portal));
+    logEvent("auto", `Skipped before filling: ${portal}`, job.id, "fill");
+    return;
+  }
   updateJob(job.id, to.filling());
   const dir = jobDir(job.id);
   const browser = browserSlot(slot);
@@ -128,7 +137,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   // An omp worker drives omp's browser tool and runs the prefill script in its JavaScript session; a
   // Claude Code one drives Playwright's MCP tools, and the app runs the prefill script for it.
   const onClaude = harnessOf(config.models.fill) === "claude-code";
-  const ctx = { job, session, dir, mailbox, isVerification, jobBrowser };
+  const ctx = { job, session, mailbox, isVerification, jobBrowser };
   const tools = fillTools(rt, ctx);
   if (onClaude) tools["prefill"] = prefillTool(rt, ctx, prefillFacts);
   const guide = onClaude ? "browser-claude" : "browser-omp";
@@ -139,6 +148,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     personal: readProfile("personal.yml"),
     answers: readProfile("answers.md"),
     lowStakes: lowStakesRule(),
+    terms: termsRule(),
     resumeContext: JSON.stringify(context, null, 2),
     browserTabId: session.browser.tabId,
     continuationNote: job.note ?? "(none)",

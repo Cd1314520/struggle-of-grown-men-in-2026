@@ -1,7 +1,5 @@
 // The host tools a fill worker is given. Each one acts for the session it was built for and for
 // nothing else: once that session no longer owns the application, every tool refuses.
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { resolveAccount } from "./accounts";
 import { CAUSE_GUIDE, recordBlocker, WORKER_CAUSES } from "./blockers";
 import { connectTab } from "./cdp-tab";
@@ -38,7 +36,6 @@ import { gmailTools } from "./worker-tools";
 export interface FillContext {
   job: Job;
   session: FillSession;
-  dir: string; // the job's working directory
   mailbox: string;
   // A verification worker only finds out whether an authorized submit went through; it never submits.
   isVerification: boolean;
@@ -105,11 +102,14 @@ async function verifyStatus(rt: FillRuntime, ctx: FillContext, args: ToolArgs): 
   return "Recorded: Ambiguity resolved. Verified draft queued for normal fill with fresh confirm_submit required.";
 }
 
+// What a form may require that the candidate does not give, so the application is dropped instead of parked.
+const SKIPPED_FOR = { cover_letter: "a cover letter", references: "references" };
+
 // What stopped the application, so stops can be counted and looked at again by cause.
 const causeParam = { type: "string", enum: WORKER_CAUSES, description: CAUSE_GUIDE };
 
 export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, HostTool> {
-  const { job, session, dir, mailbox, isVerification, jobBrowser } = ctx;
+  const { job, session, mailbox, isVerification, jobBrowser } = ctx;
   const { slot } = session;
   const tools: Record<string, HostTool> = {
     ...gmailTools(),
@@ -171,20 +171,24 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
         return parkFill(rt, session, nextQueuedQuestion(job.id) ?? input, await checkpointFrom(rt, session, args));
       },
     },
-    ask_cover_letter: {
-      description: "Return this application's provided letter or durably park for it. Never write a letter.",
-      parameters: schema({ prompt: S.str("Exact required cover-letter prompt, limits and upload/text requirements"), ...navigationFields }),
-      handler: async args => {
-        const input: GateInput = {
-          kind: "cover_letter",
-          text: arg.str(args, "prompt"),
-          context: "Required cover letter for this application; exact constraints in prompt",
-          options: [],
-        };
-        const letter = findStoredAnswer(job.id, input);
-        if (letter === null) return parkFill(rt, session, input, await checkpointFrom(rt, session, args));
-        writeFileSync(join(dir, "cover_letter.txt"), letter + "\n");
-        return `Use exactly this letter; for file upload use ${join(dir, "cover_letter.txt")}:\n\n${letter}`;
+    skip_application: {
+      description:
+        "Drop this application, unsubmitted, because the form requires something the candidate does not give: a cover letter or references. Terminates the worker.",
+      parameters: schema({
+        requires: { type: "string", enum: Object.keys(SKIPPED_FOR), description: "What the form requires" },
+        note: S.str("The required field's label and the posting or form text that makes it required"),
+      }),
+      handler: args => {
+        if (isVerification || isSubmitting(job.id)) return "ERROR: an authorized or ambiguous submission cannot be skipped; report it as usual.";
+        const requires = arg.oneOf(args, "requires", Object.keys(SKIPPED_FOR) as (keyof typeof SKIPPED_FOR)[]);
+        db.transaction(() => {
+          cancelJobGates(job.id);
+          clearFillFlags(job.id);
+          writeJob(job.id, to.skipped(`requires ${SKIPPED_FOR[requires]}: ${arg.str(args, "note")}`));
+        })();
+        notifyJobChange(job.id);
+        endSession(session);
+        return "Recorded: application skipped. Stop now.";
       },
     },
     confirm_submit: {

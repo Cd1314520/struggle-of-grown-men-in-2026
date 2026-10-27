@@ -27,6 +27,8 @@ interface Conn {
   sessions: Map<string, Pointer>;
   queues: Map<string, Promise<void>>;
   injected: Set<number>;
+  quiet: Set<number>; // injected commands whose failure is ignored
+  prepared: Set<string>; // sessions already given NO_PRINT
   nextId: number;
   nativeUserAgent: string | undefined;
   pendingBrowserVersion: Set<string>;
@@ -121,6 +123,17 @@ function packet(text: string): Packet | null {
 
 const INPUT = new Set(["Input.dispatchMouseEvent", "Input.dispatchKeyEvent", "Input.insertText"]);
 
+// Commands that act on a page as if someone were looking at it. A page in a background tab paints no
+// frames, so requestAnimationFrame never fires and wheel input never lands: a client's wait for an
+// element to hold still, and its scroll into view, time out while reads keep working. The page a
+// fill worker drives is brought to the front first.
+const DRIVE = new Set([...INPUT, "Runtime.evaluate", "Runtime.callFunctionOn", "DOM.scrollIntoViewIfNeeded", "DOM.focus"]);
+// How long the page last brought to the front is trusted to still be there: a popup or a closed tab
+// can change the active tab without the proxy seeing it.
+const FRONT_TRUST_MS = 2000;
+// The print dialog blocks the page's renderer until someone dismisses it, and a worker cannot.
+const NO_PRINT = "window.print = () => {};";
+
 // These mutate the shared profile even when sent through an owned page session.
 // Keep URL/domain-scoped login APIs (Network.setCookie/setCookies/deleteCookies) usable;
 // this guards accidental cross-tab commands, not arbitrary code executing in a page.
@@ -166,6 +179,10 @@ function inject(conn: Conn, msg: Pick<Packet, "sessionId">, method: string, para
   conn.injected.add(id);
   conn.upstream.send(JSON.stringify({ id, method, params, ...(msg.sessionId ? { sessionId: msg.sessionId } : {}) }));
   return id;
+}
+// Like inject, for a command whose failure does not matter.
+function injectQuietly(conn: Conn, msg: Pick<Packet, "sessionId">, method: string, params: Record<string, unknown>) {
+  conn.quiet.add(inject(conn, msg, method, params));
 }
 
 // Curved, eased path from the current position to (x, y).
@@ -275,6 +292,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
   let revoked = false;
   let contextId: string | undefined;
   let cachedNativeUa: string | undefined;
+  let front: { target: string; at: number } | undefined;
 
   async function getNativeUa(): Promise<string | undefined> {
     if (cachedNativeUa) return cachedNativeUa;
@@ -338,6 +356,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
     conn.sessions.delete(sessionId);
     conn.queues.delete(sessionId);
     conn.consoleObjects.delete(sessionId);
+    conn.prepared.delete(sessionId);
     if (!target) return;
     for (const liveSession of state.autoSessions) {
       if (state.sessions.get(liveSession) === target) return;
@@ -434,6 +453,8 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
           sessions: new Map(),
           queues: new Map(),
           injected: new Set(),
+          quiet: new Set(),
+          prepared: new Set(),
           nextId: 1_500_000_000,
           pendingBrowserVersion: new Set(),
           consoleObjects: new Map(),
@@ -494,6 +515,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
           }
           const state = ws.data.targets;
           if (msg.id !== undefined && conn.injected.delete(msg.id)) {
+            if (conn.quiet.delete(msg.id)) return;
             const target = state?.monitors.get(msg.id);
             state?.monitors.delete(msg.id);
             const held = state?.held.get(msg.id);
@@ -576,6 +598,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
             const related = Boolean(parent && ownsTarget(parent));
             if (!targetInfo(info) || !accept(info, related) || typeof msg.params["sessionId"] !== "string") return;
             state.sessions.set(msg.params["sessionId"], info.targetId);
+            state.infos.set(info.targetId, info);
           } else if (msg.method === "Target.targetCreated" || msg.method === "Target.targetInfoChanged") {
             if (!targetInfo(info)) return;
             state.infos.set(info.targetId, info);
@@ -770,6 +793,23 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
             }
           }
           if (msg.id !== undefined) state.requests.set(`${msg.sessionId ?? ""}:${msg.id}`, request);
+          const driven = msg.method && DRIVE.has(msg.method) ? (msg.sessionId ? state.sessions.get(msg.sessionId) : state.pageId) : undefined;
+          const type =
+            driven === undefined
+              ? undefined
+              : (state.infos.get(driven)?.type ?? (driven === state.pageId || driven === state.scope.targetId ? "page" : undefined));
+          if (driven && type === "page") {
+            const session = msg.sessionId ?? "";
+            if (!conn.prepared.has(session)) {
+              conn.prepared.add(session);
+              injectQuietly(conn, msg, "Page.addScriptToEvaluateOnNewDocument", { source: NO_PRINT });
+              injectQuietly(conn, msg, "Runtime.evaluate", { expression: NO_PRINT });
+            }
+            if (front?.target !== driven || Date.now() - front.at > FRONT_TRUST_MS) {
+              injectQuietly(conn, msg, "Page.bringToFront", {});
+              front = { target: driven, at: Date.now() };
+            }
+          }
         }
         if (!msg.method || !INPUT.has(msg.method)) {
           conn.upstream.send(state || modified ? JSON.stringify(msg) : text);

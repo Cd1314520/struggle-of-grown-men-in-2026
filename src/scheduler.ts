@@ -21,6 +21,7 @@ import {
   type Job,
 } from "./db";
 import { autoApply, checkAutoApprovedPractice, employerCapNote } from "./auto";
+import { jobBlockers, type BlockerCause } from "./blockers";
 import { forgetDeferredApproval, pumpDeferredApprovals } from "./deferred-approvals";
 import { tickQuestionDigest } from "./digest";
 import { errorMessage, isCapacityError } from "./errors";
@@ -130,6 +131,34 @@ function recoverCapacityHandoffs() {
     if (gate?.kind !== "manual" || !isCapacityError(gate.text) || isSubmitting(job.id) || !readCheckpoint(job.id)) continue;
     queueRecovery(job.id, gate.id);
     logEvent("system", "Fill stopped by model provider capacity: resuming the same draft", job.id);
+  }
+}
+
+// Hand-offs that a fresh try usually clears, and how many tries each job gets before the hand-off
+// waits for the user: a browser that stopped taking input gets a new worker and tab at once; an
+// employer's site that was down gets another look a few hours later.
+const RETRIED: Partial<Record<BlockerCause, { afterMs: number; tries: number }>> = {
+  browser: { afterMs: 0, tries: 1 },
+  site_down: { afterMs: 3 * 60 * 60 * 1000, tries: 2 },
+};
+export function retryPassingHandoffs() {
+  for (const job of jobsByStatus("needs_manual")) {
+    const gate = getOpenGate(job.id);
+    if (gate?.kind !== "manual" || isSubmitting(job.id) || manualLeaseGate(job.id) || !readCheckpoint(job.id)) continue;
+    // The worker records the cause just before it parks; a gate without its own blocker is not retried.
+    const blockers = jobBlockers(job.id);
+    const last = blockers.at(-1);
+    const rule = last && RETRIED[last.cause];
+    const parkedAt = Date.parse(gate.createdAt);
+    if (!last || !rule || Math.abs(parkedAt - Date.parse(`${last.at.replace(" ", "T")}Z`)) > 60_000) continue;
+    const tried = blockers.filter(b => b.cause === last.cause).length - 1;
+    if (tried >= rule.tries || Date.now() - parkedAt < rule.afterMs) continue;
+    try {
+      queueRecovery(job.id, gate.id);
+      logEvent("system", `Stopped by ${last.cause.replace("_", " ")}: retrying the same draft (try ${tried + 1} of ${rule.tries})`, job.id);
+    } catch (err) {
+      logEvent("error", `Automatic retry: ${errorMessage(err)}`, job.id);
+    }
   }
 }
 
@@ -508,6 +537,7 @@ export class Scheduler {
         void this.track();
       }
       if (!this.isRunning("recheck") && !profileProblems().length && recheckDue()) void this.recheck();
+      retryPassingHandoffs();
       this.pump();
     };
     setInterval(tick, 30_000);

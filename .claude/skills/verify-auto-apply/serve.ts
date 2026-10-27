@@ -132,8 +132,8 @@ async function actOut(opts: WorkerOptions, stopped: () => boolean) {
     if (!going(reply)) return;
   }
   if (script === "cover-letter") {
-    const reply = await call("ask_cover_letter", { ...nav, prompt: "Cover letter (required, plain text, at most 300 words)" });
-    if (!going(reply)) return;
+    await call("skip_application", { requires: "cover_letter", note: "Cover letter (required, plain text, at most 300 words)" });
+    return;
   }
   if (script === "manual" && !handedOff.has(jobId)) {
     handedOff.add(jobId);
@@ -195,7 +195,7 @@ const runWorker: RunWorker = (opts): WorkerHandle => {
 const SEED: { script: string; title: string; status: "awaiting_approval" | "held" | "failed" | "submitted"; score: number }[] = [
   { script: "straight", title: "Backend Engineer (straight through)", status: "awaiting_approval", score: 84 },
   { script: "question", title: "Platform Engineer (asks a question)", status: "awaiting_approval", score: 78 },
-  { script: "cover-letter", title: "Data Engineer (wants a cover letter)", status: "awaiting_approval", score: 73 },
+  { script: "cover-letter", title: "Data Engineer (requires a cover letter)", status: "awaiting_approval", score: 73 },
   { script: "manual", title: "Site Reliability Engineer (needs browser help)", status: "awaiting_approval", score: 69 },
   { script: "fail", title: "Full Stack Developer (worker fails)", status: "awaiting_approval", score: 66 },
   { script: "straight", title: "Support Engineer (reject me)", status: "awaiting_approval", score: 61 },

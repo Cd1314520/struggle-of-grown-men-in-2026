@@ -12,7 +12,20 @@ const PATH_TENANT_HOSTS: Record<string, true> = {
   "apply.workable.com": true,
   "jobs.ashbyhq.com": true,
   "jobs.jobvite.com": true,
+  // UKG Pro Recruiting: /<TENANT>/JobBoard/…; each employer keeps its own candidate accounts
+  "recruiting.ultipro.com": true,
+  "recruiting2.ultipro.com": true,
+  "www.jobapscloud.com": true,
 };
+
+/**
+ * Multi-tenant hosts that name the tenant in a query parameter instead of the path.
+ */
+const QUERY_TENANT_HOSTS: [RegExp, string][] = [
+  [/^career\d*\.(successfactors|sapsf)\.(com|eu|cn)$/, "company"], // SAP SuccessFactors: /careers?company=<id>
+  [/^sjobs\.brassring\.com$/, "partnerid"],
+  [/^www\d*\.jobdiva\.com$/, "a"],
+];
 
 /**
  * Conservatively normalizes a URL or domain string into an isolated tenant key.
@@ -64,6 +77,25 @@ function normalizeTenantDomain(urlOrDomain: string): string {
     }
     const tenantSlug = decodeURIComponent(segments[0] ?? "").toLowerCase();
     return `${hostname}${portSuffix}/${tenantSlug}`;
+  }
+
+  for (const [host, param] of QUERY_TENANT_HOSTS) {
+    if (!host.test(hostname)) continue;
+    const tenant = [...url.searchParams]
+      .find(([key]) => key.toLowerCase() === param)?.[1]
+      ?.trim()
+      .toLowerCase();
+    if (!tenant) throw new Error(`Multi-tenant domain requires its ${param}= query parameter`);
+    return `${hostname}${portSuffix}?${param}=${tenant}`;
+  }
+
+  // Workday's other careers host: <wdN>.myworkdaysite.com/[<locale>/]recruiting/<tenant>/<site>
+  if (hostname.endsWith(".myworkdaysite.com")) {
+    const segments = url.pathname.split("/").filter(Boolean);
+    const at = segments.findIndex(s => s.toLowerCase() === "recruiting");
+    const tenant = at < 0 ? undefined : segments[at + 1];
+    if (!tenant) throw new Error("Workday domain requires employer tenant in path");
+    return `${hostname}${portSuffix}/${decodeURIComponent(tenant).toLowerCase()}`;
   }
 
   // Workday: <tenant>.<wdN>.myworkdayjobs.com has tenant in subdomain.

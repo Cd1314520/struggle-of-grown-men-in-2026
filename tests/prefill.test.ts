@@ -4,6 +4,7 @@ import { buildFacts, decide, holds, pick, type Facts, type Field, type Plan } fr
 const facts: Facts = buildFacts(
   {
     first_name: "Ada",
+    middle_name: "Byron",
     last_name: "Lovelace",
     preferred_name: null,
     phone: "+1 (512) 555-0100",
@@ -49,6 +50,9 @@ describe("prefill decides", () => {
     const cases: [string, string][] = [
       ["First Name*", "Ada"],
       ["Last Name*", "Lovelace"],
+      ["Middle Name", "Byron"],
+      ["Middle", "Byron"],
+      ["Middle initial", "B"],
       ["Name", "Ada Lovelace"],
       ["Email*", "ada@example.com"],
       ["Full name✱", "Ada Lovelace"],

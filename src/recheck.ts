@@ -9,7 +9,7 @@ import { errorMessage } from "./errors";
 import { due } from "./limits";
 import { arg, S, schema, type RunWorker } from "./worker";
 import { answerGate, listQuestionGroups, type QuestionGroup } from "./questions";
-import { lowStakesRule, readPrompt, render, workDir } from "./worker-tools";
+import { lowStakesRule, readPrompt, render, termsRule, workDir } from "./worker-tools";
 
 // Questions per worker: enough to share one read of the profile, few enough that long legal context still fits.
 const BATCH = 25;
@@ -20,7 +20,16 @@ const RETRY_MINUTES = 60;
 
 const fingerprint = () =>
   createHash("sha256")
-    .update(JSON.stringify([config.phase, readProfile("personal.yml"), readProfile("answers.md"), readPrompt("recheck"), readPrompt("low-stakes")]))
+    .update(
+      JSON.stringify([
+        config.phase,
+        readProfile("personal.yml"),
+        readProfile("answers.md"),
+        readPrompt("recheck"),
+        readPrompt("low-stakes"),
+        readPrompt("terms"),
+      ]),
+    )
     .digest("hex");
 
 // Whether the profile or the rules have changed since the open questions were last checked against them.
@@ -69,6 +78,7 @@ async function recheckBatch(run: RunWorker, groups: readonly QuestionGroup[]) {
       personal: readProfile("personal.yml"),
       answers: readProfile("answers.md"),
       lowStakes: lowStakesRule(),
+      terms: termsRule(),
       questions: questionList(groups),
     }),
     tools: {

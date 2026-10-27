@@ -146,3 +146,37 @@ describe("account resolution behavioral semantics", () => {
   `);
   });
 });
+
+describe("tenants named in the path or query of shared ATS hosts", () => {
+  it("keeps UKG, SuccessFactors, myworkdaysite, BrassRing and JobDiva employers apart", () => {
+    scenario(`
+    const create = (d) => JSON.parse(resolveAccount(d, "app@example.com", true));
+    const look = (d) => JSON.parse(resolveAccount(d, "app@example.com", false));
+
+    // UKG: the tenant is the first path segment, whatever the case or page
+    const miso = create("https://recruiting.ultipro.com/MID1029MISO/JobBoard/362b/OpportunityDetail?opportunityId=ef6b");
+    assert.equal(look("recruiting.ultipro.com/mid1029miso").password, miso.password);
+    assert.equal(look("https://recruiting.ultipro.com/HOM1007HSUC/JobBoard/0436").error, "no_account_found");
+    assert.equal(look("recruiting2.ultipro.com/MID1029MISO").error, "no_account_found");
+
+    // SuccessFactors: the tenant is ?company=, on any careers route
+    const wipro = create("https://career55.sapsf.eu/careers?company=wiprolimitP2");
+    assert.equal(look("https://career55.sapsf.eu/career?company=WIPROLIMITP2&career_job_req_id=1").password, wipro.password);
+    assert.equal(look("https://career55.sapsf.eu/career?company=HCLPRD").error, "no_account_found");
+    assert.equal(look("https://career4.successfactors.com/careers").error, "invalid_domain");
+
+    // Workday's myworkdaysite host: /recruiting/<tenant>/<site>
+    const magna = create("https://wd3.myworkdaysite.com/recruiting/magna/Magna");
+    assert.equal(look("wd3.myworkdaysite.com/en-US/recruiting/Magna/Careers/job/1").password, magna.password);
+    assert.equal(look("wd3.myworkdaysite.com/recruiting/other/Site").error, "no_account_found");
+    assert.equal(look("wd3.myworkdaysite.com/").error, "invalid_domain");
+
+    // BrassRing (?partnerid=) and JobDiva (?a=)
+    const brass = create("https://sjobs.brassring.com/TGnewUI/Search/home/HomeWithPreLoad?partnerid=368&siteid=5205");
+    assert.equal(look("sjobs.brassring.com/TGNewUI/?partnerid=368&siteid=1").password, brass.password);
+    assert.equal(look("sjobs.brassring.com/TGNewUI/?partnerid=25771").error, "no_account_found");
+    create("https://www1.jobdiva.com/portal/?a=abc");
+    assert.equal(look("https://www1.jobdiva.com/portal/?a=xyz").error, "no_account_found");
+  `);
+  });
+});

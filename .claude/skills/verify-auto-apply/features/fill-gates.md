@@ -1,11 +1,11 @@
 # Fill gates
 
-Once an application is approved, a fill worker works on it and stops whenever it needs the user: to answer a question, to supply a cover letter, to confirm the final submit (gate 2), or to take over the browser. Each stop is a card above the job's tabs in Pipeline, saying what is asked with one primary action; the user clears it there and the application ends up in Applications, or in Pipeline's Failed stage with a Retry. Every hand-off and failure is also listed, by cause, under Activity, Blockers.
+Once an application is approved, a fill worker works on it and stops whenever it needs the user: to answer a question, to confirm the final submit (gate 2), or to take over the browser. Each stop is a card above the job's tabs in Pipeline, saying what is asked with one primary action; the user clears it there and the application ends up in Applications, or in Pipeline's Failed stage with a Retry. Every hand-off and failure is also listed, by cause, under Activity, Blockers. A form that requires a cover letter or references is not a stop: the worker drops the application to Archive, Skipped.
 
 ## Sub-features
 
 - `fill-question` an approved job parks on "The agent needs an answer"; the saved answer is reused when the worker resumes.
-- `fill-cover-letter` a job parks on "This application needs a cover letter"; the letter is stored exactly as typed.
+- `fill-skip` a job whose form requires a cover letter (or references) is skipped, with the reason as its note; nothing waits on the user.
 - `fill-confirm-submit` gate 2: "Submit this application?" with the exact summary; "Approve submission" (a click only, never `A`) lets the worker submit once.
 - `fill-manual` "Browser hand-off": reserve the browser, hand control back, the worker resumes.
 - `fill-failed` a worker failure shows "This application failed" with Retry (and Mark submitted in ⋯).
@@ -14,10 +14,10 @@ Once an application is approved, a fill worker works on it and stops whenever it
 
 ## How to get to it (user POV)
 
-- Approve a job in Review (see [review-queue](./review-queue.md)), then open Pipeline: the stage tiles count Needs you (cover letter, confirm submit, browser hand-off), Waiting on answers (questions), Failed, Applying and Assessing; the sidebar's Pipeline badge counts everything but questions, which the Questions badge counts.
-- The Overview's Needs you list links each kind ("Confirm submit", "Browser hand-offs", "Cover letters", "Failed").
+- Approve a job in Review (see [review-queue](./review-queue.md)), then open Pipeline: the stage tiles count Needs you (confirm submit, browser hand-off), Waiting on answers (questions), Failed, Applying and Assessing; the sidebar's Pipeline badge counts everything but questions, which the Questions badge counts.
+- The Overview's Needs you list links each kind ("Confirm submit", "Browser hand-offs", "Failed"; "Cover letters" only for gates parked before cover letters became skips).
 - Open the job directly at `#pipeline/<id>` (it opens on its own stage), or at `#job/<id>`.
-- Questions are also answered from the Questions page (see [questions-inbox](./questions-inbox.md)), which links cover letters back here.
+- Questions are also answered from the Questions page (see [questions-inbox](./questions-inbox.md)), which links the other gates back here.
 
 ## Driving it with Playwright MCP and curl
 
@@ -32,7 +32,7 @@ Preconditions:
 - **Gate 2 appears.** `curl -s $B/api/jobs/2` reaches `"status":"awaiting_submit"`, `gate.kind` `confirm_submit` within 2 s. `browser_navigate $B/#pipeline/2` and `browser_wait_for` text `Submit this application?`: the card reads `Filled in and waiting.` and `Stand-in application for job 2: name, email and resume resume.pdf entered.`, with `button "Approve submission"` and `button "Change something"`. Pressing `a` does nothing here (still `awaiting_submit`).
 - **Approve the submission.** `browser_click` `button "Approve submission"`. Toast `Response saved, queued to resume`.
 - **Confirm the outcome.** `curl` reaches `"status":"submitted"`. `browser_navigate $B/#applications/2`: the header reads `Applied just now` and the status `Applied`; the card is now `Next steps`. `browser_click` `tab "Activity"`: newest first, `Moved to Applied`, `Application agent` `Final submission authorized after re-observation: …`, `You responded` `Approve`, `Moved to Confirm submit`, `You responded` `95000`, `Moved to Needs answer`, `Stopped to ask you` (the question), `You approved it`. `curl -s $B/api/jobs/2`: `submitted_at` set, `resumeFrozen` true, and `history` statuses in order `awaiting_approval, approved, filling, needs_input, approved, filling, awaiting_submit, approved, filling, submitted`. `ls $VERIFY_HOME/state/data/jobs/2/applied/*/` lists `main.typ manifest.json resume.pdf`. `grep 'worker job 2' $VERIFY_HOME/evidence/server.log` shows the second `ask_user` returning `Exact scoped candidate answer: 95000`.
-- **Cover letter.** Approve job 3 the same way; `browser_navigate $B/#pipeline/3` (stage Needs you), wait for `This application needs a cover letter`. The card shows the prompt `Cover letter (required, plain text, at most 300 words)` and `textbox "Cover letter Entered exactly as you write it"` (a word count replaces the hint as you type). Type a letter, `browser_click` `button "Save letter and queue"`. Once `curl` shows `awaiting_submit`, open `#pipeline/3` again and approve gate 2; `$VERIFY_HOME/state/data/jobs/3/cover_letter.txt` holds the letter exactly as typed.
+- **Cover letter means skip.** Approve job 3 the same way; `curl -s $B/api/jobs/3` reaches `"status":"skipped"` with `note` `requires a cover letter: Cover letter (required, plain text, at most 300 words)` and no `gate`. It shows in Archive, not in Pipeline.
 - **Browser hand-off.** Approve job 4; open `$B/#pipeline/4`, wait for `Browser hand-off`. The card reads `The agent needs you to take over.` and `Stand-in CAPTCHA: the form asked for a check only a person can pass.`, primary `button "Reserve browser A"`, then `button "Check status and recover"`; ⋯ holds `I submitted it`, `Hold for later`, `Reject`. Click Reserve browser: toast `Browser reserved`, and the primary becomes `button "Hand control back A"`. Click it: toast `Response saved, queued to resume`. `curl` reaches `awaiting_submit` with `note` `Manual control returned: done`; gate 2 follows as above.
 - **Failure and retry.** Approve job 5; `curl` reaches `"status":"failed"`. `browser_navigate $B/#pipeline/5` (stage Failed, beside job 8): `This application failed`, `Stand-in worker: scripted failure`, `button "Retry A"`. Click it: toast `Back in the queue`, the next failed job (8) opens, and job 5 is back in Review (`"status":"awaiting_approval"`) with `resumeFrozen` true. On `#review/5` its bar has no Change resume and says `This application already started with its frozen resume, so the resume can no longer be changed.`
 - **Blockers.** `browser_navigate $B/#activity/blockers`: under `Today 2`, a row for Verify Co E (`stand-in worker: scripted failure`, cause `Site down`) and one for Verify Co D (`Stand-in CAPTCHA: …`, cause `CAPTCHA`), each linking `#job/<id>`; `tablist "Cause"` has `All 2`, `Site down 1`, `CAPTCHA 1`. `curl -s $B/api/blockers` lists both.

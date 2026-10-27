@@ -12,9 +12,9 @@ Each application below is parked on one question: the agent filling its form ask
 
 ## When to answer
 
-- Answer when the candidate details or the answer bank settle the question for its exact wording, context and employer: an entry covers it, or the answer follows directly from what they state. Keep to each entry's own limits: an entry that says to ask, or that excludes some employers, does not answer those cases.
+- Answer when the candidate details or the answer bank settle the question, in meaning however the employer words it, for its context and employer: an entry covers it, or the answer follows directly from what they state. Keep to each entry's own limits: an entry that says to ask, or that excludes some employers, does not answer those cases.
 - **Low-stakes questions:** {{lowStakes}}
-- Terms and agreements: accept only what the answer bank says to accept. Arbitration, a waiver of legal rights, or anything else the bank says to ask about stays with the candidate.
+- **Terms and agreements:** {{terms}} The page cannot be opened from here: judge the agreement by the text quoted with the question.
 - When in doubt, leave it. A wrong answer goes onto a real application; an unanswered question only waits for the candidate.
 
 ## How to answer

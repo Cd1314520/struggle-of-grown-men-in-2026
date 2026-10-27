@@ -2,6 +2,7 @@
 # details; nothing is applied while one is left. Application forms are filled from this file. Email is
 # taken from the connected Gmail mailbox. Leave a field blank to have the agent ask you when a form needs it.
 first_name: TODO-FILL
+middle_name:
 last_name: TODO-FILL
 preferred_name:
 phone: "TODO-FILL" # as you want it typed, e.g. "+1 (555) 010-0100"

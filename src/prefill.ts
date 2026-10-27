@@ -30,6 +30,7 @@ export type YesNo = "yes" | "no";
 export interface Facts {
   resume: string;
   first_name: string;
+  middle_name: string;
   last_name: string;
   preferred_name: string;
   email: string;
@@ -157,6 +158,8 @@ function factOf(q: string, f: Facts): Fact | null {
   const text = (v: string, more: Omit<Fact, "text"> = {}) => (v ? { text: v, ...more } : null);
   if (/preferred (first )?name|nickname/.test(q)) return text(f.preferred_name);
   if (/^(legal )?first name|^given name|^first$/.test(q)) return text(f.first_name);
+  if (/^(legal )?middle( name)?$/.test(q)) return text(f.middle_name);
+  if (/^middle initial$/.test(q)) return text(f.middle_name.slice(0, 1));
   if (/^(legal )?last name|^surname|^family name|^last$/.test(q)) return text(f.last_name);
   if (/^(full |legal |your )?(full )?name$/.test(q)) return text(`${f.first_name} ${f.last_name}`);
   if (/^e-?mail( address)?$|^your e-?mail/.test(q)) return text(f.email);
@@ -534,6 +537,7 @@ export function buildFacts(personal: Record<string, unknown>, mailbox: string, r
   return {
     resume,
     first_name: str(personal["first_name"]),
+    middle_name: str(personal["middle_name"]),
     last_name: str(personal["last_name"]),
     preferred_name: str(personal["preferred_name"]),
     email: mailbox,

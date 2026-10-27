@@ -3,6 +3,11 @@ import { isCapacityError } from "../src/errors";
 import { screenOut } from "../src/screen";
 
 describe("screening postings before triage", () => {
+  it("drops applications on portals that never let this machine through", () => {
+    expect(screenOut("Software Engineer", "Austin, TX", "https://www.paycomonline.net/v4/ats/web.php/portal/E1A0/jobs/3")).toMatch(/Paycom/);
+    expect(screenOut("Software Engineer", "Austin, TX", "https://job-boards.greenhouse.io/acme/jobs/1")).toBeNull();
+    expect(screenOut("Software Engineer", "Austin, TX", "not a url")).toBeNull();
+  });
   it("drops senior-level titles", () => {
     for (const title of [
       "Senior Software Engineer",

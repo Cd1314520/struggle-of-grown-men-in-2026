@@ -83,13 +83,13 @@ function screen(batch: Job[]): Job[] {
   const left: Job[] = [];
   let dropped = 0;
   for (const job of batch) {
-    const reason = kvGet(`feedback.${job.id}`) ? null : screenOut(job.title, appliedLocation(job));
+    const reason = kvGet(`feedback.${job.id}`) ? null : screenOut(job.title, appliedLocation(job), job.url);
     if (reason) {
       updateJob(job.id, to.skipped(reason));
       dropped++;
     } else left.push(job);
   }
-  if (dropped) logEvent("system", `Triage: screened out ${dropped} of ${batch.length} abroad, senior-level or hardware before reading`);
+  if (dropped) logEvent("system", `Triage: screened out ${dropped} of ${batch.length} abroad, senior-level, hardware or dead-end portals before reading`);
   return left;
 }
 

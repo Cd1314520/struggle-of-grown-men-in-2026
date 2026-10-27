@@ -42,6 +42,18 @@ practice:
       required: true
       screen: false
       statement: No degree, licence or certification is required beyond what the candidate's resume shows.
+    - id: no_cover_letter
+      label: No cover letter
+      required: true
+      statement: The posting does not ask applicants to submit a cover letter.
+    - id: no_references
+      label: No references asked
+      required: true
+      statement: The posting does not ask applicants to submit references (names and contact details of people to contact) with the application.
+    - id: applies_online
+      label: Online application
+      required: true
+      statement: Applicants can apply through an online application form, not only by email or post.
 
     - id: experience_fits
       label: ≤3 years asked
@@ -76,6 +88,18 @@ real:
       label: Not an internship
       required: true
       statement: The position is a regular job, not an internship, co-op, apprenticeship, or other student or training programme.
+    - id: no_cover_letter
+      label: No cover letter
+      required: true
+      statement: The posting does not ask applicants to submit a cover letter.
+    - id: no_references
+      label: No references asked
+      required: true
+      statement: The posting does not ask applicants to submit references (names and contact details of people to contact) with the application.
+    - id: applies_online
+      label: Online application
+      required: true
+      statement: Applicants can apply through an online application form, not only by email or post.
 
     - id: core_work
       label: Engineering on the product
