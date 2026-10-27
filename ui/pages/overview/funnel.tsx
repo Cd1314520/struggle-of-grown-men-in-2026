@@ -1,6 +1,6 @@
 // Where the postings found in the last 30 days ended up: one bar per stage, each a share of the first.
 import type { Stats } from "../../../src/api-types";
-import { Card, CardFooter, CardHeader, Skeleton } from "../../components/ui";
+import { Card, CardHeader, Skeleton } from "../../components/ui";
 import { useStats } from "../../lib/api";
 import { num } from "../../lib/format";
 
@@ -11,6 +11,14 @@ const STAGES: readonly (readonly [key: Exclude<keyof Stats["funnel"], "found">, 
   ["applied", "Applied"],
   ["responded", "Heard back"],
 ];
+
+// "926 approvals in 30 days, all by auto apply."
+function approvals({ auto, user }: Stats["approvals"]) {
+  const n = auto + user;
+  if (!n) return "No approvals in 30 days.";
+  const who = !user ? "all by auto apply" : !auto ? "all by you" : `${num(auto)} by auto apply, ${num(user)} by you`;
+  return `${num(n)} ${n === 1 ? "approval" : "approvals"} in 30 days, ${who}.`;
+}
 
 const percent = (part: number, whole: number) => {
   if (!whole) return "–";
@@ -26,9 +34,10 @@ export function Funnel() {
     <Card>
       <CardHeader
         title="Funnel"
+        titleAs="h2"
         description={
-          f
-            ? `Of ${num(f.found)} postings found in the last 30 days, ${percent(f.assessed, f.found)} passed the title screen to be assessed.`
+          st && f
+            ? `Of ${num(f.found)} postings found in the last 30 days, ${percent(f.assessed, f.found)} passed the title screen to be assessed. ${approvals(st.approvals)}`
             : "Postings found in the last 30 days"
         }
       />
@@ -37,7 +46,7 @@ export function Funnel() {
           <Skeleton className="h-44" />
         ) : (
           <>
-            <div className="mb-2 hidden grid-cols-[104px_minmax(0,1fr)_64px_72px] gap-4 text-xs text-fg-subtle sm:grid">
+            <div className="mb-2 grid grid-cols-[108px_minmax(0,1fr)_44px_72px] gap-3 text-xs text-fg-muted sm:grid-cols-[104px_minmax(0,1fr)_64px_72px] sm:gap-4">
               <span>Stage</span>
               <span />
               <span className="text-right">Jobs</span>
@@ -50,7 +59,7 @@ export function Funnel() {
                 return (
                   <li
                     key={key}
-                    className="grid grid-cols-[100px_minmax(0,1fr)_44px_40px] items-center gap-3 sm:grid-cols-[104px_minmax(0,1fr)_64px_72px] sm:gap-4"
+                    className="grid grid-cols-[108px_minmax(0,1fr)_44px_72px] items-center gap-3 sm:grid-cols-[104px_minmax(0,1fr)_64px_72px] sm:gap-4"
                   >
                     <span className="truncate text-sm text-fg">{label}</span>
                     <span className="h-6 overflow-hidden rounded-sm bg-subtle">
@@ -65,21 +74,6 @@ export function Funnel() {
           </>
         )}
       </div>
-      {st && (
-        <CardFooter className="gap-6 text-sm">
-          <span className="text-fg-muted">Approvals in 30 days</span>
-          <span className="flex items-center gap-4">
-            <span>
-              <span className="text-fg-muted">Auto apply </span>
-              <span className="tabular font-medium text-fg">{num(st.approvals.auto)}</span>
-            </span>
-            <span>
-              <span className="text-fg-muted">You </span>
-              <span className="tabular font-medium text-fg">{num(st.approvals.user)}</span>
-            </span>
-          </span>
-        </CardFooter>
-      )}
     </Card>
   );
 }

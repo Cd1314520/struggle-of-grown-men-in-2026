@@ -82,13 +82,13 @@ export function Resume({ job }: { job: JobDetail }) {
           )}
         </Section>
         {job.resumeFrozen && (
-          <div className="flex items-start gap-3 rounded-lg border border-border px-4 py-3 text-sm">
+          <div className="flex items-start gap-3 text-sm">
             <Lock className="mt-0.5 size-4 shrink-0 text-fg-subtle" />
             <div className="min-w-0">
               <p className="text-fg">{job.submitted_at ? "This is the resume that was sent." : "Locked for this application."}</p>
               <p className="mt-0.5 flex flex-wrap gap-x-3 text-fg-muted">
                 {job.resume_frozen_at && <Time at={job.resume_frozen_at} prefix="Frozen " />}
-                {job.resume_sha && <code className="font-mono text-xs leading-5">{job.resume_sha.slice(0, 10)}</code>}
+                {job.resume_sha && <code className="font-mono text-xs leading-5 text-fg">{job.resume_sha.slice(0, 10)}</code>}
               </p>
             </div>
           </div>

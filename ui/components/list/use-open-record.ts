@@ -18,7 +18,7 @@ interface Pending {
   after: number;
 }
 
-// What a row needs to open its job, spread onto its TableRow. Beside an open job only its row is a tab stop,
+// What a row needs to open its job, spread onto its ListRow. Beside an open job only its row is a tab stop,
 // so Tab goes from the list to the job's buttons and J/K walk the list.
 export interface RowLink {
   href: string;

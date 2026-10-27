@@ -1,5 +1,5 @@
 // Archive: the jobs set aside, held back or rejected, as a library to browse rather than a queue to clear.
-// A job opens in a panel over the right of the table, which stays live beside it.
+// Until a job opens the list is the page; open one and the same rows become the column beside it.
 import { Archive, Ellipsis, RotateCcw } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
@@ -8,6 +8,8 @@ import {
   Button,
   ConfirmDialog,
   EmptyState,
+  ListPanel,
+  ListToolbar,
   Menu,
   MenuContent,
   MenuItem,
@@ -18,18 +20,17 @@ import {
   SearchInput,
   Select,
   SkeletonRows,
-  Table,
   Tabs,
   TabsList,
   TabsTrigger,
 } from "../../components/ui";
 import { api, refreshAll, useSummary } from "../../lib/api";
-import { cn } from "../../lib/cn";
-import { plural } from "../../lib/format";
+import { num, plural } from "../../lib/format";
 import { useListParams } from "../../lib/list-params";
+import { useMedia, WIDE } from "../../lib/media";
 import { navigate, setParams, useRoute } from "../../lib/router";
 import { JobDetail } from "../job/detail";
-import { ArchiveHeader, ArchiveRow } from "./row";
+import { ArchiveColumns, ArchiveRow } from "./row";
 
 type View = "held" | "rejected";
 
@@ -61,6 +62,7 @@ export function ArchivePage() {
   const { data: list, query, openId } = record;
   const { data: summary } = useSummary();
   const threshold = summary?.threshold ?? null;
+  const compact = useMedia(WIDE) && openId !== null;
 
   const counts = summary?.counts ?? {};
   const held = counts["held"] ?? 0;
@@ -70,91 +72,116 @@ export function ArchivePage() {
   const sorts = SORTS[view];
   const segmented = !!list && list.groups.length > 1 && list.total > 0;
   const [emptyTitle, emptyText] = EMPTY[view];
+  // A reason every row on the page shares is said once, over them, rather than down every row.
+  const first = rows[0]?.reason?.label;
+  const uniform = rows.length > 1 && !!first && rows.every(r => r.reason?.label === first);
+  const when = view === "held" ? "Held" : "Rejected";
 
-  return (
-    <ListDetail
-      layout="overlay"
-      label="Open job"
-      open={openId !== null}
-      onListClick={record.onListClick}
-      detail={record.panel && <JobDetail key={record.panel.id} layout="panel" {...record.panel} />}
+  const panel = (
+    <Tabs
+      value={view}
+      onValueChange={v => {
+        navigate(`archive/${v}`);
+      }}
+      // No box of its own, so the column's panel fills the column.
+      className="contents"
     >
-      <Page>
-        <PageHeader
-          title="Archive"
-          description="Jobs set aside: held back from applying, or turned down."
-          actions={view === "held" && held > 0 && <ReleaseHeld count={held} />}
-        >
-          <Tabs
-            value={view}
-            onValueChange={v => {
-              navigate(`archive/${v}`);
-            }}
-          >
-            <TabsList>
-              {(["held", "rejected"] as const).map(v => (
-                <TabsTrigger key={v} value={v}>
-                  {v === "held" ? "Held" : "Rejected"}
-                  {counts[v] !== undefined && <span className="tabular text-xs font-normal text-fg-subtle">{counts[v].toLocaleString()}</span>}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-        </PageHeader>
-
-        {list?.all === 0 ? (
-          <EmptyState icon={<Archive />} title={emptyTitle} description={emptyText} />
-        ) : (
-          <>
-            <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center">
-              {segmented && <GroupSegments label="Fit" groups={list.groups} value={lp.group} onChange={lp.setGroup} className="-mx-1 min-w-0 px-1" />}
-              {/* Beside segments the tools sit right; alone they start the row, clear of a job open over its right side. */}
-              <div className={cn("flex items-center gap-2", segmented && "md:ml-auto")}>
+      <ListPanel
+        frame={compact ? "column" : "page"}
+        tabs={
+          <TabsList>
+            {(["held", "rejected"] as const).map(v => (
+              <TabsTrigger key={v} value={v} count={counts[v]}>
+                {v === "held" ? "Held" : "Rejected"}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        }
+        actions={view === "held" && held > 0 && <ReleaseHeld count={held} />}
+        toolbar={
+          list?.all !== 0 && (
+            <ListToolbar
+              segments={segmented && <GroupSegments label="Fit" groups={list.groups} value={lp.group} onChange={lp.setGroup} />}
+              search={
                 <SearchInput
                   ref={search}
                   value={lp.search}
                   onValueChange={lp.setSearch}
                   placeholder="Search"
                   aria-label={`Search ${view} jobs by title, company, place or reason`}
-                  className="min-w-0 flex-1 md:w-64 md:flex-none"
                 />
-                <FilterMenu
-                  filters={filters}
-                  active={lp.filters}
-                  onToggle={lp.toggleFilter}
-                  onClear={() => {
-                    setParams({ filter: null, page: null });
-                  }}
-                />
-                <Select
-                  prefix="Sort"
-                  value={lp.sort ?? sorts[0]?.value ?? ""}
-                  onValueChange={v => {
-                    lp.setSort(v === sorts[0]?.value ? null : v);
-                  }}
-                  options={sorts}
-                />
-              </div>
-            </div>
-
-            <Table aria-label={view === "held" ? "Held jobs" : "Rejected jobs"} aria-rowcount={list?.total}>
-              <ArchiveHeader when={view === "held" ? "Held" : "Rejected"} />
-              {!list ? (
-                <SkeletonRows rows={12} />
-              ) : rows.length === 0 ? (
-                <NoMatch noun="jobs" q={lp.q} filtered={lp.filters.length > 0 || !!lp.group} onClear={lp.clear} />
-              ) : (
-                <div className={query.isPlaceholderData ? "opacity-60 transition-opacity" : undefined}>
-                  {rows.map(job => (
-                    <ArchiveRow key={job.id} job={job} threshold={threshold} link={record.rowProps(job.id)} />
-                  ))}
-                </div>
-              )}
-            </Table>
-            {list && <Pagination offset={list.offset} limit={list.limit} total={list.total} onChange={record.setPage} />}
-          </>
+              }
+              controls={
+                <>
+                  <FilterMenu
+                    filters={filters}
+                    active={lp.filters}
+                    onToggle={lp.toggleFilter}
+                    onClear={() => {
+                      setParams({ filter: null, page: null });
+                    }}
+                  />
+                  <Select
+                    prefix="Sort"
+                    collapse
+                    value={lp.sort ?? sorts[0]?.value ?? ""}
+                    onValueChange={v => {
+                      lp.setSort(v === sorts[0]?.value ? null : v);
+                    }}
+                    options={sorts}
+                  />
+                </>
+              }
+            />
+          )
+        }
+        notice={
+          uniform && (
+            <p className="px-[var(--list-x)] pb-3 text-sm text-fg-muted">
+              All {num(rows.length)}
+              {list && list.total > rows.length && " on this page"}: {first}.
+            </p>
+          )
+        }
+        columns={!!rows.length && <ArchiveColumns when={when} uniform={uniform} />}
+        footer={list && <Pagination variant="footer" noun="jobs" offset={list.offset} limit={list.limit} total={list.total} onChange={record.setPage} />}
+        loading={query.isPlaceholderData}
+        bodyLabel={view === "held" ? "Held jobs" : "Rejected jobs"}
+        aria-rowcount={list?.total}
+      >
+        {list?.all === 0 ? (
+          <EmptyState size="sm" icon={<Archive />} title={emptyTitle} description={emptyText} />
+        ) : !list ? (
+          <SkeletonRows rows={12} />
+        ) : rows.length === 0 ? (
+          <NoMatch noun="jobs" q={lp.q} filtered={lp.filters.length > 0 || !!lp.group} onClear={lp.clear} />
+        ) : (
+          rows.map(job => <ArchiveRow key={job.id} job={job} threshold={threshold} uniform={uniform} link={record.rowProps(job.id)} />)
         )}
-      </Page>
+      </ListPanel>
+    </Tabs>
+  );
+
+  return (
+    <ListDetail
+      layout="split"
+      label="Open job"
+      open={openId !== null}
+      onListClick={record.onListClick}
+      detail={record.panel && <JobDetail key={record.panel.id} layout="panel" {...record.panel} />}
+    >
+      {compact ? (
+        <>
+          {/* Beside a job the tabs head the column; the page still has its title. */}
+          <h1 className="sr-only">Archive</h1>
+          {panel}
+        </>
+      ) : (
+        <Page>
+          <PageHeader title="Archive" description="Jobs set aside: held back from applying, or turned down." descriptionOnPhone={false} />
+          {panel}
+        </Page>
+      )}
     </ListDetail>
   );
 }
@@ -166,7 +193,9 @@ function ReleaseHeld({ count }: { count: number }) {
     <>
       <Menu modal={false}>
         <MenuTrigger asChild>
-          <Button variant="secondary" size="icon" aria-label="More actions">
+          {/* Its 40px touch target overhangs the tab row rather than heightening it, so the tabs sit at the same
+              height on Held, which has the menu, and on Rejected, which doesn't. */}
+          <Button variant="secondary" size="icon" aria-label="More actions" className="touch:-my-1">
             <Ellipsis />
           </Button>
         </MenuTrigger>

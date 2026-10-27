@@ -10,7 +10,8 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary: "bg-accent text-accent-fg shadow-xs hover:bg-accent-hover",
+        // Disabled, the primary goes grey rather than a washed-out accent: it reads as not yet, not as faint.
+        primary: "bg-accent text-accent-fg shadow-xs hover:bg-accent-hover disabled:bg-muted disabled:text-fg-subtle disabled:shadow-none disabled:opacity-100",
         secondary: "border border-border bg-surface text-fg shadow-xs hover:border-border-strong hover:bg-subtle active:bg-muted",
         ghost: "text-fg-muted hover:bg-subtle hover:text-fg active:bg-muted",
         danger: "bg-danger text-white shadow-xs hover:opacity-90",
@@ -50,7 +51,7 @@ export function Button({ className, variant, size, asChild, loading, icon, short
       {loading ? <Spinner /> : icon}
       {children}
       {shortcut && (
-        <Kbd className={cn("ml-1 touch:hidden", variant === "primary" && "border-white/25 bg-white/15 text-accent-fg")} size="sm">
+        <Kbd className={cn("ml-1 touch:hidden", variant === "primary" && !(disabled ?? loading) && "border-white/25 bg-white/15 text-accent-fg")} size="sm">
           {shortcut}
         </Kbd>
       )}

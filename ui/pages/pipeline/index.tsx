@@ -2,57 +2,57 @@
 // what waits on the owner first.
 import { ArrowRight, CircleCheck, MessageSquareText } from "lucide-react";
 import { useRef } from "react";
-import type { ListResult, ListRow } from "../../../src/api-types";
+import type { ListResult, ListRow as Row } from "../../../src/api-types";
 import type { Status } from "../../../src/status";
-import { CompactRow, ListDetail, NoMatch, RoleCell, useOpenRecord } from "../../components/list";
+import { ListDetail, NoMatch, useOpenRecord } from "../../components/list";
 import {
   Button,
-  Callout,
+  CompanyMark,
   EmptyState,
   JobStatus,
+  ListColumns,
+  ListNotice,
+  ListPanel,
+  ListRow,
+  ListToolbar,
+  Narrow,
   Page,
   PageHeader,
   Pagination,
   Score,
   SearchInput,
+  Segments,
   Select,
   SkeletonRows,
   StatusLabel,
-  Table,
-  TableCell,
-  TableHeader,
-  TableRow,
   Time,
 } from "../../components/ui";
 import { useSummary } from "../../lib/api";
-import { cn } from "../../lib/cn";
+import { place, unent } from "../../lib/format";
 import { GATE } from "../../lib/labels";
 import { useListParams } from "../../lib/list-params";
 import { TABLET, useMedia, WIDE } from "../../lib/media";
 import { href, setParams } from "../../lib/router";
 import { JobDetail } from "../job/detail";
-import { StageStrip, STAGES } from "./stages";
+import { stageSegments, STAGES } from "./stages";
 
 const STUCK = new Set(["needs_you", "questions", "failed"]);
 // A score from before a job went back to be assessed again says nothing yet.
 const UNASSESSED: readonly Status[] = ["triaged", "locating", "prepping"];
-const COLUMNS = "minmax(0,1fr) 180px 112px 56px";
-// Nothing in Assessing has a score yet.
-const COLUMNS_UNSCORED = "minmax(0,1fr) 180px 112px";
 
 // With no stage chosen, open on the first that holds anything: Needs you when it does.
 const firstStage = (list: ListResult) => list.groups.find(g => g.count > 0)?.key ?? "needs_you";
 
 // What the row waits on: the open gate when it waits on the owner, else its status.
-const gateOf = (row: ListRow) => (row.group === "needs_you" ? row.gate : null);
-function Stage({ row }: { row: ListRow }) {
+const gateOf = (row: Row) => (row.group === "needs_you" ? row.gate : null);
+function Stage({ row }: { row: Row }) {
   const gate = gateOf(row);
   return gate ? <StatusLabel tone="warning" label={GATE[gate]} /> : <JobStatus status={row.status} />;
 }
 
 // The time that matters in each stage: how long it has waited on the owner, when the agent last
 // touched it, or when the posting appeared.
-const timeOf = (group: string, row: ListRow) => (group === "assessing" ? row.opened_at : row.updated_at);
+const timeOf = (group: string, row: Row) => (group === "assessing" ? row.opened_at : row.updated_at);
 const TIME_HEADER: Record<string, string> = { applying: "Updated", assessing: "Found" };
 
 const EMPTY: Record<string, readonly [title: string, description: string]> = {
@@ -79,18 +79,179 @@ export function PipelinePage() {
   const record = useOpenRecord({ base: "pipeline", view: "pipeline", lp, search, defaultGroup: firstStage });
   const { data, rows, openId } = record;
   const group = record.group ?? "needs_you";
-  // The list beside an open job has room for one fact under the time: the stage where the rows'
-  // stages differ, else the score.
+  const stage = STAGES[group];
+  // The stage is a fact of the row only where the rows' stages differ (Needs you's gates); else the
+  // panel's title already says it.
   const mixed = new Set(rows.map(r => gateOf(r) ?? r.status)).size > 1;
 
   const wide = useMedia(WIDE),
     tablet = useMedia(TABLET);
-  const compact = openId !== null && wide,
-    columns = tablet && !compact;
+  const compact = openId !== null && wide;
   const current = data?.groups.find(g => g.key === group);
   const empty = EMPTY[group];
-  const scored = group !== "assessing",
-    grid = scored ? COLUMNS : COLUMNS_UNSCORED;
+  const threshold = summary?.threshold ?? null;
+  // Nothing in Assessing has a score yet: its trail is when the posting was found, and where it is takes
+  // the time's column, so a wide row is not a title and a lone "3h" a page apart. The facts' tracks grow
+  // with the panel too, so a short title does not leave them pinned to the far edge.
+  const scored = group !== "assessing";
+  const columns = [mixed && "minmax(200px,0.7fr)", scored ? "minmax(104px,0.4fr)" : "minmax(200px,0.7fr)"].filter(Boolean).join(" ");
+  const when = TIME_HEADER[group] ?? "Waiting since";
+
+  const panel = (
+    <ListPanel
+      frame={compact ? "column" : "page"}
+      // Beside an open job the column is the page, so it takes the page's name. On its own the panel says
+      // what the stage holds ("Paused until you act"), as the selected segment right under it already names
+      // the stage. A phone has neither: that segment names and counts it.
+      title={compact ? "Pipeline" : !tablet ? undefined : (stage?.caption ?? "Pipeline")}
+      count={compact ? data?.all : tablet ? current?.count : undefined}
+      aria-label="Applications in the pipeline"
+      bodyLabel={stage?.label ?? "Applications"}
+      aria-rowcount={data?.total}
+      loading={record.query.isPlaceholderData}
+      toolbar={
+        <ListToolbar
+          search={
+            <SearchInput
+              ref={search}
+              value={lp.search}
+              onValueChange={lp.setSearch}
+              placeholder={tablet ? `Search ${((compact ? stage?.short : stage?.label) ?? "this stage").toLowerCase()}` : "Search"}
+              aria-label="Search this stage"
+            />
+          }
+          controls={
+            <Select
+              prefix="Sort"
+              collapse
+              value={lp.sort ?? "default"}
+              onValueChange={v => {
+                lp.setSort(v === "default" ? null : v);
+              }}
+              options={sortsFor(group)}
+            />
+          }
+          segments={
+            <Segments
+              aria-label="Stages"
+              value={group}
+              onValueChange={key => {
+                setParams({ group: key, page: null, sort: null });
+              }}
+              segments={stageSegments(data ? new Map(data.groups.map(g => [g.key, g.count])) : null)}
+            />
+          }
+        />
+      }
+      notice={
+        group === "questions" &&
+        !!current?.count && (
+          // A narrow panel has room for the link alone, which then says it all.
+          <ListNotice
+            icon={<MessageSquareText />}
+            {...(tablet &&
+              !compact && {
+                action: (
+                  <Button asChild size="sm" variant="link" className="px-0 touch:px-0">
+                    <a href={href("questions")}>
+                      Open Questions
+                      <ArrowRight />
+                    </a>
+                  </Button>
+                ),
+              })}
+          >
+            {tablet && !compact ? (
+              "Each is paused on a question from its application form. One answer in Questions resumes every application that asked it."
+            ) : (
+              <Button asChild size="sm" variant="link" className="px-0 touch:px-0">
+                <a href={href("questions")}>
+                  Answer these in Questions
+                  <ArrowRight />
+                </a>
+              </Button>
+            )}
+          </ListNotice>
+        )
+      }
+      columns={
+        rows.length > 0 && (
+          <ListColumns
+            columns={columns}
+            lead
+            label="Role"
+            cells={[mixed && "Stage", scored ? when : "Location"].filter(Boolean)}
+            trail={scored ? "Fit" : when}
+          />
+        )
+      }
+      footer={data && <Pagination variant="footer" noun="applications" offset={data.offset} limit={data.limit} total={data.total} onChange={record.setPage} />}
+    >
+      {!data ? (
+        <SkeletonRows rows={8} />
+      ) : rows.length === 0 ? (
+        lp.q ? (
+          <NoMatch
+            noun="jobs"
+            q={lp.q}
+            filtered={false}
+            onClear={() => {
+              lp.setSearch("");
+            }}
+          />
+        ) : (
+          <EmptyState size="sm" icon={<CircleCheck />} title={empty?.[0] ?? "Nothing here"} description={empty?.[1]} />
+        )
+      ) : (
+        rows.map(r => {
+          const at = timeOf(group, r),
+            score = UNASSESSED.includes(r.status) ? null : r.score;
+          return (
+            <ListRow
+              key={r.id}
+              {...record.rowProps(r.id)}
+              lead={<CompanyMark name={r.company} />}
+              title={unent(r.title)}
+              secondary={
+                <>
+                  <span>{unent(r.company)}</span>
+                  {mixed && (
+                    <Narrow>
+                      <Stage row={r} />
+                    </Narrow>
+                  )}
+                </>
+              }
+              // The fit over the time, at every width: a wide row moves the time to its own column.
+              trail={
+                scored ? (
+                  <>
+                    <Score value={score} threshold={threshold} />
+                    <Narrow>
+                      <Time at={at} short />
+                    </Narrow>
+                  </>
+                ) : (
+                  <Time at={at} short />
+                )
+              }
+              columns={columns}
+              cells={[
+                mixed && <Stage row={r} />,
+                scored ? (
+                  <Time at={at} />
+                ) : (
+                  <span className="block truncate" title={r.location ?? undefined}>
+                    {place(r.location)}
+                  </span>
+                ),
+              ].filter(Boolean)}
+            />
+          );
+        })
+      )}
+    </ListPanel>
+  );
 
   return (
     <ListDetail
@@ -100,124 +261,14 @@ export function PipelinePage() {
       onListClick={record.onListClick}
       detail={record.panel && <JobDetail key={record.panel.id} layout="panel" {...record.panel} />}
     >
-      <Page width={compact ? "full" : "default"} className={cn(compact && "sm:px-4 lg:pb-0")}>
-        <PageHeader title="Pipeline" description={compact ? undefined : "Applications the agent is working on, and the ones paused until you act."}>
-          <StageStrip
-            counts={data ? new Map(data.groups.map(g => [g.key, g.count])) : null}
-            value={group}
-            compact={compact}
-            onSelect={key => {
-              setParams({ group: key, page: null, sort: null });
-            }}
-          />
-        </PageHeader>
-
-        <div className="mb-3 flex items-center gap-2">
-          <SearchInput
-            ref={search}
-            value={lp.search}
-            onValueChange={lp.setSearch}
-            placeholder={tablet ? `Search ${((compact ? STAGES[group]?.short : STAGES[group]?.label) ?? "this stage").toLowerCase()}` : "Search"}
-            aria-label="Search this stage"
-            className={cn("min-w-0", compact ? "flex-1" : "w-full sm:w-72")}
-          />
-          {!compact && (
-            <Select
-              prefix="Sort"
-              value={lp.sort ?? "default"}
-              onValueChange={v => {
-                lp.setSort(v === "default" ? null : v);
-              }}
-              options={sortsFor(group)}
-              className="ml-auto shrink-0"
-            />
-          )}
-        </div>
-
-        {group === "questions" && !!current?.count && !compact && (
-          <Callout
-            icon={<MessageSquareText />}
-            className="mb-3"
-            action={
-              <Button asChild size="sm">
-                <a href={href("questions")}>
-                  Open Questions
-                  <ArrowRight />
-                </a>
-              </Button>
-            }
-          >
-            {tablet
-              ? "Each is paused on a question from its application form. One answer in Questions resumes every application that asked it."
-              : "Answer these in Questions."}
-          </Callout>
-        )}
-
-        <Table className={cn("transition-opacity", record.query.isPlaceholderData && "opacity-60", compact && "-mx-4 rounded-none border-x-0 shadow-none")}>
-          {columns && (
-            <TableHeader columns={grid}>
-              <span>Role</span>
-              <span>Stage</span>
-              <span>{TIME_HEADER[group] ?? "Waiting since"}</span>
-              {scored && <span className="text-right">Fit</span>}
-            </TableHeader>
-          )}
-          {!data ? (
-            <SkeletonRows rows={8} />
-          ) : rows.length === 0 ? (
-            lp.q ? (
-              <NoMatch
-                noun="jobs"
-                q={lp.q}
-                filtered={false}
-                onClear={() => {
-                  lp.setSearch("");
-                }}
-              />
-            ) : (
-              <EmptyState icon={<CircleCheck />} title={empty?.[0] ?? "Nothing here"} description={empty?.[1]} />
-            )
-          ) : (
-            rows.map(r => {
-              const at = timeOf(group, r),
-                score = UNASSESSED.includes(r.status) ? null : r.score;
-              return columns ? (
-                <TableRow key={r.id} columns={grid} {...record.rowProps(r.id)}>
-                  <RoleCell row={r} />
-                  <TableCell>
-                    <Stage row={r} />
-                  </TableCell>
-                  <TableCell className="text-fg-muted">
-                    <Time at={at} />
-                  </TableCell>
-                  {scored && (
-                    <TableCell className="text-right">
-                      <Score value={score} threshold={summary?.threshold ?? null} />
-                    </TableCell>
-                  )}
-                </TableRow>
-              ) : (
-                <CompactRow
-                  key={r.id}
-                  row={r}
-                  link={record.rowProps(r.id)}
-                  top={<Time at={at} />}
-                  bottom={mixed ? <Stage row={r} /> : score != null && <Score value={score} threshold={summary?.threshold ?? null} />}
-                />
-              );
-            })
-          )}
-        </Table>
-        {data && (
-          <Pagination
-            offset={data.offset}
-            limit={data.limit}
-            total={data.total}
-            onChange={record.setPage}
-            className={cn(compact && "sticky bottom-0 -mx-4 border-t border-border bg-surface px-4")}
-          />
-        )}
-      </Page>
+      {compact ? (
+        panel
+      ) : (
+        <Page>
+          <PageHeader title="Pipeline" description="Applications the agent is working on, and the ones paused until you act." descriptionOnPhone={false} />
+          {panel}
+        </Page>
+      )}
     </ListDetail>
   );
 }

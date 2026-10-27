@@ -1,29 +1,54 @@
-// The shape of a settings page: titled sections of cards, each a list of rows with the label and what it
+// The shape of a settings page: one card per section, each a list of rows with the label and what it
 // means on the left and the value or control on the right.
 import { FileCog } from "lucide-react";
 import type { ReactNode } from "react";
-import { Card } from "../../components/ui";
+import { ListFooter, ListPanel } from "../../components/ui";
 import { cn } from "../../lib/cn";
 
-export function SettingsSection({ id, title, description, children }: { id: string; title: string; description?: string; children: ReactNode }) {
+// A section of the page: a titled card (the region the nav scrolls to), its rows, and a footer that
+// says where its values are changed.
+export function SettingsPanel({
+  id,
+  title,
+  description,
+  actions,
+  notice,
+  footer,
+  children,
+  className,
+}: {
+  id: string;
+  title: string;
+  description?: ReactNode;
+  actions?: ReactNode;
+  notice?: ReactNode;
+  footer?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
-    <section id={id} aria-labelledby={`${id}-title`} className="scroll-mt-20 lg:scroll-mt-8">
-      <h2 id={`${id}-title`} className="text-lg font-semibold text-fg">
-        {title}
-      </h2>
-      {description && <p className="mt-1 text-sm text-fg-muted">{description}</p>}
-      <div className="mt-4 flex flex-col gap-4">{children}</div>
-    </section>
+    // The id sits on a wrapper: the nav scrolls to it, clear of the top bar and the phone's nav strip.
+    <div id={id} className="scroll-mt-28 lg:scroll-mt-8">
+      <ListPanel
+        frame="card"
+        title={title}
+        description={description}
+        actions={actions}
+        notice={notice}
+        bodyRole="none"
+        footer={footer && <ListFooter className="flex-wrap gap-y-2">{footer}</ListFooter>}
+        {...(className && { className })}
+      >
+        {children}
+      </ListPanel>
+    </div>
   );
 }
 
-export function SettingsCard({ title, children, footer, className }: { title?: string; children: ReactNode; footer?: ReactNode; className?: string }) {
+// A group of rows inside a section's card ("The pipeline", "Gmail"): the list's group band, as a heading.
+export function SettingsGroup({ title }: { title: string }) {
   return (
-    <Card className={cn("overflow-hidden", className)}>
-      {title && <h3 className="px-5 pt-4 text-base font-semibold text-fg">{title}</h3>}
-      <div className="divide-y divide-border">{children}</div>
-      {footer && <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border bg-subtle/50 px-5 py-3">{footer}</div>}
-    </Card>
+    <h3 className="relative -mb-px flex h-9 items-center border-y border-border bg-subtle px-(--list-x) text-sm font-semibold text-fg touch:h-10">{title}</h3>
   );
 }
 
@@ -42,9 +67,11 @@ export function SettingRow({
   className?: string;
 }) {
   return (
-    <div className={cn("flex gap-4 px-5 py-4 sm:items-center sm:gap-8", stack ? "flex-col sm:flex-row" : "items-start", className)}>
+    <div
+      className={cn("flex gap-4 border-t border-border px-(--list-x) py-4 sm:items-center sm:gap-8", stack ? "flex-col sm:flex-row" : "items-start", className)}
+    >
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-fg">{label}</p>
+        <p className="text-base font-medium text-fg">{label}</p>
         {description && <div className="mt-0.5 text-sm text-fg-muted">{description}</div>}
       </div>
       {children !== undefined && (
@@ -56,10 +83,15 @@ export function SettingRow({
   );
 }
 
-// Said once per card: these values are read, not set, here.
-export const FromConfig = ({ what = "these" }: { what?: string }) => (
-  <span className="inline-flex items-center gap-1.5 text-xs text-fg-subtle">
-    <FileCog className="size-3.5" />
-    Change {what} in <code className="font-mono">config.yml</code>
+// A fold in a section's card: the policy behind its values.
+export const SettingFold = ({ children }: { children: ReactNode }) => <div className="border-t border-border px-(--list-x) py-3">{children}</div>;
+
+// Said once per card, in its footer: these values are read, not set, here.
+export const FromConfig = ({ what = "these", file = "config.yml" }: { what?: string; file?: string }) => (
+  <span className="inline-flex items-center gap-1.5 text-sm text-fg-muted">
+    <FileCog className="size-3.5 shrink-0 text-fg-subtle" />
+    <span>
+      Change {what} in <code className="font-mono text-xs">{file}</code>
+    </span>
   </span>
 );

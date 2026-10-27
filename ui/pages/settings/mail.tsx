@@ -1,4 +1,4 @@
-// Gmail and the daily questions digest.
+// Gmail and the daily questions digest: one section, the digest's buttons in its footer.
 import { Copy, RefreshCw, Send } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -8,9 +8,9 @@ import { Button, Disclosure, StatusLabel, Time, Tooltip } from "../../components
 import { api, queryClient } from "../../lib/api";
 import { plural } from "../../lib/format";
 import type { Tone } from "../../lib/labels";
-import { FromConfig, SettingRow, SettingsCard } from "./parts";
+import { FromConfig, SettingFold, SettingRow, SettingsGroup, SettingsPanel } from "./parts";
 
-export function Gmail({ s }: { s: Summary }) {
+function Gmail({ s }: { s: Summary }) {
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(s.redirectUri);
@@ -20,7 +20,8 @@ export function Gmail({ s }: { s: Summary }) {
     }
   };
   return (
-    <SettingsCard title="Gmail">
+    <>
+      <SettingsGroup title="Gmail" />
       <SettingRow
         stack
         label="Mailbox"
@@ -47,14 +48,14 @@ export function Gmail({ s }: { s: Summary }) {
         )}
       </SettingRow>
       <SettingRow stack label="OAuth redirect URI" description="Google must list this address for the connection to work.">
-        <code className="min-w-0 truncate rounded-md border border-border bg-subtle px-2 py-1 font-mono text-xs text-fg-muted">{s.redirectUri}</code>
+        <code className="min-w-0 truncate font-mono text-xs text-fg">{s.redirectUri}</code>
         <Tooltip content="Copy">
           <Button size="icon-sm" variant="ghost" aria-label="Copy the redirect URI" onClick={() => void copy()}>
             <Copy />
           </Button>
         </Tooltip>
       </SettingRow>
-    </SettingsCard>
+    </>
   );
 }
 
@@ -90,7 +91,8 @@ function nextDigest(d: DigestStatus) {
   return sentToday ? `Tomorrow ${d.time}` : now.time >= d.time ? `Due now: today's ${d.time} window is open` : `Today ${d.time}`;
 }
 
-export function Digest({ d }: { d: DigestStatus }) {
+export function Mail({ s }: { s: Summary }) {
+  const d = s.digest;
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState("");
   // Sending, then reading the status back either way: a send that threw may still have gone out.
@@ -121,21 +123,25 @@ export function Digest({ d }: { d: DigestStatus }) {
   };
   const [tone, label] = d.enabled ? (DIGEST_STATE[d.deliveryState] ?? ["neutral", d.deliveryState]) : (["neutral", "Off"] as const);
   return (
-    <SettingsCard
-      title="Daily questions digest"
+    <SettingsPanel
+      id="mail"
+      title="Mail & digest"
       footer={
         <>
-          <Button size="sm" icon={<Send />} loading={busy} disabled={busy || !d.enabled || !d.recipient} onClick={() => void run(true)}>
-            {busy ? "Sending or reconciling" : "Send now"}
-          </Button>
-          <Button size="sm" variant="ghost" icon={<RefreshCw />} disabled={busy} onClick={() => void run(false)}>
-            Refresh status
-          </Button>
-          <span className="flex-1" />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" icon={<Send />} loading={busy} disabled={busy || !d.enabled || !d.recipient} onClick={() => void run(true)}>
+              {busy ? "Sending or reconciling" : "Send now"}
+            </Button>
+            <Button size="sm" variant="ghost" icon={<RefreshCw />} disabled={busy} onClick={() => void run(false)}>
+              Refresh status
+            </Button>
+          </div>
           <FromConfig what="the schedule" />
         </>
       }
     >
+      <Gmail s={s} />
+      <SettingsGroup title="Daily questions digest" />
       <SettingRow label="Status" description="One email a day with the questions waiting on you and the employers' steps falling due.">
         <StatusLabel tone={tone} label={label} pulse={d.deliveryState === "sending"} className="text-fg" />
       </SettingRow>
@@ -146,7 +152,7 @@ export function Digest({ d }: { d: DigestStatus }) {
         <span className={d.enabled ? "" : "text-fg-muted"}>{d.enabled ? nextDigest(d) : "Disabled"}</span>
       </SettingRow>
       <SettingRow label="Waiting to go out" description={d.lastSentAt ? <Time at={d.lastSentAt} prefix="Last sent " /> : "Never sent."}>
-        <span className="tabular">{plural(d.undeliveredGroups, "group")}</span>
+        <span className="tabular font-medium">{plural(d.undeliveredGroups, "group")}</span>
       </SettingRow>
       {d.lastError && (
         <SettingRow label="Last error">
@@ -156,11 +162,11 @@ export function Digest({ d }: { d: DigestStatus }) {
         </SettingRow>
       )}
       {result && (
-        <p role="status" className="animate-in px-5 py-3 text-sm text-fg">
+        <p role="status" className="animate-in border-t border-border px-(--list-x) py-3 text-sm text-fg">
           {result}
         </p>
       )}
-      <div className="px-5 py-3">
+      <SettingFold>
         <Disclosure id="settings-digest" summary="How the digest works">
           <div className="space-y-2">
             <p>
@@ -176,7 +182,7 @@ export function Digest({ d }: { d: DigestStatus }) {
             </p>
           </div>
         </Disclosure>
-      </div>
-    </SettingsCard>
+      </SettingFold>
+    </SettingsPanel>
   );
 }

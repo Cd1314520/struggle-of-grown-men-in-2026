@@ -5,10 +5,19 @@
 
 /* The fonts' @font-face rules are in index.html: the bundler would try to resolve their URLs here. */
 
+/* Tailwind's max-* breakpoints are "(width < 64rem)", which the bundler lowers to "(max-width: calc(64rem -
+   .001px))", and Chromium rounds that up to 64rem: a 1024px window matched both max-lg and lg, so the h1
+   went sr-only with the sidebar showing. "not all and (min-width)" is the exact complement of lg:. Widest
+   first, as Tailwind orders them, so max-sm still wins over max-lg; before dark and touch, as before. */
+@custom-variant max-2xl (@media not all and (min-width: 96rem));
+@custom-variant max-xl (@media not all and (min-width: 80rem));
+@custom-variant max-lg (@media not all and (min-width: 64rem));
+@custom-variant max-md (@media not all and (min-width: 48rem));
+@custom-variant max-sm (@media not all and (min-width: 40rem));
 @custom-variant dark (&:where(.dark, .dark *));
 /* A finger, or a window too narrow for a mouse to be likely: controls grow to a 36px+ tap target. */
 @custom-variant touch {
-  @media (pointer: coarse), (width < 40rem) {
+  @media (pointer: coarse), not all and (min-width: 40rem) {
     @slot;
   }
 }
@@ -23,14 +32,15 @@
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
 
-  /* Type scale. 13px is the UI's base; 14px is for reading. */
+  /* Type scale. 13px is the UI's base on a desktop, 15px on touch (the override after this block);
+     14px is for reading. */
   --text-2xs: 0.6875rem; /* 11px: kbd, counters */
   --text-2xs--line-height: 1rem;
-  --text-xs: 0.75rem; /* 12px: overlines, table headers, captions */
+  --text-xs: 0.75rem; /* 12px: column headers, captions */
   --text-xs--line-height: 1rem;
-  --text-sm: 0.8125rem; /* 13px: UI text, rows, meta */
+  --text-sm: 0.8125rem; /* 13px: UI text, a row's secondary line, meta */
   --text-sm--line-height: 1.25rem;
-  --text-base: 0.875rem; /* 14px: reading text, inputs */
+  --text-base: 0.875rem; /* 14px: reading text, inputs, row titles */
   --text-base--line-height: 1.375rem;
   --text-lg: 1rem; /* 16px: card and panel titles */
   --text-lg--line-height: 1.5rem;
@@ -102,6 +112,29 @@
   --animate-shimmer: shimmer 1.6s linear infinite;
   --animate-spin: spin 0.8s linear infinite;
   --animate-pulse: pulse 1.8s ease-in-out infinite;
+}
+
+/* A finger, or a window too narrow for a mouse: the whole scale steps up, so nothing on a phone is
+   under 12px and rows read at 15–16px. Desktop sizes are the @theme values above; the condition is the
+   touch variant's. */
+@media (pointer: coarse), not all and (min-width: 40rem) {
+  :root {
+    --text-2xs: 0.75rem; /* 12 */
+    --text-2xs--line-height: 1rem;
+    --text-xs: 0.8125rem; /* 13 */
+    --text-xs--line-height: 1.125rem;
+    --text-sm: 0.9375rem; /* 15 */
+    --text-sm--line-height: 1.375rem;
+    --text-base: 1rem; /* 16 */
+    --text-base--line-height: 1.5rem;
+    --text-lg: 1.0625rem; /* 17 */
+    --text-lg--line-height: 1.5rem;
+    /* xl stays 20 */
+    --text-2xl: 1.375rem; /* 22: the open job's title wraps less */
+    --text-2xl--line-height: 1.875rem;
+    --text-3xl: 1.75rem; /* 28 */
+    --text-3xl--line-height: 2.25rem;
+  }
 }
 
 @keyframes fade-in {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { brief, DAY, firstClause, place, plain, shortUrl, span, withoutCompany } from "./format";
+import { agoShort, brief, DAY, firstClause, HOUR, place, plain, shortUrl, span, withoutCompany } from "./format";
 
 describe("agent text", () => {
   it("shortens an address to its host and the start of its path", () => {
@@ -37,6 +37,15 @@ describe("spans of time", () => {
     expect(span(700 * DAY)).toBe("22mo");
     expect(span(731 * DAY)).toBe("2y");
     expect(span(5 * 365.25 * DAY)).toBe("5y");
+  });
+});
+
+describe("a row's age", () => {
+  it("drops the ' ago' and says now for under a minute", () => {
+    expect(agoShort(Date.now() - 3 * HOUR)).toBe("3h");
+    expect(agoShort(Date.now() - 2 * DAY)).toBe("2d");
+    expect(agoShort(Date.now() - 5000)).toBe("now");
+    expect(agoShort(null)).toBe("");
   });
 });
 

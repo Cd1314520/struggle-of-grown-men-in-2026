@@ -4,6 +4,7 @@ import {
   Ban,
   CalendarClock,
   Check,
+  ChevronDown,
   ExternalLink,
   Flag,
   Mail,
@@ -35,7 +36,6 @@ import {
   MenuTrigger,
   Select,
   StatusDot,
-  StatusLabel,
   Textarea,
   Time,
 } from "../../components/ui";
@@ -61,7 +61,7 @@ function StepForm({ step, submit, busy, onCancel }: { step: Step | null; submit:
   };
   return (
     <form
-      className="grid animate-in grid-cols-1 gap-3 rounded-lg border border-border bg-subtle/50 p-4 sm:grid-cols-[160px_1fr]"
+      className="@container grid animate-in grid-cols-1 gap-3 border-t border-border pt-4 @md:grid-cols-[160px_1fr]"
       onSubmit={e => {
         e.preventDefault();
         submit(f);
@@ -88,10 +88,10 @@ function StepForm({ step, submit, busy, onCancel }: { step: Step | null; submit:
       <Field label="Link">
         <Input type="url" value={f.link} onChange={set("link")} placeholder="https://" />
       </Field>
-      <Field label="Notes" className="sm:col-span-2">
+      <Field label="Notes" className="@md:col-span-2">
         <Textarea rows={2} value={f.detail} onChange={set("detail")} />
       </Field>
-      <div className="flex justify-end gap-2 sm:col-span-2">
+      <div className="flex justify-end gap-2 @md:col-span-2">
         <Button variant="ghost" size="sm" onClick={onCancel}>
           Cancel
         </Button>
@@ -119,7 +119,7 @@ function InlineForm({
 }) {
   return (
     <form
-      className="flex animate-in flex-col gap-3 rounded-lg border border-border bg-subtle/50 p-3 sm:flex-row sm:items-end"
+      className="@container flex animate-in flex-col gap-3 border-l-2 border-border-strong pl-3 @md:flex-row @md:items-end"
       onSubmit={e => {
         e.preventDefault();
         submit();
@@ -213,20 +213,13 @@ function StepItem({ step, company, a, last }: { step: Step; company: string; a: 
       ];
 
   return (
-    <li className="relative flex gap-4 pb-6 last:pb-0">
-      {!last && <span aria-hidden className="absolute top-6 bottom-0 left-[11px] w-px bg-border" />}
-      <span
-        className={cn(
-          "relative z-10 mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border bg-surface",
-          open ? "border-border-strong" : "border-border",
-        )}
-      >
-        <StatusDot tone={state.tone} />
-      </span>
+    <li className="relative flex gap-3 pb-5 last:pb-0">
+      {!last && <span aria-hidden className="absolute top-5 bottom-1 left-[3.5px] w-px bg-border" />}
+      <StatusDot tone={state.tone} className="mt-2" />
       <div className={cn("flex min-w-0 flex-1 flex-col gap-2", !open && "opacity-70")}>
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
-            {step.kind !== "other" && <div className="mb-0.5 text-xs font-medium text-fg-subtle">{STEP_KIND[step.kind]}</div>}
+            {step.kind !== "other" && <div className="mb-0.5 text-xs font-medium text-fg-muted">{STEP_KIND[step.kind]}</div>}
             <p className="text-base break-words text-fg">
               <Linkified text={withoutCompany(step.title, company)} />
             </p>
@@ -257,7 +250,10 @@ function StepItem({ step, company, a, last }: { step: Step; company: string; a: 
           </Menu>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-fg-muted [&_svg]:size-3.5 [&_svg]:text-fg-subtle">
-          <StatusLabel tone={state.tone} label={state.waiting ? `${state.label}, waiting on them` : state.label} className="text-fg" />
+          {/* The dot carries the state; a step still to do needs no word for it. */}
+          {step.state !== "todo" || state.tone === "danger" ? (
+            <span className={state.tone === "danger" ? "text-danger-text" : "text-fg"}>{state.waiting ? `${state.label}, waiting on them` : state.label}</span>
+          ) : null}
           {facts.map(([icon, text], i) => (
             <span key={i} className="inline-flex items-center gap-1.5">
               {icon}
@@ -284,7 +280,7 @@ function StepItem({ step, company, a, last }: { step: Step; company: string; a: 
         )}
         {step.done_note && (
           <p className="border-l-2 border-border-strong pl-3 text-sm text-fg-muted">
-            <span className="text-fg-subtle">Your note </span>
+            <span className="font-medium">Your note </span>
             <Linkified text={step.done_note} />
           </p>
         )}
@@ -412,34 +408,34 @@ export function NextSteps({ job, a }: { job: JobDetail; a: JobActions }) {
       ];
   // Open steps first, in the order asked; what is finished sinks under them.
   const steps = [...job.steps].sort((x, y) => Number(isOpenStep(y)) - Number(isOpenStep(x)));
+  const add = !ended && !adding && (
+    <Button
+      variant="ghost"
+      size="sm"
+      icon={<Plus />}
+      className="-mr-2.5 touch:-mr-3"
+      onClick={() => {
+        setAdding(true);
+      }}
+    >
+      Add a step
+    </Button>
+  );
   return (
-    <Card className="overflow-hidden" data-decision="Next steps">
-      <div className="flex items-start gap-3 px-5 pt-5">
+    <Card className="p-4 sm:p-5" data-decision="Next steps">
+      <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <h3 className="text-lg font-semibold text-fg">Next steps</h3>
-          <p className="mt-1 flex items-start gap-2 text-sm text-fg-muted">
+          <p className="mt-0.5 flex items-start gap-2 text-sm text-fg-muted">
             <StatusDot tone={lead.tone} className="mt-1.5" />
             <span className="min-w-0 break-words">
               <Linkified text={lead.text} />
             </span>
           </p>
         </div>
-        <Menu>
-          <MenuTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label="Outcome">
-              <MoreHorizontal />
-            </Button>
-          </MenuTrigger>
-          <MenuContent>
-            {outcomes.map(o => (
-              <MenuItem key={o.action} icon={o.icon} danger={!!o.danger} onSelect={() => void a.act(o.action)}>
-                {o.label}
-              </MenuItem>
-            ))}
-          </MenuContent>
-        </Menu>
+        {add}
       </div>
-      <div className="px-5 pt-5 pb-5">
+      <div className="pt-5">
         {steps.length > 0 ? (
           <ol className="flex flex-col">
             {steps.map((s, i) => (
@@ -453,37 +449,46 @@ export function NextSteps({ job, a }: { job: JobDetail; a: JobActions }) {
             </p>
           )
         )}
-        {!ended &&
-          (adding ? (
-            <div className="mt-5">
-              <StepForm
-                step={null}
-                busy={a.busy === "step:add:"}
-                onCancel={() => {
-                  setAdding(false);
-                }}
-                submit={f => {
-                  if (!f.title.trim()) {
-                    toast.error("Say what the step is first.");
-                    return;
-                  }
-                  void a.step("add", { ...f }).then(ok => {
-                    if (ok) setAdding(false);
-                  });
-                }}
-              />
-            </div>
-          ) : (
-            <Button
-              className="mt-5"
-              icon={<Plus />}
-              onClick={() => {
-                setAdding(true);
+        {adding && (
+          <div className="mt-5">
+            <StepForm
+              step={null}
+              busy={a.busy === "step:add:"}
+              onCancel={() => {
+                setAdding(false);
               }}
-            >
-              Add a step
+              submit={f => {
+                if (!f.title.trim()) {
+                  toast.error("Say what the step is first.");
+                  return;
+                }
+                void a.step("add", { ...f }).then(ok => {
+                  if (ok) setAdding(false);
+                });
+              }}
+            />
+          </div>
+        )}
+      </div>
+      {/* How it ended, or that it is back on: a quiet line under the steps, so the header keeps one action
+          and a phone never stacks this menu over a step's own. */}
+      <div className="mt-5 flex items-center gap-2 border-t border-border pt-3 text-sm text-fg-muted">
+        <span className="min-w-0 flex-1">{ended ? "Closed by mistake?" : "Heard back, or pulling out?"}</span>
+        <Menu>
+          <MenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="-mr-2.5 touch:-mr-3">
+              Outcome
+              <ChevronDown />
             </Button>
-          ))}
+          </MenuTrigger>
+          <MenuContent>
+            {outcomes.map(o => (
+              <MenuItem key={o.action} icon={o.icon} danger={!!o.danger} onSelect={() => void a.act(o.action)}>
+                {o.label}
+              </MenuItem>
+            ))}
+          </MenuContent>
+        </Menu>
       </div>
     </Card>
   );

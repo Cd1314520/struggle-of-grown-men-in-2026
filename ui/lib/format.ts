@@ -28,6 +28,12 @@ export const ago = (at: string | number | null | undefined) => {
   const ms = Date.now() - (typeof at === "number" ? at : parseAt(at));
   return ms < MINUTE ? "just now" : `${span(ms)} ago`;
 };
+// "3h", "now": `ago` for a row's trail, where " ago" goes without saying.
+export const agoShort = (at: string | number | null | undefined) => {
+  if (!at) return "";
+  const ms = Date.now() - (typeof at === "number" ? at : parseAt(at));
+  return ms < MINUTE ? "now" : span(ms);
+};
 // "in 3h", or "3h ago" for a past time.
 export const relative = (at: string | number) => {
   const ms = (typeof at === "number" ? at : parseAt(at)) - Date.now();

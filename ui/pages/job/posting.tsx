@@ -15,7 +15,7 @@ function Listed({ url, source, location }: { url: string; source: string; locati
         {SOURCE(source)}
         <ExternalLink className="size-3.5" />
       </a>
-      <span className="text-fg-subtle">{location ?? host(url)}</span>
+      <span className="text-fg-muted">{location ?? host(url)}</span>
     </span>
   );
 }
@@ -30,7 +30,7 @@ export function Posting({ job }: { job: JobDetail }) {
         {desc ? (
           <div>
             <div className={cn("relative", long && !open && "max-h-[440px] overflow-hidden")}>
-              <p className="max-w-[68ch] text-base leading-7 break-words whitespace-pre-line text-fg">{desc}</p>
+              <p className="text-base leading-7 break-words whitespace-pre-line text-fg">{desc}</p>
               {long && !open && (
                 <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[var(--job-bg)] to-transparent" />
               )}

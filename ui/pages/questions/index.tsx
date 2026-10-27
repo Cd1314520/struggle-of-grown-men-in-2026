@@ -4,8 +4,8 @@ import { ArrowRight, CheckCheck, CircleAlert, PanelRight } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { QuestionGroup } from "../../../src/questions";
-import { COLUMN, ListDetail, ListHeader, NoMatch, useRecordHistory } from "../../components/list";
-import { Button, Callout, EmptyState, Page, PageHeader, SearchInput, Skeleton, SkeletonRows } from "../../components/ui";
+import { COLUMN, ListDetail, NoMatch, useRecordHistory } from "../../components/list";
+import { Button, EmptyState, ListNotice, ListPanel, ListToolbar, Page, PageHeader, SearchInput, Skeleton, SkeletonRows } from "../../components/ui";
 import { api, queryClient, refreshAll, useQuestions } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { useHotkeys } from "../../lib/hotkeys";
@@ -22,38 +22,51 @@ const open = (key: string | null) => {
   navigate(key ? `questions/${encodeURIComponent(key)}` : "questions", { replace: true });
 };
 
-// The other gates, counted, with the way to Pipeline where each is handled on its application.
-function Elsewhere({ groups, className = "" }: { groups: readonly QuestionGroup[]; className?: string }) {
+// The other gates, counted, with the way to Pipeline where each is handled on its application: a line in
+// the queue's header, read as an alert. `inline`: a phone's, a link at the end of the count's line, so the
+// queue starts a notice higher.
+function Elsewhere({ groups, inline }: { groups: readonly QuestionGroup[]; inline?: boolean }) {
   const { total, text } = elsewhere(groups);
   if (!total) return null;
+  const detail = text.charAt(0).toUpperCase() + text.slice(1);
+  if (inline)
+    return (
+      <span role="alert" className="flex items-center gap-1.5 text-sm [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-warning-text">
+        <CircleAlert />
+        <Button asChild size="sm" variant="link" className="px-0 touch:px-0">
+          <a href="#pipeline?group=needs_you" title={detail}>
+            {total.toLocaleString()} more in Pipeline
+            <ArrowRight />
+          </a>
+        </Button>
+      </span>
+    );
   return (
-    <Callout
-      tone="warning"
-      icon={<CircleAlert />}
-      action={
-        <Button asChild size="sm" variant="ghost" className="-my-1 -mr-2">
+    // The link rides in the text's line rather than as the notice's action, which a phone would push onto a
+    // line of its own: one line keeps the queue high. Which gates they are is on hover and in Pipeline's stages.
+    <ListNotice tone="warning" icon={<CircleAlert />}>
+      <span className="flex flex-wrap items-center justify-between gap-x-3">
+        <span title={detail}>
+          {total.toLocaleString()} more {total === 1 ? "waits" : "wait"} on you
+        </span>
+        <Button asChild size="sm" variant="link" className="px-0 touch:px-0">
           <a href="#pipeline?group=needs_you">
             Pipeline
             <ArrowRight />
           </a>
         </Button>
-      }
-      className={className}
-    >
-      {text.charAt(0).toUpperCase() + text.slice(1)} also {total === 1 ? "waits" : "wait"} on you
-    </Callout>
+      </span>
+    </ListNotice>
   );
 }
 
 function Loading() {
   return (
     <div className="flex lg:h-dvh">
-      <div className={cn("w-full bg-surface", COLUMN)}>
-        <div className="flex flex-col gap-3 border-b border-border px-4 pt-4 pb-3">
-          <Skeleton className="h-8 w-32" />
-          <Skeleton className="h-8 w-full" />
-        </div>
-        <SkeletonRows rows={8} />
+      <div className={cn("w-full", COLUMN)}>
+        <ListPanel frame="column" title="Questions" count={undefined} toolbar={<ListToolbar search={<Skeleton className="h-8 w-full touch:h-10" />} />}>
+          <SkeletonRows rows={8} />
+        </ListPanel>
       </div>
       <div className="hidden flex-1 flex-col gap-4 bg-surface px-10 pt-24 lg:flex">
         <Skeleton className="h-7 w-3/5" />
@@ -175,17 +188,15 @@ export function QuestionsPage() {
 
   if (!groups.length)
     return (
-      <Page width="narrow">
-        <PageHeader title="Questions" />
-        <Elsewhere groups={data} className="mb-6" />
-        <div className="rounded-xl border border-border bg-surface shadow-xs">
+      <Page>
+        <PageHeader title="Questions" description="What application forms asked that your profile can't answer." descriptionOnPhone={false} />
+        <ListPanel title="To answer" count={0} notice={<Elsewhere groups={data} />}>
           <EmptyState
             icon={<CheckCheck />}
             title="All caught up"
             description="Nothing is waiting on an answer. When an application asks something your profile can't answer, it lands here."
-            className="py-20"
           />
-        </div>
+        </ListPanel>
       </Page>
     );
 
@@ -214,26 +225,42 @@ export function QuestionsPage() {
       }
       empty={<EmptyState icon={<PanelRight />} title="No question open" description="Pick a question from the queue to answer it." className="h-full" />}
     >
-      <aside className="flex flex-col bg-surface pb-20 lg:h-full lg:pb-0">
-        <ListHeader title="Questions" count={groups.length} noun="to answer">
-          <Elsewhere groups={data} />
-          <SearchInput ref={searchBox} value={search} onValueChange={setSearch} placeholder="Filter by question or employer" aria-label="Filter questions" />
-        </ListHeader>
-        <div className="min-h-0 flex-1 lg:overflow-y-auto">
-          {current ? (
-            <Queue groups={shown} selected={current.key} desktopOnly={!routeKey} />
-          ) : (
-            <NoMatch
-              noun="questions"
-              q={search}
-              filtered={false}
-              onClear={() => {
-                setSearch("");
-              }}
-            />
-          )}
-        </div>
-      </aside>
+      <ListPanel
+        frame="column"
+        title="Questions"
+        count={groups.length}
+        noun="to answer"
+        bodyRole="none"
+        toolbar={
+          <ListToolbar
+            search={
+              <SearchInput
+                ref={searchBox}
+                value={search}
+                onValueChange={setSearch}
+                placeholder="Filter by question or employer"
+                aria-label="Filter questions"
+              />
+            }
+          />
+        }
+        // Side by side the notice has the header's room; a phone keeps the queue high with a link by the count.
+        actions={!wide && <Elsewhere groups={data} inline />}
+        notice={wide && <Elsewhere groups={data} />}
+      >
+        {current ? (
+          <Queue groups={shown} selected={current.key} desktopOnly={!routeKey} />
+        ) : (
+          <NoMatch
+            noun="questions"
+            q={search}
+            filtered={false}
+            onClear={() => {
+              setSearch("");
+            }}
+          />
+        )}
+      </ListPanel>
     </ListDetail>
   );
 }

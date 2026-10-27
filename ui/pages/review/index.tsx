@@ -3,12 +3,12 @@
 // page and a job opens over it.
 import { ArrowRight, Inbox, PanelRight } from "lucide-react";
 import { useRef, type ReactNode } from "react";
-import { FilterMenu, GroupSegments, ListDetail, ListHeader, NoMatch, useOpenRecord } from "../../components/list";
-import { Button, CompanyMark, EmptyState, Pagination, SearchInput, Select, SkeletonRows, TableGroup } from "../../components/ui";
+import { FilterMenu, GroupSegments, ListDetail, NoMatch, useOpenRecord } from "../../components/list";
+import { Button, CompanyMark, EmptyState, ListGroup, ListPanel, ListToolbar, Pagination, SearchInput, Select, SkeletonRows } from "../../components/ui";
 import { useSummary } from "../../lib/api";
 import { plural, unent } from "../../lib/format";
 import { useListParams } from "../../lib/list-params";
-import { useMedia, WIDE } from "../../lib/media";
+import { TABLET, useMedia, WIDE } from "../../lib/media";
 import { setParams } from "../../lib/router";
 import { JobDetail } from "../job/detail";
 import { QueueRow } from "./queue-row";
@@ -20,7 +20,8 @@ const SORTS = [
 ] as const;
 
 export function ReviewPage() {
-  const wide = useMedia(WIDE);
+  const wide = useMedia(WIDE),
+    tablet = useMedia(TABLET);
   const lp = useListParams();
   const search = useRef<HTMLInputElement>(null);
   // Beside the queue a job is always open; on a phone the queue is the page until one is.
@@ -56,88 +57,94 @@ export function ReviewPage() {
         )
       }
     >
-      <section aria-label="Jobs to review" className="flex flex-col pb-24 lg:h-full lg:pb-0">
-        <ListHeader
-          title="Review"
-          count={list?.all}
-          noun="waiting for you"
-          actions={
-            <>
-              <FilterMenu
-                filters={list?.filters ?? []}
-                active={lp.filters}
-                onToggle={lp.toggleFilter}
-                onClear={() => {
-                  setParams({ filter: null, page: null });
-                }}
+      {/* A phone's panel has no head: the top bar names the page and the tab bar's badge and the All segment
+          count it, so the queue starts right under the search. The heading stays for screen readers. */}
+      {!tablet && <h1 className="sr-only">Review</h1>}
+      <ListPanel
+        frame="column"
+        title={tablet ? "Review" : undefined}
+        count={tablet ? list?.all : undefined}
+        noun="waiting for you"
+        aria-label="Jobs to review"
+        bodyLabel="Queue"
+        aria-rowcount={list?.total}
+        loading={query.isPlaceholderData}
+        toolbar={
+          <ListToolbar
+            search={
+              <SearchInput
+                ref={search}
+                value={lp.search}
+                onValueChange={lp.setSearch}
+                // A phone's box, beside Filter and Sort, has room for the word alone.
+                placeholder={tablet ? "Search title, company or place" : "Search"}
+                aria-label="Search the queue"
               />
-              <Select
-                prefix="Sort"
-                value={lp.sort ?? "newest"}
-                onValueChange={v => {
-                  lp.setSort(v === "newest" ? null : v);
-                }}
-                options={SORTS}
-              />
-            </>
-          }
-        >
-          <SearchInput ref={search} value={lp.search} onValueChange={lp.setSearch} placeholder="Search title, company or place" aria-label="Search the queue" />
-          {list && list.total > 0 && (
-            <GroupSegments label="When the posting opened" groups={list.groups} value={lp.group} onChange={lp.setGroup} className="-mx-1 px-1" />
-          )}
-        </ListHeader>
-
-        <div className="border-y border-border bg-surface lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:border-y-0">
-          {!list ? (
-            <SkeletonRows rows={10} />
-          ) : rows.length === 0 ? (
-            <NoMatch noun="jobs" q={lp.q} filtered={lp.filters.length > 0 || !!lp.group} onClear={lp.clear} />
-          ) : (
-            <div role="table" aria-label="Queue" aria-rowcount={list.total} className={query.isPlaceholderData ? "opacity-60 transition-opacity" : undefined}>
-              {rows.map((job, i) => {
-                const prev = rows[i - 1],
-                  next = rows[i + 1];
-                // Sorted by company, an employer with several roles here gets a heading over them; one with a
-                // single role stays an ordinary row, so the list is not half headings.
-                const clustered = byCompany && (job.company === prev?.company || job.company === next?.company);
-                let heading: ReactNode = null;
-                if (byAge && job.group !== prev?.group) {
-                  const g = groups.get(job.group);
-                  heading = <TableGroup label={g?.label ?? job.group} {...(g ? { count: g.count } : {})} className="sticky top-12 z-10 bg-subtle lg:top-0" />;
-                } else if (clustered && job.company !== prev?.company) heading = <CompanyHeading company={job.company} roles={job.companyCount} />;
-                return (
-                  <div key={job.id} className="contents">
-                    {heading}
-                    <QueueRow job={job} threshold={threshold} underCompany={clustered} link={record.rowProps(job.id)} />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-        {list && (
-          <Pagination
-            offset={list.offset}
-            limit={list.limit}
-            total={list.total}
-            onChange={record.setPage}
-            className="px-4 lg:border-t lg:border-border lg:py-2.5"
+            }
+            controls={
+              <>
+                <FilterMenu
+                  filters={list?.filters ?? []}
+                  active={lp.filters}
+                  onToggle={lp.toggleFilter}
+                  onClear={() => {
+                    setParams({ filter: null, page: null });
+                  }}
+                />
+                <Select
+                  prefix="Sort"
+                  collapse
+                  value={lp.sort ?? "newest"}
+                  onValueChange={v => {
+                    lp.setSort(v === "newest" ? null : v);
+                  }}
+                  options={SORTS}
+                />
+              </>
+            }
+            segments={list && list.total > 0 && <GroupSegments label="When the posting opened" groups={list.groups} value={lp.group} onChange={lp.setGroup} />}
           />
+        }
+        footer={list && <Pagination variant="footer" noun="jobs" offset={list.offset} limit={list.limit} total={list.total} onChange={record.setPage} />}
+      >
+        {!list ? (
+          <SkeletonRows rows={10} />
+        ) : rows.length === 0 ? (
+          <NoMatch noun="jobs" q={lp.q} filtered={lp.filters.length > 0 || !!lp.group} onClear={lp.clear} />
+        ) : (
+          rows.map((job, i) => {
+            const prev = rows[i - 1],
+              next = rows[i + 1];
+            // Sorted by company, an employer with several roles here gets a heading over them; one with a
+            // single role stays an ordinary row, so the list is not half headings.
+            const clustered = byCompany && (job.company === prev?.company || job.company === next?.company);
+            let heading: ReactNode = null;
+            if (byAge && job.group !== prev?.group) {
+              const g = groups.get(job.group);
+              heading = <ListGroup label={g?.label ?? job.group} count={g?.count} />;
+            } else if (clustered && job.company !== prev?.company)
+              heading = (
+                <ListGroup
+                  // The mark sits over the rows' lead, so the name lines up with the titles under it.
+                  lead={
+                    <span className="mr-1 flex w-8 shrink-0 justify-center">
+                      <CompanyMark name={job.company} size="sm" />
+                    </span>
+                  }
+                  label={unent(job.company)}
+                  hint={`${job.companyCount} to review`}
+                />
+              );
+            return (
+              <div key={job.id} className="contents">
+                {heading}
+                <QueueRow job={job} threshold={threshold} underCompany={clustered} link={record.rowProps(job.id)} />
+              </div>
+            );
+          })
         )}
-      </section>
+      </ListPanel>
     </ListDetail>
-  );
-}
-
-// The heading over an employer's roles when the queue is sorted by company.
-function CompanyHeading({ company, roles }: { company: string; roles: number }) {
-  return (
-    <div role="row" className="sticky top-12 z-10 flex h-11 lg:top-0 items-center gap-3 border-b border-border bg-subtle px-4">
-      <CompanyMark name={company} />
-      <span className="min-w-0 truncate text-sm font-medium text-fg">{unent(company)}</span>
-      <span className="tabular shrink-0 text-xs text-fg-subtle">{roles} to review</span>
-    </div>
   );
 }
 

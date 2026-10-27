@@ -4,9 +4,9 @@ import { FileCog, RefreshCw, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import type { CatalogModel, ModelCatalog, ModelStage } from "../../../src/api-types";
-import { Button, Callout, Combobox, Skeleton, type ComboOption } from "../../components/ui";
+import { Button, Combobox, ListNotice, SkeletonRows, type ComboOption } from "../../components/ui";
 import { api, queryClient, refreshAll, useModels } from "../../lib/api";
-import { SettingRow, SettingsCard, SettingsSection } from "./parts";
+import { SettingRow, SettingsGroup, SettingsPanel } from "./parts";
 
 // What each stage does, and what that asks of a model. In the order a job meets them.
 export const STAGES: readonly { stage: ModelStage; label: string; description: string; core: boolean }[] = [
@@ -98,67 +98,59 @@ export function Models() {
     }
   };
   const options: ComboOption[] = [{ value: DEFAULT, label: "omp's default", selected: "omp's default" }, ...(data?.catalog.models ?? []).map(option)];
-  const card = (core: boolean, title: string) => (
-    <SettingsCard
-      title={title}
-      footer={
-        core ? (
-          <span className="inline-flex items-center gap-1.5 text-xs text-fg-subtle">
-            <FileCog className="size-3.5" />
-            Saved to <code className="font-mono">config.local.yml</code>, and used from each stage&apos;s next run. Prices are dollars per million tokens in and
-            out.
-          </span>
-        ) : undefined
-      }
-    >
+  const group = (core: boolean, title: string) => (
+    <>
+      <SettingsGroup title={title} />
       {STAGES.filter(s => s.core === core).map(s => (
         <StageRow key={s.stage} {...s} value={data?.stages[s.stage] ?? null} options={options} />
       ))}
-    </SettingsCard>
+    </>
   );
+  const failed = HARNESSES.filter(h => data?.catalog.errors[h.id]);
+  const models = data?.catalog.models ?? [];
   return (
-    <SettingsSection
+    <SettingsPanel
       id="models"
       title="Models"
       description="Which model each kind of agent work runs on. A claude-code model runs through Claude Code (claude -p) as signed in on this machine; any other through omp. The list is what the two can reach here."
-    >
-      {HARNESSES.map(h => {
-        const error = data?.catalog.errors[h.id];
-        return error ? (
-          <Callout
-            key={h.id}
-            tone="warning"
-            icon={<TriangleAlert />}
-            title={`${h.label} couldn't list its models`}
-            action={
-              <Button size="sm" icon={<RefreshCw />} loading={refreshing} onClick={() => void refresh()}>
-                Try again
-              </Button>
-            }
-          >
-            {error}. Sign in with <code className="font-mono text-xs">{h.login}</code> on this machine, if you mean to use it. A model can still be typed by
-            name.
-          </Callout>
-        ) : null;
-      })}
-      {data && data.catalog.models.length > 0 && (
-        <div className="-mt-1 flex items-center gap-3 text-sm text-fg-muted">
-          <span className="flex-1">
-            {data.catalog.models.length} models from {new Set(data.catalog.models.map(m => m.provider)).size} providers.
-          </span>
-          <Button size="sm" variant="ghost" icon={<RefreshCw />} loading={refreshing} onClick={() => void refresh()}>
-            Refresh list
+      actions={
+        data && (
+          <Button size="sm" variant="ghost" icon={<RefreshCw />} loading={refreshing} onClick={() => void refresh()} className="-mr-2.5 touch:-mr-3">
+            <span className="max-sm:sr-only">Refresh list</span>
           </Button>
-        </div>
-      )}
+        )
+      }
+      notice={
+        failed.length > 0 && (
+          <div className="flex flex-col">
+            {failed.map(h => (
+              <ListNotice key={h.id} tone="warning" icon={<TriangleAlert />}>
+                {h.label} couldn&apos;t list its models: {data?.catalog.errors[h.id]}. Sign in with <code className="font-mono text-xs">{h.login}</code> on this
+                machine, if you mean to use it. A model can still be typed by name.
+              </ListNotice>
+            ))}
+          </div>
+        )
+      }
+      footer={
+        <span className="inline-flex items-start gap-1.5">
+          <FileCog className="mt-1 size-3.5 shrink-0 text-fg-subtle" />
+          <span>
+            Saved to <code className="font-mono text-xs">config.local.yml</code> and used from each stage&apos;s next run.
+            {models.length > 0 &&
+              ` ${models.length} models from ${new Set(models.map(m => m.provider)).size} providers; prices are dollars per million tokens in and out.`}
+          </span>
+        </span>
+      }
+    >
       {isPending ? (
-        <Skeleton className="h-72 rounded-xl" />
+        <SkeletonRows lead={false} rows={4} className="border-t border-border" />
       ) : (
         <>
-          {card(true, "The pipeline")}
-          {card(false, "Supporting work")}
+          {group(true, "The pipeline")}
+          {group(false, "Supporting work")}
         </>
       )}
-    </SettingsSection>
+    </SettingsPanel>
   );
 }

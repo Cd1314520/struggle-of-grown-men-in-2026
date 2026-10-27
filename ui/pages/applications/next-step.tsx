@@ -19,7 +19,7 @@ function nextPhrase(next: NextStep, now = Date.now()): { text: string; hint: str
   if (next.whose === "upcoming") return { text: `Booked in ${span(at - now)}`, hint: `Booked for ${when}`, tone: "text-info-text" };
   return next.quiet
     ? { text: `Quiet for ${span(now - at)}`, hint: `Waiting on them since ${when}`, tone: "text-fg-muted" }
-    : { text: `Waiting ${span(now - at)}`, hint: `Waiting on them since ${when}`, tone: "text-fg-subtle" };
+    : { text: `Waiting ${span(now - at)}`, hint: `Waiting on them since ${when}`, tone: "text-fg-muted" };
 }
 
 export function NextPhrase({ next, className }: { next: NextStep; className?: string }) {

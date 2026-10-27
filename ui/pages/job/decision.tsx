@@ -28,12 +28,14 @@ import type { JobDetail } from "../../../src/api-types";
 import {
   Button,
   Card,
+  Clamp,
   ConfirmDialog,
   Dialog,
   DialogContent,
   Disclosure,
   Kbd,
   Linkified,
+  ListIcon,
   Menu,
   MenuContent,
   MenuItem,
@@ -52,7 +54,6 @@ import { combo, useHotkeys } from "../../lib/hotkeys";
 import type { Tone } from "../../lib/labels";
 import { href } from "../../lib/router";
 import { useDraft, type JobActions } from "./actions";
-import { Clamp } from "./clamp";
 import { enteredOf, parsePending, setAsideOf, type DecisionKind } from "./model";
 
 interface Act {
@@ -94,15 +95,6 @@ const RUNNING_TITLE: Partial<Record<JobDetail["status"], string>> = {
   locating: "Finding the posting",
 };
 
-const ICON_TONE: Record<Tone, string> = {
-  neutral: "bg-subtle text-fg-muted",
-  accent: "bg-accent-soft text-accent-text",
-  success: "bg-success-soft text-success-text",
-  warning: "bg-warning-soft text-warning-text",
-  danger: "bg-danger-soft text-danger-text",
-  info: "bg-info-soft text-info-text",
-};
-
 // ---- pieces of a gate's body
 
 // What the agent was asked, in the page's own words.
@@ -113,11 +105,11 @@ function Asked({ text, context }: { text: string; context?: string | undefined }
   return (
     <div className="flex flex-col gap-2">
       {long ? (
-        <div className="rounded-lg border border-border bg-subtle/50 px-4 py-3">
+        <blockquote className="border-l-2 border-border-strong pl-3">
           <Clamp lines={5} className="text-sm text-fg">
             <Linkified text={text} />
           </Clamp>
-        </div>
+        </blockquote>
       ) : (
         <p className="text-base font-medium text-fg">
           <Linkified text={text} />
@@ -196,17 +188,17 @@ function Entered({ text }: { text: string }) {
       </p>
     );
   return (
-    <div className="divide-y divide-border overflow-hidden rounded-lg border border-border text-sm">
+    <div className="@container divide-y divide-border border-y border-border text-sm">
       {e.rows.map(([k, v], i) =>
         k ? (
-          <div key={i} className="grid gap-1 px-4 py-3 sm:grid-cols-[150px_minmax(0,1fr)] sm:gap-6">
+          <div key={i} className="grid gap-0.5 py-2.5 @md:grid-cols-[150px_minmax(0,1fr)] @md:gap-6">
             <div className="text-fg-muted">{k}</div>
             <div className="break-words whitespace-pre-line text-fg">
               <Linkified text={v} />
             </div>
           </div>
         ) : (
-          <p key={i} className="bg-subtle/50 px-4 py-3 break-words whitespace-pre-line text-fg-muted">
+          <p key={i} className="py-2.5 break-words whitespace-pre-line text-fg-muted">
             <Linkified text={v} />
           </p>
         ),
@@ -235,10 +227,7 @@ function AnswerBox({
 }) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="flex items-baseline justify-between gap-3">
-        <span className="text-sm font-medium text-fg">{label}</span>
-        {hint && <span className="text-xs text-fg-subtle">{hint}</span>}
-      </span>
+      <span className="text-sm font-medium text-fg">{label}</span>
       <Textarea
         rows={rows}
         value={value}
@@ -253,6 +242,7 @@ function AnswerBox({
           }
         }}
       />
+      {hint && <span className="text-sm text-fg-muted">{hint}</span>}
     </label>
   );
 }
@@ -408,8 +398,8 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
               <Linkified text={reason} />
             </p>
           )}
-          <div className="divide-y divide-border rounded-lg border border-border">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+          <div className="divide-y divide-border border-y border-border">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
               <span className="min-w-36 flex-1 text-sm text-fg-muted">Look for yourself</span>
               {job.manualBrowserReserved ? (
                 <>
@@ -422,7 +412,7 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
                 <ActButton act={reserve} busy={a.busy} size="sm" />
               )}
             </div>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
               <span className="min-w-36 flex-1 text-sm text-fg-muted">I checked it myself</span>
               <ActButton act={markSubmitted("Verified submitted")} busy={a.busy} size="sm" />
               <ActButton
@@ -540,7 +530,7 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
         <div className="flex flex-col gap-4">
           <Entered text={gate.text} />
           {changing && (
-            <div className="flex animate-in flex-col gap-3 rounded-lg border border-border bg-subtle/50 p-4">
+            <div className="flex animate-in flex-col gap-3 border-t border-border pt-4">
               <AnswerBox
                 label="Changes for this application"
                 rows={3}
@@ -830,13 +820,14 @@ function Evidence({ job }: { job: JobDetail }) {
   );
 }
 
-// A gate the agent stopped at, or the work in flight: a card above the job's content.
+// A gate the agent stopped at, or the work in flight: a card above the job's content, the only framed
+// block in a job.
 export function DecisionCard({ d, job, busy }: { d: Decision; job: JobDetail; busy: string | null }) {
   const hasActions = !!d.primary || d.secondary.length > 0;
   return (
-    <Card className="overflow-hidden" data-decision={d.title}>
-      <div className="flex items-start gap-3 px-5 pt-5">
-        <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-lg [&_svg]:size-4", ICON_TONE[d.tone])}>{d.icon}</span>
+    <Card className="p-4 sm:p-5" data-decision={d.title}>
+      <div className="flex items-start gap-3">
+        <ListIcon icon={d.icon} tone={d.tone} />
         <div className="min-w-0 flex-1 pt-0.5">
           <h3 className="flex items-center gap-2 text-lg font-semibold text-fg">
             {d.title}
@@ -846,23 +837,23 @@ export function DecisionCard({ d, job, busy }: { d: Decision; job: JobDetail; bu
         </div>
         <MoreMenu acts={d.menu} busy={busy} />
       </div>
-      {d.body && <div className="px-5 pt-4">{d.body}</div>}
+      {d.body && <div className="pt-4">{d.body}</div>}
       {hasActions && (
-        <div className="flex flex-wrap items-center gap-2 px-5 pt-5">
+        <div className="flex flex-wrap items-center gap-2 pt-5">
           {d.primary && <ActButton act={d.primary} busy={busy} variant="primary" />}
           {d.secondary.map(x => (
             <ActButton key={x.key + x.label} act={x} busy={busy} />
           ))}
           {d.saveKey && (
-            <span className="ml-auto hidden items-center gap-1.5 text-xs text-fg-subtle sm:inline-flex">
+            <span className="ml-auto hidden items-center gap-1.5 text-xs text-fg-muted sm:inline-flex">
               <Kbd>{combo("↵")}</Kbd>
               to save
             </span>
           )}
         </div>
       )}
-      {d.why.length > 0 || d.evidence ? (
-        <div className="mt-5 flex flex-col gap-2 border-t border-border bg-subtle/40 px-5 py-3">
+      {(d.why.length > 0 || d.evidence) && (
+        <div className="mt-4 flex flex-col gap-1 border-t border-border pt-3">
           {d.why.length > 0 && (
             <Disclosure id="gate-why" summary="How this works">
               <div className="flex flex-col gap-1.5">
@@ -874,8 +865,6 @@ export function DecisionCard({ d, job, busy }: { d: Decision; job: JobDetail; bu
           )}
           {d.evidence && <Evidence job={job} />}
         </div>
-      ) : (
-        <div className="h-5" />
       )}
     </Card>
   );
@@ -885,14 +874,14 @@ export function DecisionCard({ d, job, busy }: { d: Decision; job: JobDetail; bu
 // With no room for its text the bar's buttons share its width.
 const FILL = "max-sm:h-9 @max-lg:flex-1 max-sm:[&_kbd]:hidden";
 
-// On a page of its own it floats over the content's foot, clear of the phone's tab bar.
+// On a page of its own it floats over the foot of the job's card, clear of the phone's tab bar.
 export function DecisionBar({ d, busy, floating }: { d: Decision; busy: string | null; floating: boolean }) {
   return (
     <div
       className={cn(
         "@container flex items-center gap-3 bg-surface/95 backdrop-blur",
         floating
-          ? "sticky bottom-[calc(4.25rem+env(safe-area-inset-bottom))] mt-2 animate-slide-up rounded-xl border border-border py-2.5 pr-2.5 pl-4 shadow-lg lg:bottom-5"
+          ? "sticky bottom-[calc(4.25rem+env(safe-area-inset-bottom))] mx-3 mt-2 mb-3 animate-slide-up rounded-xl border border-border py-2.5 pr-2.5 pl-4 shadow-lg sm:mx-4 sm:mb-4 lg:bottom-5"
           : "border-t border-border px-4 py-3 sm:px-6",
       )}
       data-decision={d.title}

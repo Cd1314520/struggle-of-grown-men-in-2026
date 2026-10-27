@@ -24,20 +24,31 @@ export function MenuItem({
   icon,
   danger,
   shortcut,
+  description,
   children,
   ...props
-}: ComponentProps<typeof M.Item> & { icon?: ReactNode; danger?: boolean; shortcut?: string }) {
+}: ComponentProps<typeof M.Item> & { icon?: ReactNode; danger?: boolean; shortcut?: string; description?: ReactNode }) {
   return (
     <M.Item
       className={cn(
-        "flex h-8 cursor-pointer items-center touch:h-10 gap-2 rounded-md px-2 text-sm outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-subtle [&_svg]:size-4",
+        "flex cursor-pointer items-center gap-2",
+        // A second line ("Last run 22m ago") makes the item two lines tall, its icon level with the first.
+        description ? "items-start py-1.5 [&>svg]:mt-0.5" : "h-8 touch:h-10",
+        "rounded-md px-2 text-sm outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-subtle [&_svg]:size-4",
         danger ? "text-danger-text data-[highlighted]:bg-danger-soft [&_svg]:text-danger-text" : "text-fg [&_svg]:text-fg-subtle",
         className,
       )}
       {...props}
     >
       {icon}
-      <span className="flex-1">{children}</span>
+      {description ? (
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span>{children}</span>
+          <span className="text-sm text-fg-muted">{description}</span>
+        </span>
+      ) : (
+        <span className="flex-1">{children}</span>
+      )}
       {shortcut && <span className="text-xs text-fg-subtle touch:hidden">{shortcut}</span>}
     </M.Item>
   );

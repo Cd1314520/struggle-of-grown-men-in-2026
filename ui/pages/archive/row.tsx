@@ -1,51 +1,75 @@
-// One archived job: the role, why it was set aside, where, its fit, and when.
-import type { ListRow } from "../../../src/api-types";
+// One archived job: the role, why it was set aside, where, its fit, and when. Narrow, the reason is the
+// row's snippet; wide, it is a cell beside the place and the time.
+import { MapPin } from "lucide-react";
+import type { ListRow as Row } from "../../../src/api-types";
 import type { RowLink } from "../../components/list";
-import { CompanyMark, Score, TableCell, TableHeader, TableRow, Time, Tooltip } from "../../components/ui";
-import { cn } from "../../lib/cn";
+import { CompanyMark, ListColumns, ListRow, Narrow, Score, Time, Tooltip } from "../../components/ui";
 import { place, unent } from "../../lib/format";
 
-const COLUMNS = "minmax(0,2.3fr) minmax(0,2fr) minmax(0,1.1fr) 44px 76px";
+// `uniform`: every row on the page was set aside for the same reason, which the panel says once instead.
+const columnsOf = (uniform: boolean) => (uniform ? "180px 80px" : "minmax(0,1fr) 180px 80px");
 
-export function ArchiveHeader({ when }: { when: string }) {
-  return (
-    <TableHeader columns={COLUMNS}>
-      <span>Role</span>
-      <span>Reason</span>
-      <span>Location</span>
-      <span className="text-right">Fit</span>
-      <span className="text-right">{when}</span>
-    </TableHeader>
-  );
+export function ArchiveColumns({ when, uniform }: { when: string; uniform: boolean }) {
+  return <ListColumns columns={columnsOf(uniform)} lead label="Role" cells={uniform ? ["Location", when] : ["Reason", "Location", when]} trail="Fit" />;
 }
 
-export function ArchiveRow({ job, threshold, link }: { job: ListRow; threshold: number | null; link: RowLink }) {
+export function ArchiveRow({ job, threshold, uniform, link }: { job: Row; threshold: number | null; uniform: boolean; link: RowLink }) {
   const why = job.reason;
+  const located = !!job.location?.trim();
   return (
-    <TableRow columns={COLUMNS} {...link} className="flex-nowrap scroll-mt-4 scroll-mb-4">
-      <TableCell className="flex min-w-0 flex-1 items-center gap-3">
-        <CompanyMark name={job.company} />
-        <div className="min-w-0">
-          <div className="truncate font-medium text-fg">{unent(job.title)}</div>
-          <div className="truncate text-fg-muted">{unent(job.company)}</div>
-        </div>
-      </TableCell>
-      <TableCell className="hidden md:block">
-        {why && (
-          <Tooltip content={why.detail || why.label.length > 50 ? <span className="line-clamp-4">{why.detail ?? why.label}</span> : null}>
-            <span className="block truncate text-fg-muted">{why.label}</span>
-          </Tooltip>
-        )}
-      </TableCell>
-      <TableCell className={cn("hidden truncate md:block", job.location?.trim() ? "text-fg-muted" : "text-fg-subtle")} title={job.location ?? undefined}>
-        {place(job.location)}
-      </TableCell>
-      <TableCell className="shrink-0 text-right">
-        <Score value={job.score} threshold={threshold} />
-      </TableCell>
-      <TableCell className="hidden text-right text-fg-subtle md:block">
-        <Time at={job.updated_at} />
-      </TableCell>
-    </TableRow>
+    <ListRow
+      {...link}
+      lead={<CompanyMark name={job.company} />}
+      title={unent(job.title)}
+      secondary={
+        // The employer keeps its whole name where it can; the place takes what is left.
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="max-w-full shrink-0 truncate">{unent(job.company)}</span>
+          {located && (
+            <Narrow>
+              {/* A pin parts the place from the employer, both in the same muted voice. */}
+              <span className="flex min-w-0 items-center gap-1" title={job.location ?? undefined}>
+                <MapPin aria-hidden className="size-3.5 shrink-0 text-fg-subtle" />
+                <span className="truncate">{place(job.location)}</span>
+              </span>
+            </Narrow>
+          )}
+        </span>
+      }
+      snippet={
+        why &&
+        !uniform && (
+          <Narrow>
+            <span title={why.detail ?? undefined}>{why.label}</span>
+          </Narrow>
+        )
+      }
+      trail={
+        <>
+          <Score value={job.score} threshold={threshold} />
+          <Narrow>
+            <Time at={job.updated_at} short />
+          </Narrow>
+        </>
+      }
+      columns={columnsOf(uniform)}
+      cells={[
+        ...(uniform
+          ? []
+          : [
+              why ? (
+                <Tooltip key="why" content={why.detail || why.label.length > 50 ? <span className="line-clamp-4">{why.detail ?? why.label}</span> : null}>
+                  <span className="line-clamp-2">{why.label}</span>
+                </Tooltip>
+              ) : (
+                <span key="why" />
+              ),
+            ]),
+        <span key="place" className="block truncate" title={job.location ?? undefined}>
+          {place(job.location)}
+        </span>,
+        <Time key="at" at={job.updated_at} />,
+      ]}
+    />
   );
 }

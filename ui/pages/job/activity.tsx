@@ -1,25 +1,16 @@
 // The Activity tab: one timeline of status moves, stops and the log, newest first, grouped by day.
-import { useState } from "react";
 import type { JobDetail } from "../../../src/api-types";
-import { Disclosure, Overline, StatusDot } from "../../components/ui";
-import { cn } from "../../lib/cn";
+import { Clamp, Disclosure, StatusDot, Subhead } from "../../components/ui";
 import { cap, clock, dayLabel, plain, plural } from "../../lib/format";
 import { CAUSE, STATUS, type Tone } from "../../lib/labels";
 import { timelineOf, workerName, type Entry } from "./model";
 
 function Detail({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
   if (!text) return null;
   return (
-    <button
-      type="button"
-      onClick={() => {
-        setOpen(!open);
-      }}
-      className={cn("mt-0.5 block text-left text-sm break-words whitespace-pre-line text-fg-muted hover:text-fg", !open && "line-clamp-2")}
-    >
+    <Clamp lines={2} touchLines={3} className="mt-0.5 text-sm text-fg-muted">
       {cap(plain(text))}
-    </button>
+    </Clamp>
   );
 }
 
@@ -42,12 +33,12 @@ function Row({ e, last }: { e: Entry; last: boolean }) {
       {!last && <span aria-hidden className="absolute top-4 bottom-0 left-[3.5px] w-px bg-border" />}
       <StatusDot tone={d.tone} className="mt-1.5" />
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-3">
-          <p className="min-w-0 flex-1 text-sm font-medium text-fg">{d.title}</p>
-          <span className="tabular shrink-0 text-xs text-fg-subtle">
+        <p className="text-sm font-medium text-fg">
+          {d.title}
+          <span className="tabular ml-2 font-normal whitespace-nowrap text-fg-muted">
             {e.type === "run" && clock(e.from) !== clock(e.at) ? `${clock(e.from)}–${clock(e.at)}` : clock(e.at)}
           </span>
-        </div>
+        </p>
         <Detail text={d.detail} />
         {e.type === "run" && (
           <Disclosure summary="Show steps" className="mt-1">
@@ -77,7 +68,7 @@ export function Activity({ job }: { job: JobDetail }) {
     <div className="flex flex-col gap-6">
       {days.map(([label, list]) => (
         <section key={label}>
-          <Overline className="mb-3">{label}</Overline>
+          <Subhead className="mb-3">{label}</Subhead>
           <ol>
             {list.map((e, i) => (
               <Row key={`${e.type}${e.at}${i}`} e={e} last={i === list.length - 1} />

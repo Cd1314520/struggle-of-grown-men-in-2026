@@ -2,7 +2,7 @@
 import { Check, CircleHelp, X } from "lucide-react";
 import { useState } from "react";
 import type { JobDetail } from "../../../src/api-types";
-import { Disclosure, EmptyState, Score, Section, StatusLabel } from "../../components/ui";
+import { Disclosure, EmptyState, Properties, Score, Section } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { checklistOf, groupsOf, itemLabel, practiceOf, tally, type Item, type Phase } from "./model";
 
@@ -14,18 +14,17 @@ const MARK = {
 
 function ItemRow({ item }: { item: Item }) {
   const [open, setOpen] = useState(false);
+  // What the item weighs leads its evidence, so the statement gets the whole line above.
+  const weight = <span className="tabular mr-2 font-medium text-fg-muted">{item.required ? "Required" : `${item.points} / ${item.weight}`}</span>;
   return (
-    <li className="flex gap-3 px-4 py-3">
+    <li className="flex gap-3 py-3">
       <span className="mt-0.5 shrink-0">{MARK[item.answer]}</span>
       <div className="min-w-0 flex-1">
-        <div className="flex items-start gap-3">
-          <p className="min-w-0 flex-1 text-sm text-fg">
-            <span className="font-medium">{itemLabel(item)}</span>
-            <span className="text-fg-muted">. {item.statement}</span>
-          </p>
-          <span className="tabular shrink-0 text-xs text-fg-subtle">{item.required ? "Required" : `${item.points} / ${item.weight}`}</span>
-        </div>
-        {item.evidence && (
+        <p className="text-sm text-fg">
+          <span className="font-medium">{itemLabel(item)}</span>
+          <span className="text-fg-muted">. {item.statement}</span>
+        </p>
+        {item.evidence ? (
           <button
             type="button"
             onClick={() => {
@@ -33,8 +32,11 @@ function ItemRow({ item }: { item: Item }) {
             }}
             className={cn("mt-1 block text-left text-sm text-fg-muted hover:text-fg", !open && "line-clamp-2")}
           >
+            {weight}
             {item.evidence}
           </button>
+        ) : (
+          <p className="mt-1 text-sm">{weight}</p>
         )}
       </div>
     </li>
@@ -44,24 +46,20 @@ function ItemRow({ item }: { item: Item }) {
 function Group({ title, items }: { title: string; items: Item[] }) {
   if (!items.length) return null;
   return (
-    <div>
-      <div className="mb-2 flex items-baseline gap-2 text-xs font-medium text-fg-subtle">
-        {title}
-        <span className="tabular">{items.length}</span>
-      </div>
-      <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+    <Section title={title} count={items.length}>
+      <ul className="divide-y divide-border border-y border-border">
         {items.map(i => (
           <ItemRow key={i.key} item={i} />
         ))}
       </ul>
-    </div>
+    </Section>
   );
 }
 
 function Checklist({ items }: { items: Item[] }) {
   const g = groupsOf(items);
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-8">
       {!g.missed.length && <p className="text-sm text-fg-muted">Nothing missed.</p>}
       <Group title="Missed" items={g.missed} />
       <Group title="Unclear" items={g.unclear} />
@@ -74,20 +72,24 @@ function PracticeEvidence({ job, phase }: { job: JobDetail; phase: Phase }) {
   const p = practiceOf(job, phase);
   if (!p) return null;
   return (
-    <Section title="Practice eligibility" actions={<StatusLabel tone={p.qualifies ? "success" : "neutral"} label={p.verdict} className="text-fg" />}>
-      <p className="max-w-[68ch] text-base text-fg">{/[.)]$/.test(p.reason) ? p.reason : `${p.reason}.`}</p>
+    <Section title="Practice eligibility">
+      <p className="text-base text-fg">
+        <span className="font-semibold">{p.verdict}.</span> {/[.)]$/.test(p.reason) ? p.reason : `${p.reason}.`}
+      </p>
       {p.rows.length > 0 && (
-        <dl className="mt-4 grid grid-cols-[minmax(96px,auto)_1fr] gap-x-6 gap-y-3 text-sm">
-          {p.rows.map(([label, value, evidence]) => (
-            <div key={label} className="contents">
-              <dt className="text-fg-muted">{label}</dt>
-              <dd className="min-w-0">
-                <span className="text-fg">{value}</span>
-                {evidence && <p className="mt-0.5 text-fg-muted">{evidence}</p>}
-              </dd>
-            </div>
-          ))}
-        </dl>
+        <Properties
+          className="mt-4"
+          items={p.rows.map(
+            ([label, value, evidence]) =>
+              [
+                label,
+                <div key={label}>
+                  <span className="text-fg">{value}</span>
+                  {evidence && <p className="mt-0.5 text-fg-muted">{evidence}</p>}
+                </div>,
+              ] as const,
+          )}
+        />
       )}
     </Section>
   );

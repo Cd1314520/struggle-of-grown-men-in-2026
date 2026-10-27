@@ -1,7 +1,7 @@
 // The queue: every open question, newest posting first, under how long ago the posting opened.
 import { Fragment, useEffect } from "react";
 import type { QuestionGroup } from "../../../src/questions";
-import { CompanyMark, Count, TableCell, TableGroup, TableRow, Time, Tooltip } from "../../components/ui";
+import { CompanyMark, Count, ListGroup, ListRow, Time, Tooltip } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { href } from "../../lib/router";
 import { questionText, sections } from "./model";
@@ -12,21 +12,21 @@ function QueueRow({ group, selected, desktopOnly }: { group: QuestionGroup; sele
   const company = group.jobs[0]?.company ?? "";
   const many = group.jobs.length;
   return (
-    <TableRow
-      columns="32px minmax(0,1fr)"
+    <ListRow
       href={href("questions", group.key)}
       data-question={group.key}
       selected={selected}
       // Only the open question's row is a tab stop, so Tab reaches its options; J/K walk the queue.
       tabIndex={selected ? undefined : -1}
       aria-current={selected && !desktopOnly ? "true" : undefined}
-      className={cn("grid scroll-mt-10 items-start gap-x-3 py-3", desktopOnly && "max-lg:bg-transparent max-lg:before:hidden")}
-    >
-      <CompanyMark name={company} />
-      <TableCell>
-        <p className="line-clamp-2 font-medium break-words text-fg">{questionText(group.text)}</p>
-        <div className="mt-0.5 flex items-center gap-2 text-fg-muted">
-          <span className="min-w-0 flex-1 truncate">{company}</span>
+      className={cn(desktopOnly && "max-lg:bg-transparent max-lg:before:hidden")}
+      lead={<CompanyMark name={company} />}
+      // A question is the whole point of the row: it gets a third line at every width.
+      title={questionText(group.text)}
+      titleLines={3}
+      secondary={
+        <>
+          <span>{company}</span>
           {many > 1 && (
             <Tooltip content={`Asked by ${many} applications`}>
               <span>
@@ -34,10 +34,10 @@ function QueueRow({ group, selected, desktopOnly }: { group: QuestionGroup; sele
               </span>
             </Tooltip>
           )}
-          <Time at={group.createdAt} className="text-xs text-fg-subtle" />
-        </div>
-      </TableCell>
-    </TableRow>
+        </>
+      }
+      trail={<Time at={group.createdAt} short />}
+    />
   );
 }
 
@@ -50,16 +50,18 @@ export function Queue({ groups, selected, desktopOnly }: { groups: readonly Ques
     if (row && document.activeElement !== row && document.activeElement?.matches("a[data-question]")) row.focus({ preventScroll: true });
   }, [selected]);
   return (
-    <nav aria-label="Questions to answer" className="pb-6">
+    <nav aria-label="Questions to answer">
       {/* Headings and rows are siblings, as in Review: each heading sticks until the next covers it. */}
-      {sections(groups).map(s => (
-        <Fragment key={s.label}>
-          <TableGroup label={s.label} count={s.groups.length} className="sticky top-12 z-10 bg-subtle lg:top-0" />
-          {s.groups.map(g => (
-            <QueueRow key={g.key} group={g} selected={g.key === selected} desktopOnly={desktopOnly} />
-          ))}
-        </Fragment>
-      ))}
+      <div role="table" aria-label="Questions">
+        {sections(groups).map(s => (
+          <Fragment key={s.label}>
+            <ListGroup label={s.label} count={s.groups.length} />
+            {s.groups.map(g => (
+              <QueueRow key={g.key} group={g} selected={g.key === selected} desktopOnly={desktopOnly} />
+            ))}
+          </Fragment>
+        ))}
+      </div>
     </nav>
   );
 }

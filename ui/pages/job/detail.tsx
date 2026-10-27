@@ -1,5 +1,5 @@
 // The open job: header, the decision the app waits on, and tabs. Shown beside or over a list (layout
-// "panel"), or as the whole page at #job/<id> (layout "page").
+// "panel"), or as the whole page at #job/<id> (layout "page", inside the page's card).
 import { ArrowUpRight, Building2, ChevronDown, ChevronUp, Clock, Globe, Maximize2, MapPin, SearchX, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { JobDetail as Job } from "../../../src/api-types";
@@ -13,7 +13,7 @@ import { useJobActions } from "./actions";
 import { Activity } from "./activity";
 import { DecisionBar, DecisionCard, useDecision, useDecisionKeys } from "./decision";
 import { Fit } from "./fit";
-import { decisionOf, fitLeads, headerStatus, type Phase } from "./model";
+import { decisionOf, fitLeads, headerStatus, setAsideOf, type Phase } from "./model";
 import { Overview } from "./overview";
 import { Posting } from "./posting";
 import { NextSteps } from "./process";
@@ -61,44 +61,75 @@ function Fact({ icon, children, title }: { icon: ReactNode; children: ReactNode;
 function Header({ job, threshold, onScore }: { job: Job; threshold: number | null; onScore: () => void }) {
   const status = headerStatus(job);
   const others = job.siblings.length;
+  // Why a held or rejected job was set aside, beside its status at every width.
+  const aside = job.status === "held" || job.status === "rejected" ? setAsideOf(job) : null;
+  const fit = threshold != null ? `Fit score, needs ${threshold}` : "Fit score";
+  const label = job.score != null ? `Fit ${job.score}, open the Fit tab` : undefined;
   return (
-    <header className="flex items-start gap-4">
-      <CompanyMark name={job.company} size="lg" className="mt-0.5 hidden sm:inline-flex" />
-      <div className="min-w-0 flex-1">
-        <a
-          href={job.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="group inline-flex max-w-full items-center gap-1 text-sm font-medium text-fg-muted hover:text-fg touch:-my-1.5 touch:py-1.5"
-          title="Open the original posting"
-        >
-          <CompanyMark name={job.company} size="sm" className="mr-1 sm:hidden" />
-          <span className="truncate">{job.company}</span>
-          <ArrowUpRight className="size-3.5 shrink-0 text-fg-subtle group-hover:text-fg" />
-        </a>
-        <h1 className="mt-1 text-2xl font-semibold tracking-[-0.015em] text-balance break-words text-fg">{job.title}</h1>
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-fg-muted">
-          <Fact icon={<MapPin />} title={job.location ?? undefined}>
-            {place(job.location)}
-          </Fact>
-          <Fact icon={<Clock />}>{job.submitted_at ? <Time at={job.submitted_at} prefix="Applied " /> : <Time at={job.found_at} prefix="Found " />}</Fact>
-          <Fact icon={<Globe />}>{host(job.url)}</Fact>
-          {others > 0 && (
-            <Fact icon={<Building2 />}>
-              {others} other {others === 1 ? "role" : "roles"} at {job.company}
-            </Fact>
+    // One column under 36rem (a phone, a narrow panel): company, title, then one row of facts that holds
+    // the status and the score. From 36rem the status and the big score stand on the right.
+    <header className="@container">
+      <div className="flex items-start gap-4">
+        <CompanyMark name={job.company} size="lg" className="mt-0.5 hidden @xl:inline-flex" />
+        <div className="min-w-0 flex-1">
+          <a
+            href={job.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group inline-flex max-w-full items-center gap-1 text-sm font-medium text-fg-muted hover:text-fg touch:-my-1.5 touch:py-1.5"
+            title="Open the original posting"
+          >
+            <CompanyMark name={job.company} size="sm" className="mr-1 @xl:hidden" />
+            <span className="truncate">{job.company}</span>
+            <ArrowUpRight className="size-3.5 shrink-0 text-fg-subtle group-hover:text-fg" />
+          </a>
+          <h1 className="mt-1 text-2xl font-semibold tracking-[-0.015em] text-balance break-words text-fg">{job.title}</h1>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-fg-muted @xl:mt-3 @xl:gap-y-1.5">
+            <StatusLabel tone={status.tone} label={status.label} pulse={status.pulse} className="text-fg @xl:hidden" />
+            {aside && (
+              <span title={aside.detail ?? undefined} className="min-w-0 text-fg">
+                {aside.label}
+              </span>
+            )}
+            {job.score != null && (
+              <button
+                type="button"
+                onClick={onScore}
+                title={fit}
+                aria-label={label}
+                className="inline-flex items-baseline gap-1.5 rounded-md outline-offset-2 hover:text-fg touch:-my-1.5 touch:py-1.5 @xl:hidden"
+              >
+                Fit
+                <Score value={job.score} threshold={threshold} className="text-base" />
+              </button>
+            )}
+            {/* "No location given" is not worth a line on a phone. */}
+            <span className={job.location ? "contents" : "hidden @xl:contents"}>
+              <Fact icon={<MapPin />} title={job.location ?? undefined}>
+                {place(job.location)}
+              </Fact>
+            </span>
+            <Fact icon={<Clock />}>{job.submitted_at ? <Time at={job.submitted_at} prefix="Applied " /> : <Time at={job.found_at} prefix="Found " />}</Fact>
+            <span className="hidden min-w-0 @xl:contents">
+              <Fact icon={<Globe />}>{host(job.url)}</Fact>
+              {others > 0 && (
+                <Fact icon={<Building2 />}>
+                  {others} other {others === 1 ? "role" : "roles"} at {job.company}
+                </Fact>
+              )}
+            </span>
+          </div>
+        </div>
+        <div className="hidden shrink-0 flex-col items-end gap-3 @xl:flex">
+          <StatusLabel tone={status.tone} label={status.label} pulse={status.pulse} className="text-fg" />
+          {job.score != null && (
+            <Tooltip content={fit}>
+              <button type="button" onClick={onScore} className="rounded-md outline-offset-4" aria-label={label}>
+                <Score value={job.score} threshold={threshold} size="lg" className="items-end" />
+              </button>
+            </Tooltip>
           )}
         </div>
-      </div>
-      <div className="flex shrink-0 flex-col items-end gap-3">
-        <StatusLabel tone={status.tone} label={status.label} pulse={status.pulse} className="text-fg" />
-        {job.score != null && (
-          <Tooltip content={threshold != null ? `Fit score, needs ${threshold}` : "Fit score"}>
-            <button type="button" onClick={onScore} className="rounded-md outline-offset-4" aria-label={`Fit ${job.score}, open the Fit tab`}>
-              <Score value={job.score} threshold={threshold} size="lg" className="items-end" />
-            </button>
-          </Tooltip>
-        )}
       </div>
     </header>
   );
@@ -211,7 +242,7 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
   }, [settling]);
 
   const panel = layout === "panel";
-  const pad = panel ? "px-4 sm:px-6" : "";
+  const pad = "px-4 sm:px-6";
   const card =
     decision?.placement === "card" ? (
       <DecisionCard d={decision} job={job} busy={actions.busy} />
@@ -225,7 +256,7 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col", settling && "pointer-events-none")}>
       <div className={cn(panel && "min-h-0 flex-1 overflow-y-auto overscroll-contain")} data-job-scroll>
-        <div className={cn("pt-6", pad)}>
+        <div className={cn("pt-4 sm:pt-6", pad)}>
           <Header
             job={job}
             threshold={threshold}
@@ -234,8 +265,8 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
             }}
           />
         </div>
-        {lead && <div className={cn("mt-6", pad)}>{lead}</div>}
-        <Tabs value={tab} onValueChange={open} className="mt-6">
+        {lead && <div className={cn("mt-5 sm:mt-6", pad)}>{lead}</div>}
+        <Tabs value={tab} onValueChange={open} className="mt-4 sm:mt-6">
           <div className={cn("sticky z-10 bg-[var(--job-bg)]", panel ? "top-0" : "top-12 lg:top-0", pad)}>
             <TabsList>
               {TABS.map(([k, label]) => (
@@ -245,21 +276,24 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
               ))}
             </TabsList>
           </div>
-          <div className={cn("@container pt-6 pb-10", pad)}>
-            {TABS.map(([k]) => (
-              <TabsContent key={k} value={k} className="animate-in rounded-sm outline-offset-4">
-                {k === "overview" && (
-                  <div className="flex flex-col gap-8">
-                    {!lead && card}
-                    <Overview job={job} phase={phase} openTab={open} />
-                  </div>
-                )}
-                {k === "fit" && <Fit job={job} phase={phase} threshold={threshold} />}
-                {k === "resume" && <Resume job={job} />}
-                {k === "posting" && <Posting job={job} />}
-                {k === "activity" && <Activity job={job} />}
-              </TabsContent>
-            ))}
+          {/* One measure for every tab, so prose, check lists and properties share a right edge. */}
+          <div className={cn("pt-6 pb-10", pad)}>
+            <div className="@container max-w-3xl">
+              {TABS.map(([k]) => (
+                <TabsContent key={k} value={k} className="animate-in rounded-sm outline-offset-4">
+                  {k === "overview" && (
+                    <div className="flex flex-col gap-8">
+                      {!lead && card}
+                      <Overview job={job} phase={phase} openTab={open} />
+                    </div>
+                  )}
+                  {k === "fit" && <Fit job={job} phase={phase} threshold={threshold} />}
+                  {k === "resume" && <Resume job={job} />}
+                  {k === "posting" && <Posting job={job} />}
+                  {k === "activity" && <Activity job={job} />}
+                </TabsContent>
+              ))}
+            </div>
           </div>
         </Tabs>
       </div>
@@ -296,7 +330,7 @@ export function JobDetail({ id, layout, onClose, onActed, position }: JobDetailP
     error instanceof ApiError && error.status === 404 ? (
       <EmptyState icon={<SearchX />} title="This job no longer exists" description="It may have been removed by a cleanup." />
     ) : !job || !loaded ? (
-      <div className={cn("flex flex-col gap-8 pt-6", panel && "px-4 sm:px-6")}>
+      <div className="flex flex-col gap-8 px-4 pt-6 sm:px-6">
         <HeaderSkeleton />
         <Skeleton className="h-9 w-full" />
         <div className="space-y-3">
@@ -312,8 +346,8 @@ export function JobDetail({ id, layout, onClose, onActed, position }: JobDetailP
   return (
     <div
       ref={root}
-      style={{ "--job-bg": panel ? "var(--surface)" : "var(--canvas)" } as CSSProperties}
-      className={cn("flex flex-col bg-[var(--job-bg)]", panel && "h-full min-h-0")}
+      style={{ "--job-bg": "var(--surface)" } as CSSProperties}
+      className={cn("flex flex-col", panel && "h-full min-h-0 bg-[var(--job-bg)]")}
       data-job={id}
     >
       {panel && <PanelBar job={loaded ? job : undefined} position={position} onClose={onClose} condensed={condensed} />}

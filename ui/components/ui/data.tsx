@@ -1,7 +1,7 @@
 // Small pieces that show one value: a score, an employer's mark, a time, a stat, a key-value list.
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
-import { ago, dateTime, parseAt } from "../../lib/format";
+import { ago, agoShort, dateTime, parseAt } from "../../lib/format";
 import { Tooltip } from "./tooltip";
 
 // A fit score: the number, coloured against the threshold, with a thin bar under it in the larger size.
@@ -65,15 +65,15 @@ export function CompanyMark({ name, size = "md", className }: { name: string; si
   );
 }
 
-// "3h ago", with the exact time on hover.
-export function Time({ at, className, prefix = "" }: { at: string | number | null | undefined; className?: string; prefix?: string }) {
+// "3h ago", with the exact time on hover. `short` is a row's trail: "3h", "2d", "now".
+export function Time({ at, short, className, prefix = "" }: { at: string | number | null | undefined; short?: boolean; className?: string; prefix?: string }) {
   if (!at) return null;
   const ms = typeof at === "number" ? at : parseAt(at);
   return (
     <Tooltip content={dateTime(ms)}>
       <time dateTime={new Date(ms).toISOString()} className={cn("tabular whitespace-nowrap", className)}>
         {prefix}
-        {ago(ms)}
+        {short ? agoShort(ms) : ago(ms)}
       </time>
     </Tooltip>
   );
@@ -90,7 +90,23 @@ export function Stat({ label, value, hint, className }: { label: ReactNode; valu
   );
 }
 
-// Label/value rows.
+// Numbers in a line, with no tiles and no borders: an Applications or Overview header's stats.
+export function StatRow({ items, className }: { items: readonly { label: ReactNode; value: ReactNode; hint?: ReactNode }[]; className?: string }) {
+  return (
+    <dl className={cn("flex flex-wrap gap-x-10 gap-y-3", className)}>
+      {items.map((s, i) => (
+        <div key={i} className="flex flex-col">
+          <dt className="text-sm text-fg-muted">{s.label}</dt>
+          <dd className="tabular text-xl font-semibold text-fg">{s.value}</dd>
+          {s.hint && <dd className="text-xs text-fg-muted">{s.hint}</dd>}
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+// Label/value rows: two columns where there is room, and stacked (the label over its value) in less
+// than 28rem, a phone or a narrow panel, so a value never wraps a word to a line.
 export function Properties({
   items,
   className,
@@ -99,16 +115,18 @@ export function Properties({
   className?: string;
 }) {
   return (
-    <dl className={cn("grid grid-cols-[minmax(96px,auto)_1fr] gap-x-6 gap-y-2.5 text-sm", className)}>
-      {items.filter(Boolean).map((item, i) => {
-        const [k, v] = item as readonly [ReactNode, ReactNode];
-        return (
-          <div key={i} className="contents">
-            <dt className="text-fg-muted">{k}</dt>
-            <dd className="min-w-0 break-words text-fg">{v}</dd>
-          </div>
-        );
-      })}
-    </dl>
+    <div className={cn("@container", className)}>
+      <dl className="grid gap-y-3 text-sm @md:grid-cols-[minmax(96px,160px)_1fr] @md:gap-x-6 @md:gap-y-2.5">
+        {items.filter(Boolean).map((item, i) => {
+          const [k, v] = item as readonly [ReactNode, ReactNode];
+          return (
+            <div key={i} className="flex min-w-0 flex-col gap-0.5 @md:contents">
+              <dt className="text-fg-muted">{k}</dt>
+              <dd className="min-w-0 break-words text-fg">{v}</dd>
+            </div>
+          );
+        })}
+      </dl>
+    </div>
   );
 }

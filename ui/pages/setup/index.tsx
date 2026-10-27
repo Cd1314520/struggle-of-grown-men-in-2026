@@ -1,10 +1,10 @@
-// Setup: what a new install still needs, step by step, each checked live against this machine. The first
-// step not done is the one open, with the page's one primary action; done steps fold to a line.
-import { Check, CircleCheck, Copy, ExternalLink, Minus, Radar, RefreshCw, X } from "lucide-react";
+// Setup: what a new install still needs, step by step, each checked live against this machine. Steps still
+// to do are open, the first with the page's one primary action; done steps fold to a line.
+import { Check, ChevronDown, CircleCheck, Copy, ExternalLink, Minus, Radar, RefreshCw, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { SetupCheck, SetupResult, SetupStep, SetupStepId } from "../../../src/api-types";
-import { Button, Callout, Card, Disclosure, Page, PageHeader, Skeleton, StatusLabel } from "../../components/ui";
+import { Button, Callout, Disclosure, ListIcon, ListPanel, Page, PageHeader, SkeletonRows } from "../../components/ui";
 import { api, queryClient, refreshAll, useSetup, useSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { href } from "../../lib/router";
@@ -174,22 +174,22 @@ const STEPS: Record<SetupStepId, StepCopy> = {
   },
 };
 
-// A check's line: what it is, and what was found.
+// A check's line: what it is, and what was found. The value wraps under the label on a phone.
 function CheckRow({ c, optional }: { c: SetupCheck; optional: boolean }) {
   const needed = c.required && !optional;
   const Icon = c.ok ? Check : needed ? X : Minus;
   const file = /\.(md|yml)$/.test(c.key) ? c.key : null;
   return (
-    <li className="flex min-h-8 items-start gap-2.5 py-1">
+    <li className="flex items-start gap-2.5 py-1">
       <Icon className={cn("mt-0.5 size-4 shrink-0", c.ok ? "text-success-text" : needed ? "text-danger-text" : "text-fg-subtle")} aria-hidden />
       <span className="sr-only">{c.ok ? "Done:" : needed ? "To do:" : "Optional:"}</span>
       <span className="min-w-0 flex-1 text-sm">
         {file ? (
-          <a href={href("profile", file)} className="font-mono text-xs text-fg hover:text-accent-text hover:underline">
+          <a href={href("profile", file)} className="text-fg underline-offset-2 hover:text-accent-text hover:underline">
             {c.label}
           </a>
         ) : (
-          <span className={cn("text-fg", /^[a-z][\w.-]*$/.test(c.label) && "font-mono text-xs")}>{c.label}</span>
+          <span className="text-fg">{c.label}</span>
         )}
         {c.detail && <span className="block break-words text-fg-muted sm:ml-2 sm:inline">{c.detail}</span>}
       </span>
@@ -197,63 +197,63 @@ function CheckRow({ c, optional }: { c: SetupCheck; optional: boolean }) {
   );
 }
 
-function StepCard({ step, n, current, result }: { step: SetupStep; n: number; current: boolean; result: SetupResult }) {
+// One step, as a row of the list: a step still to do is open (what it is, its checks, how to do it, its
+// action); a done one is a line, its details behind a toggle.
+function StepRow({ step, n, current, result }: { step: SetupStep; n: number; current: boolean; result: SetupResult }) {
+  const [open, setOpen] = useState(false);
   const copy = STEPS[step.id];
   const checks = step.checks.filter(copy.shown ?? (() => true));
   const action = copy.action?.({ primary: current, step, result });
-  const body = (
-    <>
-      {checks.length > 0 && (
-        <ul className="mt-3">
-          {checks.map(c => (
-            <CheckRow key={c.key} c={c} optional={!step.required} />
-          ))}
-        </ul>
-      )}
-      {(copy.how ?? action) && (
-        <div className="mt-4 flex flex-col gap-4">
-          {copy.how && (
-            <Disclosure id={`setup-${step.id}`} summary="How to do it">
-              <div className="space-y-2">{copy.how(result)}</div>
-            </Disclosure>
-          )}
-          {action && <div className="flex flex-wrap gap-2">{action}</div>}
-        </div>
-      )}
-    </>
+  const list = checks.length > 0 && (
+    <ul className="mt-2">
+      {checks.map(c => (
+        <CheckRow key={c.key} c={c} optional={!step.required} />
+      ))}
+    </ul>
   );
+  const details = `setup-details-${step.id}`;
   return (
-    <li>
-      <Card className={cn("p-5", current && "border-accent/40 ring-3 ring-accent/10")}>
-        <div className="flex items-start gap-4">
-          <span
-            aria-hidden
-            className={cn(
-              "flex size-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold tabular",
-              step.done ? "bg-success-soft text-success-text" : current ? "bg-accent text-accent-fg" : "bg-muted text-fg-muted",
-            )}
-          >
-            {step.done ? <Check className="size-4" /> : n}
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <h2 className="flex-1 text-base font-semibold text-fg">{copy.title}</h2>
-              <StatusLabel
-                tone={step.done ? "success" : step.required ? "warning" : "neutral"}
-                label={step.done ? "Done" : step.required ? "To do" : "Optional"}
-              />
+    <li
+      aria-current={current ? "step" : undefined}
+      className="grid scroll-mt-10 grid-cols-[2rem_minmax(0,1fr)_auto] items-start gap-x-3 border-t border-border px-(--list-x) py-3.5 touch:py-4"
+    >
+      <ListIcon icon={step.done ? <Check /> : n} tone={step.done ? "success" : step.required ? "accent" : "neutral"} />
+      <div className="min-w-0 self-center">
+        <h3 className="text-base font-medium text-fg">{copy.title}</h3>
+        {!step.done && !step.required && <p className="text-sm text-fg-muted">Optional</p>}
+      </div>
+      {step.done ? (
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={details}
+          onClick={() => {
+            setOpen(!open);
+          }}
+          className="group inline-flex h-8 items-center gap-1 self-start text-sm text-fg-muted hover:text-fg touch:-my-0.5 touch:h-9"
+        >
+          Details
+          <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
+        </button>
+      ) : (
+        <span />
+      )}
+      {(!step.done || open) && (
+        <div id={details} className={cn("col-start-2 col-end-4 min-w-0", step.done && "animate-in")}>
+          <p className="mt-0.5 text-sm text-fg-muted">{copy.description}</p>
+          {list}
+          {!step.done && (copy.how ?? action) && (
+            <div className="mt-3 flex flex-col gap-3">
+              {copy.how && (
+                <Disclosure id={`setup-${step.id}`} summary="How to do it">
+                  <div className="space-y-2">{copy.how(result)}</div>
+                </Disclosure>
+              )}
+              {action && <div className="flex flex-wrap gap-2">{action}</div>}
             </div>
-            <p className="mt-0.5 text-sm text-fg-muted">{copy.description}</p>
-            {step.done ? (
-              <Disclosure id={`setup-done-${step.id}`} summary="Details" className="mt-3">
-                {body}
-              </Disclosure>
-            ) : (
-              body
-            )}
-          </div>
+          )}
         </div>
-      </Card>
+      )}
     </li>
   );
 }
@@ -276,48 +276,47 @@ export function SetupPage() {
   const required = data?.steps.filter(st => st.required) ?? [];
   const done = required.filter(st => st.done).length;
   const current = data?.steps.find(st => !st.done && st.required) ?? data?.steps.find(st => !st.done);
+  const progress = data && (
+    <>
+      <span className="tabular">
+        {done} of {required.length} done
+      </span>
+      <div className="mt-2 mb-1 h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-muted" aria-hidden>
+        <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${(done / Math.max(1, required.length)) * 100}%` }} />
+      </div>
+    </>
+  );
   return (
     <Page width="narrow">
-      <PageHeader
-        title="Setup"
-        description="Everything a new install needs, checked against this machine as it is now. Work down the list."
+      <PageHeader title="Setup" description="Everything a new install needs, checked against this machine as it is now. Work down the list." />
+      {data?.remaining === 0 && (
+        <Callout tone="success" icon={<CircleCheck />} title="Setup is complete" className="mb-6">
+          {s?.scanMinutes
+            ? `Boards are scanned every ${s.scanMinutes} minutes. Matches wait for you in Review; questions the agents can't answer wait in Questions.`
+            : "Scheduled scans are off: start one from the sidebar. Matches wait for you in Review."}
+        </Callout>
+      )}
+      <ListPanel
+        frame="card"
+        title="Steps"
+        description={progress}
+        bodyRole="none"
         actions={
-          <Button icon={<RefreshCw />} loading={checking} onClick={() => void recheck()}>
+          <Button size="sm" icon={<RefreshCw />} loading={checking} onClick={() => void recheck()}>
             Check again
           </Button>
         }
-      />
-      {isPending || !data ? (
-        <div className="flex flex-col gap-4">
-          <Skeleton className="h-10 rounded-lg" />
-          <Skeleton className="h-48 rounded-xl" />
-          <Skeleton className="h-24 rounded-xl" />
-        </div>
-      ) : (
-        <>
-          {data.remaining === 0 ? (
-            <Callout tone="success" icon={<CircleCheck />} title="Setup is complete" className="mb-6">
-              {s?.scanMinutes
-                ? `Boards are scanned every ${s.scanMinutes} minutes. Matches wait for you in Review; questions the agents can't answer wait in Questions.`
-                : "Scheduled scans are off: start one from the sidebar. Matches wait for you in Review."}
-            </Callout>
-          ) : (
-            <div className="mb-6 flex items-center gap-3">
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden>
-                <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${(done / Math.max(1, required.length)) * 100}%` }} />
-              </div>
-              <span className="text-sm text-fg-muted tabular">
-                {done} of {required.length} done
-              </span>
-            </div>
-          )}
-          <ol className="flex flex-col gap-4">
+      >
+        {isPending || !data ? (
+          <SkeletonRows rows={6} className="border-t border-border" />
+        ) : (
+          <ol>
             {data.steps.map((step, i) => (
-              <StepCard key={step.id} step={step} n={i + 1} current={step.id === current?.id} result={data} />
+              <StepRow key={step.id} step={step} n={i + 1} current={step.id === current?.id} result={data} />
             ))}
           </ol>
-        </>
-      )}
+        )}
+      </ListPanel>
     </Page>
   );
 }

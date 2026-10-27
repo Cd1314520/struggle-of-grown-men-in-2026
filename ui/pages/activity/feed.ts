@@ -88,8 +88,11 @@ function said(e: Pick<ActivityItem, "kind" | "message">): Said | null {
   return text === null ? null : { text };
 }
 
+// Ids nobody reads: "(Claude Code session 3fe752b7-…)" after a worker's report, a bare UUID in a list.
+const IDS = /\s*\(Claude Code session [\w-]+\)|\s*\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+
 function plain(e: Pick<ActivityItem, "kind" | "message">) {
-  const m = e.message.replace(/\bTab job-\d+:\s*/g, ""),
+  const m = e.message.replace(/\bTab job-\d+:\s*/g, "").replace(IDS, ""),
     cut = (s: string) => s.replace(/^\w+:\s*/, "");
   // Housekeeping: a worker that ends because it parked at a gate (the gate has its own entry), a tab closed for memory.
   if (/^Chrome started|^Gmail connected|^\w+ worker aborted:\s*$|^Closed this application's parked browser tab/.test(m)) return null;

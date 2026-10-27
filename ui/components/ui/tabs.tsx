@@ -1,26 +1,26 @@
 import { Tabs as T } from "radix-ui";
 import { useCallback, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
 import { cn } from "../../lib/cn";
-import { Count } from "./count";
 
-// Underlined tabs: switching between views of one thing (a job's Overview, Fit, Resume…).
+// Underlined tabs: switching between different views (a job's Overview, Fit, Resume…; Archive's Held and
+// Rejected). A list's tabs head its ListPanel (`tabs`).
 export const Tabs = T.Root;
 export const TabsContent = T.Content;
 export function TabsList({ className, ...props }: ComponentProps<typeof T.List>) {
   return <T.List className={cn("flex h-10 items-stretch gap-5 overflow-x-auto border-b border-border", className)} {...props} />;
 }
 // The list scrolls sideways and would clip an outline: keyboard focus shows as an accent underline and label.
-export function TabsTrigger({ className, count, children, ...props }: ComponentProps<typeof T.Trigger> & { count?: number }) {
+export function TabsTrigger({ className, count, children, ...props }: ComponentProps<typeof T.Trigger> & { count?: number | undefined }) {
   return (
     <T.Trigger
       className={cn(
-        "relative -mb-px inline-flex items-center justify-center gap-1.5 border-b-2 border-transparent text-sm font-medium whitespace-nowrap text-fg-muted transition-colors outline-none hover:text-fg data-[state=active]:border-fg data-[state=active]:text-fg focus-visible:border-accent focus-visible:text-accent-text data-[state=active]:focus-visible:border-accent data-[state=active]:focus-visible:text-accent-text touch:min-w-9",
+        "relative -mb-px inline-flex h-10 items-center justify-center gap-1.5 border-b-2 border-transparent text-sm font-medium whitespace-nowrap text-fg-muted transition-colors outline-none hover:text-fg data-[state=active]:border-fg data-[state=active]:text-fg focus-visible:border-accent focus-visible:text-accent-text data-[state=active]:focus-visible:border-accent data-[state=active]:focus-visible:text-accent-text touch:min-w-9",
         className,
       )}
       {...props}
     >
       {children}
-      {count !== undefined && <Count value={count} />}
+      {count !== undefined && <span className="tabular text-sm font-normal text-fg-subtle">{count.toLocaleString()}</span>}
     </T.Trigger>
   );
 }
@@ -28,7 +28,7 @@ export function TabsTrigger({ className, count, children, ...props }: ComponentP
 // A row that scrolls sideways when it is too long for its space: the clipped side fades, so the last
 // segment reads as "more this way" rather than cut off.
 const FADE = "24px";
-function useEdgeFade(ref: RefObject<HTMLDivElement | null>) {
+export function useEdgeFade(ref: RefObject<HTMLDivElement | null>) {
   const [edges, setEdges] = useState("");
   const measure = useCallback(() => {
     const el = ref.current;
@@ -56,12 +56,14 @@ function useEdgeFade(ref: RefObject<HTMLDivElement | null>) {
   return mask ? { maskImage: mask } : undefined;
 }
 
-// A row of segments: narrowing one list to a group (Your move, Upcoming…). Each shows its count.
+// A row of segments: narrowing one list to a group (Your move, Upcoming…), in its panel's toolbar. Each
+// shows its count; a warning or danger count is tinted while it is above zero.
 export interface Segment<T extends string> {
   value: T;
   label: ReactNode;
   count?: number | undefined;
-  tone?: "neutral" | "accent" | "warning" | undefined;
+  tone?: "neutral" | "accent" | "warning" | "danger" | undefined;
+  data?: Record<`data-${string}`, string> | undefined; // on the segment's button: Pipeline's data-stage
 }
 export function Segments<T extends string>({
   value,
@@ -89,17 +91,24 @@ export function Segments<T extends string>({
             role="tab"
             aria-selected={on}
             data-segment={s.value}
+            {...s.data}
             onClick={() => {
               onValueChange(s.value);
             }}
             className={cn(
-              "inline-flex h-7 shrink-0 items-center touch:h-9 gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors",
-              on ? "bg-surface text-fg shadow-sm ring-1 ring-border" : "text-fg-muted hover:bg-subtle hover:text-fg",
+              "inline-flex h-8 shrink-0 items-center touch:h-9 gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors",
+              on ? "bg-muted text-fg" : "text-fg-muted hover:bg-subtle hover:text-fg",
             )}
           >
             {s.label}
             {s.count !== undefined && (
-              <span className={cn("tabular text-xs", on ? "text-fg-muted" : "text-fg-subtle", s.tone === "warning" && s.count > 0 && "text-warning-text")}>
+              <span
+                className={cn(
+                  "tabular text-xs",
+                  on ? "text-fg-muted" : "text-fg-subtle",
+                  s.count > 0 && (s.tone === "warning" ? "text-warning-text" : s.tone === "danger" && "text-danger-text"),
+                )}
+              >
                 {s.count.toLocaleString()}
               </span>
             )}

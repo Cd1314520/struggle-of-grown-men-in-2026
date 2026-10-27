@@ -10,11 +10,11 @@ import {
   Disclosure,
   Kbd,
   Linkified,
-  Overline,
   Properties,
   Select,
   Separator,
   Spinner,
+  Subhead,
   Textarea,
   Time,
   Tooltip,
@@ -41,23 +41,23 @@ function FormContext({ text }: { text: string }) {
   const long = text.length > 320 || text.split("\n").length > 5;
   return (
     <div className="flex flex-col gap-2">
-      <Overline>On the form</Overline>
-      <div
+      <Subhead>On the form</Subhead>
+      <blockquote
         className={cn(
-          "border-l-2 border-border pl-4 text-sm text-fg-muted",
+          "border-l-2 border-border pl-3 text-base break-words text-fg-muted",
           long && !open && "line-clamp-4",
           long && open && "max-h-[45vh] overflow-y-auto pr-2",
         )}
       >
         <Linkified text={long && !open ? text.replace(/\n{2,}/g, "\n") : text} />
-      </div>
+      </blockquote>
       {long && (
         <button
           type="button"
           onClick={() => {
             setOpen(!open);
           }}
-          className="ml-4 self-start text-sm font-medium text-accent-text underline-offset-2 hover:underline"
+          className="ml-3 self-start text-sm font-medium text-fg-muted hover:text-fg touch:-my-2 touch:py-2"
         >
           {open ? "Show less" : `Show full text (${plural(text.split(/\s+/).length, "word")})`}
         </button>
@@ -92,7 +92,7 @@ function Asking({ group, gateId, onGateId }: { group: QuestionGroup; gateId: str
               <a href={href("pipeline", j.id)} className="min-w-0 flex-1 truncate text-fg hover:underline">
                 {j.title}
               </a>
-              <Time at={j.askedAt} prefix="asked " className="text-xs text-fg-subtle" />
+              <Time at={j.askedAt} prefix="asked " className="shrink-0 text-sm text-fg-muted" />
             </li>
           ))}
         </ul>
@@ -238,10 +238,7 @@ export function FocusPane({
         {job && (
           <a href={href("pipeline", job.id)} className="group flex min-w-0 flex-1 items-center gap-2.5 self-stretch">
             <CompanyMark name={job.company} size="sm" />
-            <span className="min-w-0 truncate text-sm">
-              <span className="font-medium text-fg">{job.company}</span>
-              <span className="ml-2 hidden text-fg-muted sm:inline">{many ? plural(group.jobs.length, "application") : job.title}</span>
-            </span>
+            <span className="min-w-0 truncate text-sm font-medium text-fg">{job.company}</span>
             <ArrowUpRight className="size-3.5 shrink-0 text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100" />
           </a>
         )}
@@ -279,12 +276,19 @@ export function FocusPane({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div key={group.key} className="mx-auto flex max-w-2xl animate-in flex-col gap-7 px-4 pt-6 pb-8 lg:px-10 lg:pt-10">
-          <div className="flex flex-col gap-3">
+        <div key={group.key} className="mx-auto flex w-full max-w-2xl animate-in flex-col gap-7 px-4 pt-6 pb-8 lg:px-10 lg:pt-10">
+          <div className="flex flex-col gap-2">
             <h2 className={cn("font-semibold tracking-[-0.01em] break-words text-fg", group.text.length > 180 ? "text-lg" : "text-xl")}>
               {questionText(group.text)}
             </h2>
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-fg-subtle">
+            {/* Who asks: the bar above names only the employer, so the role is here, where it can wrap. */}
+            {job && (
+              <p className="text-base break-words">
+                <span className="font-medium text-fg">{job.company}</span>
+                <span className="ml-2 text-fg-muted">{many ? plural(group.jobs.length, "application") : job.title}</span>
+              </p>
+            )}
+            <div className="mt-1 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-fg-muted">
               <span className="inline-flex items-center gap-1.5">
                 <Clock className="size-3.5" />
                 <Time at={group.createdAt} prefix="Asked " />
@@ -304,20 +308,23 @@ export function FocusPane({
 
           <div className="flex flex-col gap-3">
             {opts.length > 0 && (
-              <div className={cn("grid gap-2", opts.length % 2 === 0 && opts.length <= 4 && opts.every(o => o.length <= 28) && "sm:grid-cols-2")}>
-                {opts.map((o, i) => (
-                  <OptionCard
-                    key={`${i}:${o}`}
-                    n={i + 1}
-                    label={o}
-                    keyed={keyed}
-                    busy={sending === i + 1}
-                    disabled={busy}
-                    onPick={() => {
-                      submit(o, i + 1);
-                    }}
-                  />
-                ))}
+              // Two up only where a pair of short options fits side by side: the pane, not the window, decides.
+              <div className="@container">
+                <div className={cn("grid gap-2", opts.length % 2 === 0 && opts.length <= 4 && opts.every(o => o.length <= 28) && "@xl:grid-cols-2")}>
+                  {opts.map((o, i) => (
+                    <OptionCard
+                      key={`${i}:${o}`}
+                      n={i + 1}
+                      label={o}
+                      keyed={keyed}
+                      busy={sending === i + 1}
+                      disabled={busy}
+                      onPick={() => {
+                        submit(o, i + 1);
+                      }}
+                    />
+                  ))}
+                </div>
               </div>
             )}
             {/* A composer: the typed answer and the button that saves it, in one frame. */}
@@ -383,7 +390,7 @@ export function FocusPane({
         </div>
       </div>
 
-      <footer className="hidden h-10 shrink-0 items-center gap-5 border-t border-border px-6 text-xs text-fg-subtle lg:flex">
+      <footer className="hidden h-10 shrink-0 items-center gap-5 border-t border-border px-6 text-xs text-fg-muted lg:flex touch:hidden">
         <span className="flex items-center gap-1.5">
           <Kbd>J</Kbd>
           <Kbd>K</Kbd>

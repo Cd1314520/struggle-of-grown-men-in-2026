@@ -1,17 +1,20 @@
 // The Overview tab: why the job fits, what to watch out for, and the few facts that bear on the decision.
 import { ArrowRight, Check, CircleAlert, ExternalLink, X } from "lucide-react";
 import type { JobDetail } from "../../../src/api-types";
-import { Button, Properties, Section, StatusLabel } from "../../components/ui";
-import { Clamp } from "./clamp";
+import { Button, Clamp, Properties, Section, Subhead } from "../../components/ui";
 import { checklistOf, itemLabel, practiceOf, resumeNote, risksOf, verdictOf, type Item, type Phase } from "./model";
 
+// The first few of a side, under a count of them all.
 function CheckList({ title, items, met }: { title: string; items: Item[]; met: boolean }) {
+  const shown = items.slice(0, 4);
   return (
     <div className="min-w-0">
-      <div className="mb-2 text-xs font-medium text-fg-subtle">{title}</div>
-      {items.length ? (
+      <Subhead count={items.length || undefined} className="mb-2">
+        {title}
+      </Subhead>
+      {shown.length ? (
         <ul className="flex flex-col gap-2">
-          {items.map(i => (
+          {shown.map(i => (
             <li key={i.key} className="flex items-start gap-2 text-sm text-fg" title={i.statement}>
               {met ? <Check className="mt-0.5 size-4 shrink-0 text-success-text" /> : <X className="mt-0.5 size-4 shrink-0 text-danger-text" />}
               <span className="min-w-0">
@@ -22,7 +25,7 @@ function CheckList({ title, items, met }: { title: string; items: Item[]; met: b
           ))}
         </ul>
       ) : (
-        <p className="text-sm text-fg-subtle">{met ? "Nothing scored as met." : "Nothing missed."}</p>
+        <p className="text-sm text-fg-muted">{met ? "Nothing scored as met." : "Nothing missed."}</p>
       )}
     </div>
   );
@@ -43,7 +46,7 @@ export function Overview({ job, phase, openTab }: { job: JobDetail; phase: Phase
     <div className="flex flex-col gap-8">
       {job.rationale && (
         <Section title="Why it fits">
-          <Clamp lines={4} className="max-w-[68ch] text-base leading-relaxed text-fg">
+          <Clamp lines={4} className="text-base leading-relaxed text-fg">
             {job.rationale}
           </Clamp>
         </Section>
@@ -56,6 +59,7 @@ export function Overview({ job, phase, openTab }: { job: JobDetail; phase: Phase
             <Button
               variant="link"
               size="sm"
+              className="px-0 touch:px-0"
               onClick={() => {
                 openTab("fit");
               }}
@@ -65,16 +69,16 @@ export function Overview({ job, phase, openTab }: { job: JobDetail; phase: Phase
             </Button>
           }
         >
-          <div className="grid grid-cols-1 gap-x-8 gap-y-5 rounded-lg border border-border p-4 sm:grid-cols-2">
-            <CheckList title="Misses" items={misses.slice(0, 4)} met={false} />
-            <CheckList title="Matches" items={hits.slice(0, 4)} met />
+          <div className="grid grid-cols-1 gap-x-8 gap-y-5 @lg:grid-cols-2">
+            <CheckList title="Misses" items={misses} met={false} />
+            <CheckList title="Matches" items={hits} met />
           </div>
         </Section>
       )}
 
       {risks.length > 0 && (
         <Section title="Watch out">
-          <ul className="flex max-w-[68ch] flex-col gap-2.5">
+          <ul className="flex flex-col gap-2.5">
             {risks.map(r => (
               <li key={r} className="flex items-start gap-2.5 text-base text-fg">
                 <CircleAlert className="mt-[3px] size-4 shrink-0 text-fg-subtle" />
@@ -91,7 +95,7 @@ export function Overview({ job, phase, openTab }: { job: JobDetail; phase: Phase
             practice && [
               "Practice",
               <div key="p" className="flex flex-col gap-0.5">
-                <StatusLabel tone={practice.qualifies ? "success" : "neutral"} label={practice.verdict} className="text-fg" />
+                <span className="font-medium text-fg">{practice.verdict}</span>
                 <span className="text-fg-muted">{practice.reason}</span>
               </div>,
             ],

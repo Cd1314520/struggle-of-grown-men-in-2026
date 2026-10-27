@@ -5,7 +5,8 @@ import { Button, EmptyState, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparat
 import { cn } from "../../lib/cn";
 
 // One button rather than a row of chips. It names the filter when one is on, so what narrows the list
-// stays in sight without a second row.
+// stays in sight without a second row. In a ListToolbar narrower than 28rem it keeps only its icon, with
+// an accent dot while a filter is on; the name stays for screen readers.
 export function FilterMenu({
   filters,
   active,
@@ -25,10 +26,18 @@ export function FilterMenu({
       <MenuTrigger asChild>
         <Button
           variant="secondary"
-          icon={<ListFilter />}
-          className={cn("max-w-48 min-w-0", on.length && "border-accent/25 bg-accent-soft text-accent-text hover:border-accent/40 hover:bg-accent-soft")}
+          icon={
+            <span className="relative flex">
+              <ListFilter />
+              {on.length > 0 && <span className="absolute -top-0.5 -right-0.5 hidden size-1.5 rounded-full bg-accent @max-md/toolbar:block" />}
+            </span>
+          }
+          className={cn(
+            "max-w-48 min-w-0 @max-md/toolbar:w-8 @max-md/toolbar:px-0 touch:@max-md/toolbar:w-10",
+            on.length && "border-accent/25 bg-accent-soft text-accent-text hover:border-accent/40 hover:bg-accent-soft",
+          )}
         >
-          <span className="truncate">{label}</span>
+          <span className="truncate @max-md/toolbar:sr-only">{label}</span>
         </Button>
       </MenuTrigger>
       <MenuContent className="w-60">
@@ -100,6 +109,7 @@ export function NoMatch({ noun, q, filtered, onClear }: { noun: string; q: strin
   const q1 = q.trim();
   return (
     <EmptyState
+      size="sm"
       icon={<SearchX />}
       title={`No ${noun} match`}
       description={q1 ? `Nothing matches “${q1}”${filtered ? " with these filters" : ""}.` : "Nothing fits these filters."}

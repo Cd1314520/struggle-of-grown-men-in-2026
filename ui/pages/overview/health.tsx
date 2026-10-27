@@ -3,7 +3,7 @@ import { ArrowRight } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Summary } from "../../../src/api-types";
 import type { DigestStatus } from "../../../src/digest";
-import { Button, Card, CardHeader, Skeleton, StatusLabel } from "../../components/ui";
+import { Button, ListPanel, ListRow, SkeletonRows, StatusLabel } from "../../components/ui";
 import { ago, cap, MINUTE, num } from "../../lib/format";
 import type { Tone } from "../../lib/labels";
 
@@ -88,37 +88,25 @@ function rows(s: Summary): Row[] {
 
 export function Health({ summary }: { summary: Summary | undefined }) {
   return (
-    <Card>
-      <CardHeader
-        title="System"
-        actions={
-          <Button asChild variant="ghost" size="sm" className="-my-1 -mr-2">
-            <a href="#settings">
-              Settings
-              <ArrowRight />
-            </a>
-          </Button>
-        }
-      />
+    <ListPanel
+      frame="card"
+      title="System"
+      actions={
+        <Button asChild variant="ghost" size="sm" className="-mr-2">
+          <a href="#settings">
+            Settings
+            <ArrowRight />
+          </a>
+        </Button>
+      }
+    >
       {!summary ? (
-        <div className="space-y-3 px-5 pb-5">
-          {Array.from({ length: 5 }, (_, i) => (
-            <Skeleton key={i} className="h-9" />
-          ))}
-        </div>
+        <SkeletonRows rows={5} lead={false} />
       ) : (
-        <ul className="border-t border-border">
-          {rows(summary).map(r => (
-            <li key={r.name} className="flex min-h-14 items-center gap-3 border-b border-border px-5 py-2.5 last:border-b-0">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-fg">{r.name}</p>
-                <p className="truncate text-sm text-fg-muted">{r.detail}</p>
-              </div>
-              <StatusLabel tone={r.state[1]} label={r.state[0]} pulse={r.pulse} />
-            </li>
-          ))}
-        </ul>
+        rows(summary).map(r => (
+          <ListRow key={r.name} title={r.name} snippet={r.detail} trail={<StatusLabel tone={r.state[1]} label={r.state[0]} pulse={r.pulse} />} />
+        ))
       )}
-    </Card>
+    </ListPanel>
   );
 }

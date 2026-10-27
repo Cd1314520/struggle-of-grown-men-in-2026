@@ -44,6 +44,7 @@ function Running({ r }: { r: ResumeState }) {
   return (
     <Card>
       <CardHeader
+        className="max-sm:px-4"
         title={imp.feedback.length ? "Changing the draft" : "Converting your files"}
         description="An agent is reading them and writing your resume on the template. This usually takes a few minutes; you can leave this page."
         actions={
@@ -60,11 +61,11 @@ function Running({ r }: { r: ResumeState }) {
           </Button>
         }
       />
-      <div className="flex flex-col gap-4 border-t border-border px-5 py-4">
+      <div className="flex flex-col gap-4 border-t border-border px-4 sm:px-5 py-4">
         <div className="flex items-center gap-2.5 text-sm text-fg">
           <Spinner className="text-accent-text" />
           <span className="flex-1">{imp.steps[0]?.message ?? "Starting…"}</span>
-          <Time at={imp.startedAt} prefix="started " className="text-xs text-fg-subtle" />
+          <Time at={imp.startedAt} prefix="started " className="text-sm text-fg-muted" />
         </div>
         {imp.steps.length > 1 && (
           <ul className="space-y-1 border-l border-border pl-4">
@@ -104,12 +105,12 @@ function Draft({ r }: { r: ResumeState }) {
   const warnings = imp.warnings?.split("\n").filter(l => l.trim()) ?? [];
   return (
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-      <div className="rounded-xl bg-subtle p-4 sm:p-6">
+      <div className="rounded-xl border border-border bg-subtle p-4 shadow-xs sm:p-6">
         <Sheets src="/api/resume/draft.png" pages={imp.pages} version={imp.finishedAt ?? ""} pdf="/api/resume/draft.pdf" label="The draft resume" />
       </div>
       <Card className="lg:sticky lg:top-8">
-        <CardHeader title="Review the draft" description={imp.pages ? plural(imp.pages, "page") : undefined} />
-        <div className="flex flex-col gap-4 border-t border-border px-5 py-4">
+        <CardHeader className="max-sm:px-4" title="Review the draft" description={imp.pages ? plural(imp.pages, "page") : undefined} />
+        <div className="flex flex-col gap-4 border-t border-border px-4 sm:px-5 py-4">
           {imp.summary && <p className="text-sm text-fg">{imp.summary}</p>}
           {warnings.length > 0 && (
             <Callout tone="warning" icon={<TriangleAlert />} title="Check before you use it">
@@ -150,7 +151,7 @@ function Draft({ r }: { r: ResumeState }) {
             </Button>
           </div>
         </div>
-        <div className="flex flex-col gap-3 border-t border-border px-5 py-4">
+        <div className="flex flex-col gap-3 border-t border-border px-4 sm:px-5 py-4">
           <label htmlFor="resume-feedback" className="text-sm font-medium text-fg">
             Ask for changes
           </label>
@@ -213,10 +214,11 @@ function Notes({ r }: { r: ResumeState }) {
   return (
     <Card>
       <CardHeader
+        className="max-sm:px-4"
         title="Resume notes"
         description="Confirmed extra material: more bullets for each job, other projects, skills. Tailoring swaps these in where they fit a posting better than the stock resume does."
       />
-      <div className="flex flex-col gap-4 border-t border-border px-5 py-4">
+      <div className="flex flex-col gap-4 border-t border-border px-4 sm:px-5 py-4">
         {state && (
           <p className="text-sm text-fg-muted">
             <span className="font-medium text-fg">{state}. </span>
@@ -249,41 +251,48 @@ function Notes({ r }: { r: ResumeState }) {
 function Current({ r }: { r: ResumeState }) {
   const s = r.stock;
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {/* The basis wraps the buttons under the title on a phone rather than squeeze it. */}
-        <div className="min-w-0 flex-1 basis-48">
-          <h2 className="text-lg font-semibold text-fg">Your resume</h2>
-          <p className="text-sm text-fg-muted">
+    <Card>
+      <CardHeader
+        className="max-sm:px-4"
+        titleAs="h2"
+        title="Your resume"
+        description={
+          <>
             {s.pages ? `${plural(s.pages, "page")}, ` : ""}
             <Time at={s.updatedAt} prefix="changed " />
-          </p>
-        </div>
-        <Button asChild variant="ghost">
-          <a href={href("profile", r.main)}>
-            <Pencil />
-            Edit source
-          </a>
-        </Button>
-        {!s.error && (
-          <Button asChild>
-            <a href="/api/resume/stock.pdf" download={r.pdfName}>
-              <Download />
-              Download PDF
-            </a>
-          </Button>
+          </>
+        }
+        actions={
+          <>
+            {!s.error && (
+              <Button asChild>
+                <a href="/api/resume/stock.pdf" download={r.pdfName}>
+                  <Download />
+                  Download PDF
+                </a>
+              </Button>
+            )}
+            <Button asChild variant="ghost">
+              <a href={href("profile", r.main)}>
+                <Pencil />
+                Edit source
+              </a>
+            </Button>
+          </>
+        }
+      />
+      <div className="px-4 pb-4 sm:px-5 sm:pb-5">
+        {s.error ? (
+          <Callout tone="danger" icon={<CircleAlert />} title={`${r.main} doesn't compile`}>
+            <pre className="mt-1 overflow-x-auto font-mono text-xs whitespace-pre-wrap">{s.error}</pre>
+          </Callout>
+        ) : (
+          <div className="rounded-lg bg-subtle p-4 sm:p-6">
+            <Sheets src="/api/resume/stock.png" pages={s.pages} version={s.updatedAt ?? ""} pdf="/api/resume/stock.pdf" label="Your resume" />
+          </div>
         )}
       </div>
-      {s.error ? (
-        <Callout tone="danger" icon={<CircleAlert />} title={`${r.main} doesn't compile`}>
-          <pre className="mt-1 overflow-x-auto font-mono text-xs whitespace-pre-wrap">{s.error}</pre>
-        </Callout>
-      ) : (
-        <div className="rounded-xl bg-subtle p-4 sm:p-6">
-          <Sheets src="/api/resume/stock.png" pages={s.pages} version={s.updatedAt ?? ""} pdf="/api/resume/stock.pdf" label="Your resume" />
-        </div>
-      )}
-    </div>
+    </Card>
   );
 }
 
@@ -319,13 +328,14 @@ export function ResumePage() {
             ) : (
               <Card>
                 <CardHeader
+                  className="max-sm:px-4"
                   title="Import your resume"
                   description="Upload whatever you have. An agent writes it on the app's Typst template, keeping every fact as your files give it, and you review the result before it is used."
                 />
-                <div className="border-t border-border px-5 py-5">
+                <div className="border-t border-border px-4 sm:px-5 py-5">
                   <Upload limits={r.limits} submit="Convert to a resume" busy={sending} onSubmit={start} />
                 </div>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border px-5 py-3 text-sm text-fg-muted">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border px-4 sm:px-5 py-3 text-sm text-fg-muted">
                   <FileText className="size-4 text-fg-subtle" />
                   <span>Rather write Typst yourself?</span>
                   <Button
@@ -344,10 +354,11 @@ export function ResumePage() {
             {r.stock.exists && status !== "running" && (
               <Card>
                 <CardHeader
+                  className="max-sm:px-4"
                   title="Import from files"
                   description="Build a new draft from an updated resume or anything else. Your current resume stays until you accept it."
                 />
-                <div className="border-t border-border px-5 py-4">
+                <div className="border-t border-border px-4 sm:px-5 py-4">
                   <Upload compact limits={r.limits} submit="Convert" busy={sending} onSubmit={start} />
                 </div>
               </Card>

@@ -36,16 +36,25 @@ export function CodeView({ text, file }: { text: string; file: string }) {
   const lines = text.replace(/\n$/, "").split("\n");
   const paint = file.endsWith(".yml") ? yamlLine : typstLine;
   return (
-    <div className="py-3 font-mono text-xs leading-5">
+    <div className="py-3 font-mono text-sm">
       <div className="grid grid-cols-[auto_minmax(0,1fr)]">
-        {lines.map((line, i) => (
-          <Fragment key={i}>
-            <span aria-hidden className="tabular pr-4 pl-5 text-right text-fg-subtle select-none">
-              {i + 1}
-            </span>
-            <span className="pr-5 break-words whitespace-pre-wrap text-fg">{paint(line)}</span>
-          </Fragment>
-        ))}
+        {lines.map((line, i) => {
+          // A wrapped line hangs under its own key rather than at the margin.
+          const indent = /^ */.exec(line)?.[0].length ?? 0;
+          return (
+            <Fragment key={i}>
+              <span aria-hidden className="tabular pr-4 pl-(--list-x) text-right text-fg-subtle select-none">
+                {i + 1}
+              </span>
+              <span
+                className="pr-(--list-x) break-words whitespace-pre-wrap text-fg"
+                style={indent ? { paddingLeft: `${indent}ch`, textIndent: `-${indent}ch` } : undefined}
+              >
+                {paint(line)}
+              </span>
+            </Fragment>
+          );
+        })}
       </div>
     </div>
   );

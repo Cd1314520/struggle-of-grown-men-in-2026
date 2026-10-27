@@ -19,7 +19,7 @@ export function EmptyState({
 }) {
   const sm = size === "sm";
   return (
-    <div className={cn("flex flex-col items-center justify-center px-6 text-center", sm ? "py-8" : "py-16", className)}>
+    <div className={cn("flex flex-col items-center justify-center px-6 text-center", sm ? "py-10" : "py-16", className)}>
       {icon && (
         <div
           className={cn(
@@ -30,7 +30,7 @@ export function EmptyState({
           {icon}
         </div>
       )}
-      <p className={cn("font-medium text-fg", sm ? "text-sm" : "text-base")}>{title}</p>
+      <p className={cn("font-medium text-fg", sm ? "text-base" : "text-lg")}>{title}</p>
       {description && <p className={cn("mt-1 text-sm text-fg-muted", sm ? "max-w-64" : "max-w-sm")}>{description}</p>}
       {action && <div className={sm ? "mt-4" : "mt-5"}>{action}</div>}
     </div>
@@ -49,18 +49,23 @@ export function Skeleton({ className }: { className?: string }) {
   );
 }
 
-// Rows of placeholder while a list loads.
-export function SkeletonRows({ rows = 8, className }: { rows?: number; className?: string }) {
+// Rows of placeholder while a list loads, shaped like ListRow: a mark, two lines and a trail. `dense`
+// is the log's one line; `lead={false}` drops the mark.
+export function SkeletonRows({ rows = 8, dense, lead = true, className }: { rows?: number; dense?: boolean; lead?: boolean; className?: string }) {
   return (
-    <div className={cn("divide-y divide-border", className)}>
+    <div aria-hidden className={cn("divide-y divide-border", className)}>
       {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className="flex items-center gap-3 px-4 py-3">
-          <Skeleton className="size-8 shrink-0 rounded-md" />
-          <div className="flex-1 space-y-2">
-            <Skeleton className="h-3.5 w-2/5" />
-            <Skeleton className="h-3 w-1/4" />
-          </div>
-          <Skeleton className="h-3.5 w-10" />
+        <div key={i} className={cn("flex items-center gap-3 px-[var(--list-x,1rem)]", dense ? "min-h-10 py-2" : "min-h-14 py-3 touch:min-h-16")}>
+          {lead && !dense && <Skeleton className="size-8 shrink-0 rounded-md" />}
+          {dense ? (
+            <Skeleton className="h-3 flex-1" />
+          ) : (
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-3.5 w-2/5" />
+              <Skeleton className="h-3 w-1/4" />
+            </div>
+          )}
+          {!dense && <Skeleton className="h-3.5 w-10" />}
         </div>
       ))}
     </div>

@@ -84,14 +84,14 @@ export function OverviewPage() {
         </Callout>
       )}
       {/* Two columns that flow on their own; on a phone, what needs the owner comes first. */}
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
-        <div className="flex min-w-0 flex-col gap-5">
+      <div className="grid items-start gap-4 sm:gap-5 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col gap-4 sm:gap-5">
           <NeedsYou summary={s} />
           <Kpis summary={s} />
           <Trend />
           <Funnel />
         </div>
-        <div className="flex min-w-0 flex-col gap-5">
+        <div className="flex min-w-0 flex-col gap-4 sm:gap-5">
           <Health summary={s} />
           <Upcoming />
           <Recent />

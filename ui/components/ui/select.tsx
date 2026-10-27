@@ -1,4 +1,4 @@
-import { Check, ChevronDown } from "lucide-react";
+import { ArrowUpDown, Check, ChevronDown } from "lucide-react";
 import { Select as S } from "radix-ui";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
@@ -8,12 +8,15 @@ export interface Option<T extends string = string> {
   label: ReactNode;
 }
 
-// A compact select. `prefix` labels the trigger: "Sort: Newest".
+// A compact select. `prefix` labels the trigger: "Sort: Newest". `collapse`: inside a ListToolbar
+// narrower than 28rem (a phone, a list column) the trigger keeps only an icon, and says the rest to
+// screen readers.
 export function Select<T extends string>({
   value,
   onValueChange,
   options,
   prefix,
+  collapse,
   className,
   disabled,
   "aria-label": ariaLabel,
@@ -22,10 +25,14 @@ export function Select<T extends string>({
   onValueChange: (v: T) => void;
   options: readonly Option<T>[];
   prefix?: string;
+  collapse?: boolean;
   className?: string;
   disabled?: boolean;
   "aria-label"?: string;
 }) {
+  const current = options.find(o => o.value === value)?.label;
+  const name = ariaLabel ?? (collapse && prefix && typeof current === "string" ? `${prefix}: ${current}` : prefix);
+  const wide = collapse && "@max-md/toolbar:hidden";
   return (
     <S.Root
       value={value}
@@ -35,15 +42,19 @@ export function Select<T extends string>({
       }}
     >
       <S.Trigger
-        aria-label={ariaLabel ?? prefix}
+        aria-label={name}
         className={cn(
           "inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-sm text-fg shadow-xs transition-[background-color,border-color,box-shadow] outline-none hover:border-border-strong hover:bg-subtle focus-visible:border-accent focus-visible:ring-3 focus-visible:ring-accent/15 disabled:pointer-events-none disabled:opacity-50 data-[state=open]:border-border-strong data-[state=open]:bg-subtle touch:h-10",
+          collapse && "@max-md/toolbar:w-8 @max-md/toolbar:justify-center @max-md/toolbar:px-0 touch:@max-md/toolbar:w-10",
           className,
         )}
       >
-        {prefix && <span className="text-fg-subtle">{prefix}</span>}
-        <S.Value />
-        <S.Icon>
+        {collapse && <ArrowUpDown aria-hidden className="hidden size-4 text-fg-muted @max-md/toolbar:block" />}
+        {prefix && <span className={cn("text-fg-subtle", wide)}>{prefix}</span>}
+        <span className={cn("contents", wide)}>
+          <S.Value />
+        </span>
+        <S.Icon className={cn(wide)}>
           <ChevronDown className="size-3.5 text-fg-subtle" />
         </S.Icon>
       </S.Trigger>

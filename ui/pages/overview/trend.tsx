@@ -169,6 +169,7 @@ export function Trend() {
     <Card>
       <CardHeader
         title={METRICS[metric].title}
+        titleAs="h2"
         description={st ? `${num(total)} ${total === 1 ? unit[0] : unit[1]} in the last 30 days` : "Last 30 days"}
         actions={
           <Segments

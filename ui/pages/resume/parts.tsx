@@ -1,5 +1,5 @@
 // The pieces of the Resume page: a resume's pages, framed as the sheets they are, and the upload form.
-import { FileText, FileUp, X } from "lucide-react";
+import { ExternalLink, FileText, FileUp, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button, Field, Skeleton, Textarea } from "../../components/ui";
 import { cn } from "../../lib/cn";
@@ -30,6 +30,14 @@ function Sheet({ src, pdf, alt }: { src: string; pdf: string; alt: string }) {
   return (
     <a href={pdf} target="_blank" rel="noopener noreferrer" className={cn(frame, "block transition-shadow hover:shadow-lg")}>
       {!loaded && <Skeleton className="absolute inset-0 rounded-none" />}
+      {/* A phone can't read the page at this size: the sheet says what a tap does. */}
+      <span
+        aria-hidden
+        className="absolute right-3 bottom-3 z-10 hidden h-8 items-center gap-1.5 rounded-md bg-surface px-3 text-sm font-medium text-fg shadow-md ring-1 ring-border touch:inline-flex"
+      >
+        <ExternalLink className="size-3.5" />
+        Open PDF
+      </span>
       <img
         src={src}
         alt={alt}
@@ -99,10 +107,11 @@ export function Upload({
           over ? "border-accent bg-accent-soft" : "border-border-strong bg-subtle/50 hover:bg-subtle",
         )}
       >
-        <span className="flex size-10 items-center justify-center rounded-lg border border-border bg-surface text-fg-subtle shadow-xs">
+        <span className="flex size-10 items-center justify-center rounded-lg bg-surface text-fg-subtle shadow-xs ring-1 ring-border">
           <FileUp className="size-5" />
         </span>
-        <span className="text-sm font-medium text-fg">Drop files here, or choose them</span>
+        <span className="text-sm font-medium text-fg touch:hidden">Drop files here, or choose them</span>
+        <span className="hidden text-sm font-medium text-fg touch:inline">Choose files</span>
         <span className="max-w-sm text-sm text-fg-muted">
           An old resume in any format, a LinkedIn PDF, a list of projects: anything that says what you have done. Up to {limits.files} files.
         </span>
@@ -118,12 +127,12 @@ export function Upload({
         />
       </label>
       {files.length > 0 && (
-        <ul className="divide-y divide-border rounded-lg border border-border">
+        <ul className="divide-y divide-border border-y border-border">
           {files.map(f => (
             <li key={`${f.name}:${f.size}`} className="flex min-h-11 items-center gap-3 px-3">
               <FileText className="size-4 shrink-0 text-fg-subtle" />
               <span className="min-w-0 flex-1 truncate text-sm text-fg">{f.name}</span>
-              <span className="text-xs text-fg-subtle tabular">{size(f.size)}</span>
+              <span className="text-sm text-fg-muted tabular">{size(f.size)}</span>
               <Button
                 size="icon-sm"
                 variant="ghost"

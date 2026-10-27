@@ -67,7 +67,8 @@ function TopBar() {
   return (
     <header className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-border bg-surface/95 px-3 backdrop-blur lg:hidden">
       <Logo />
-      <span className="flex-1 truncate text-base font-semibold text-fg">{navItem(page)?.label ?? "Auto Apply"}</span>
+      {/* #job/<id> is the one page off the nav; its back link, just below, names its section. */}
+      <span className="flex-1 truncate text-base font-semibold text-fg">{navItem(page)?.label ?? "Job"}</span>
       <button
         type="button"
         aria-label="Search"

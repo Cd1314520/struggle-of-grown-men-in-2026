@@ -13,8 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { Summary } from "../../../src/api-types";
-import { Card, CardHeader, Skeleton } from "../../components/ui";
-import { cn } from "../../lib/cn";
+import { ListIcon, ListPanel, ListRow, SkeletonRows } from "../../components/ui";
 import { num } from "../../lib/format";
 import { PROFILE_LABEL } from "../../lib/labels";
 
@@ -28,12 +27,6 @@ interface Row {
   icon: LucideIcon;
   tone: Tone;
 }
-
-const TILE: Record<Tone, string> = {
-  accent: "bg-accent-soft text-accent-text",
-  warning: "bg-warning-soft text-warning-text",
-  danger: "bg-danger-soft text-danger-text",
-};
 
 // In the order they are best dealt with: what is about to be sent first, then what holds applications
 // back, then the new matches, which keep.
@@ -109,46 +102,28 @@ export function attentionRows(s: Summary): Row[] {
 export function NeedsYou({ summary }: { summary: Summary | undefined }) {
   const rows = summary ? attentionRows(summary) : null;
   return (
-    <Card>
-      <CardHeader title="Needs you" />
+    <ListPanel frame="card" title="Needs you">
       {!rows ? (
-        <div className="space-y-3 px-5 pb-5">
-          {Array.from({ length: 3 }, (_, i) => (
-            <Skeleton key={i} className="h-10" />
-          ))}
-        </div>
+        <SkeletonRows rows={3} />
       ) : rows.length ? (
-        <ul className="border-t border-border">
-          {rows.map(r => (
-            <li key={r.key} className="border-b border-border last:border-b-0">
-              <a
-                href={r.href}
-                className="group flex min-h-14 items-center gap-3.5 px-5 py-2.5 transition-colors outline-none last:rounded-b-xl hover:bg-subtle/70 focus-visible:bg-subtle"
-              >
-                <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-md [&_svg]:size-4", TILE[r.tone])}>
-                  <r.icon />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-fg">{r.label}</span>
-                  <span className="block text-sm text-fg-muted sm:truncate">{r.hint}</span>
-                </span>
-                <span className="tabular text-lg font-semibold text-fg">{num(r.count)}</span>
-                <ChevronRight className="size-4 shrink-0 text-fg-subtle transition-transform group-hover:translate-x-0.5" />
-              </a>
-            </li>
-          ))}
-        </ul>
+        rows.map(r => (
+          <ListRow
+            key={r.key}
+            href={r.href}
+            lead={<ListIcon icon={r.icon} tone={r.tone} />}
+            title={r.label}
+            snippet={r.hint}
+            trail={
+              <span className="flex items-center gap-1.5">
+                <span className="tabular text-base font-semibold text-fg">{num(r.count)}</span>
+                <ChevronRight className="size-4 text-fg-subtle transition-transform group-hover:translate-x-0.5" />
+              </span>
+            }
+          />
+        ))
       ) : (
-        <div className="flex items-center gap-3.5 border-t border-border px-5 py-5">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-success-soft text-success-text [&_svg]:size-4">
-            <CircleCheck />
-          </span>
-          <div>
-            <p className="text-sm font-medium text-fg">All clear</p>
-            <p className="text-sm text-fg-muted">New matches land in Review as soon as they are assessed.</p>
-          </div>
-        </div>
+        <ListRow lead={<ListIcon icon={CircleCheck} tone="success" />} title="All clear" snippet="New matches land in Review as soon as they are assessed." />
       )}
-    </Card>
+    </ListPanel>
   );
 }
