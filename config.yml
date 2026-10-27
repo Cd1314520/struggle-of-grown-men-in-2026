@@ -63,7 +63,7 @@ autoApply:
 #   track     reads the mailbox for replies to applications
 schedule:
   scanMinutes: 30
-  discoverMinutes: 720
+  discoverMinutes: 0 # off: 1,800+ boards are watched already
   trackMinutes: 120
 
 # Remote-job aggregators, read during a scan but no more often than `minutes` each (they ask for a
