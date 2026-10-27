@@ -1,0 +1,125 @@
+# The rubric tests/practice.test.ts scores against: a practice and a real phase shaped like an owner's,
+# so the tests do not depend on profile/rubric.yml or on the example one.
+unclear: 0.5
+practice:
+  threshold: 60
+  criteria:
+    - id: us_employer
+      label: US-based
+      statement: The employer is based in the US.
+      required: true
+    - id: legit_paid
+      label: Paid, named employer
+      statement: The job is paid, at a named employer.
+      required: true
+    - id: no_clearance
+      label: No clearance needed
+      statement: No security clearance is needed.
+      required: true
+    - id: engineering_work
+      label: Hands-on engineering
+      statement: The work is hands-on engineering.
+      required: true
+    - id: not_senior
+      label: Not senior level
+      statement: The role is not senior level.
+      required: true
+    - id: not_internship
+      label: Not an internship
+      statement: The role is not an internship.
+      required: true
+    - id: degree_fits
+      label: Degree fits
+      statement: The degree asked for is one the candidate has.
+      required: true
+      screen: false
+    - id: not_new_grad
+      label: Not new grad
+      statement: The role is not limited to new graduates.
+      required: true
+      screen: false
+    - id: not_ai_training
+      label: Not AI training
+      statement: The role is not AI-training data work.
+      required: true
+    - id: not_hardware
+      label: Not hardware/embedded
+      statement: The role is not hardware or embedded work.
+      required: true
+    - id: experience_fits
+      label: ≤3 years asked
+      statement: The posting asks for three years of experience or fewer.
+      weight: 25
+    - id: skills_overlap
+      label: Skills overlap
+      statement: The skills asked for overlap with the candidate's.
+      weight: 25
+    - id: coding_is_core
+      label: Coding is core
+      statement: Writing code is the core of the job.
+      weight: 20
+    - id: python
+      label: Python
+      statement: The job uses Python.
+      weight: 10
+real:
+  threshold: 65
+  criteria:
+    - id: employer_ok
+      label: Tech company at scale
+      statement: The employer is a tech company at scale.
+      required: true
+      screen: false
+    - id: us_based
+      label: US-based
+      statement: The job is based in the US.
+      required: true
+    - id: no_clearance
+      label: No clearance needed
+      statement: No security clearance is needed.
+      required: true
+    - id: travel_ok
+      label: Travel ≤5%
+      statement: Travel is 5% or less.
+      required: true
+    - id: not_senior
+      label: Not senior level
+      statement: The role is not senior level.
+      required: true
+    - id: not_internship
+      label: Not an internship
+      statement: The role is not an internship.
+      required: true
+    - id: not_new_grad
+      label: Not new grad
+      statement: The role is not limited to new graduates.
+      required: true
+      screen: false
+    - id: not_ai_training
+      label: Not AI training
+      statement: The role is not AI-training data work.
+      required: true
+    - id: not_hardware
+      label: Not hardware/embedded
+      statement: The role is not hardware or embedded work.
+      required: true
+    - id: scale
+      label: Systems at scale
+      statement: The work is on systems at scale.
+      weight: 25
+    - id: agent_native
+      label: Agent-native org
+      statement: The organisation builds with coding agents.
+      weight: 25
+    - id: core_work
+      label: Engineering on the product
+      statement: The work is engineering on the product itself.
+      weight: 20
+    - id: experience_fits
+      label: ≤3 years asked
+      statement: The posting asks for three years of experience or fewer.
+      weight: 15
+    - id: skills_overlap
+      label: Skills overlap
+      statement: The skills asked for overlap with the candidate's.
+      weight: 15

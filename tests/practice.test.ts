@@ -1,8 +1,10 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { assessPractice, needsJudgment, parsePracticeAssessment, practiceReason, practiceRefusal, type PracticeAssessment } from "../src/practice";
 import { evaluate, type Verdict } from "../src/rubric";
 import { autoApproval, checkAutoApprovedPractice, confirmsSubmit, reconsiderAutoApproval } from "../src/auto";
-import { config } from "../src/config";
+import { config, PROFILE } from "../src/config";
 
 // Snapshot config for clean restoration
 const initialConfig = JSON.stringify(config);
@@ -17,6 +19,19 @@ function restoreConfig() {
   }
   Object.assign(config, initial);
 }
+
+// Scored against a rubric and employer lists of its own, put back as they were for the test files after this one.
+const fixtures: Record<string, string> = {
+  "rubric.yml": readFileSync(join(import.meta.dir, "fixtures", "practice-rubric.yml"), "utf8"),
+  "employers.yml": "frontier: [Stripe]\npractice: []\n",
+};
+const before = Object.fromEntries(Object.keys(fixtures).map(name => [name, readFileSync(join(PROFILE, name), "utf8")]));
+beforeAll(() => {
+  for (const [name, text] of Object.entries(fixtures)) writeFileSync(join(PROFILE, name), text);
+});
+afterAll(() => {
+  for (const [name, text] of Object.entries(before)) writeFileSync(join(PROFILE, name), text);
+});
 
 beforeEach(restoreConfig);
 afterEach(restoreConfig);
