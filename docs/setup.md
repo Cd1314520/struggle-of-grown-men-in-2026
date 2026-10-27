@@ -61,6 +61,26 @@ What the app does check is where a request comes from (`refusal` in `src/server.
 
 If you reach the app under another name, set `publicUrl` to it.
 
+## Windows (WSL2)
+
+The app does not run on Windows itself (Xvfb, `setsid`, X11 sockets, systemd), but it runs in a WSL2 Linux distro with the steps above. Inside WSL, systemd still runs the app; a Windows scheduled task only keeps the distro up. Untested so far.
+
+1. **Distro**: `wsl --install -d Ubuntu` in an elevated PowerShell, then open Ubuntu and create your user.
+2. **Repository**: clone it to `~/auto-apply` inside the distro, not under `/mnt/c`: the Windows drive is slow from WSL and its line endings and permissions break the hooks and `chmod`.
+3. **systemd**: `sudo cp ~/auto-apply/deploy/wsl/wsl.conf /etc/wsl.conf`, then `wsl --shutdown` from Windows and reopen Ubuntu. `systemctl --user status` should answer.
+4. **Programs**: the prerequisites above, from apt where it has them: `sudo apt install xvfb x11vnc websockify novnc poppler-utils git unzip`, Chrome from Google's `.deb`, Bun at the version in `.bun-version` (its installer puts it in `~/.bun/bin`; `sudo ln -s ~/.bun/bin/bun /usr/bin/bun` so the units find it), and `typst` from its release binary into `~/.local/bin`.
+5. **Service**: [Install](#install) as on Linux, `loginctl enable-linger` included.
+6. **Keepalive**: WSL stops a distro soon after its last `wsl.exe` session closes, services or not. From an elevated PowerShell on Windows, run `deploy/wsl/install-keepalive.ps1` (reach it as `\\wsl$\Ubuntu\home\<you>\auto-apply\deploy\wsl\`, or copy it out):
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File install-keepalive.ps1 -Distro Ubuntu
+   ```
+
+   It registers `auto-apply WSL keepalive`, which runs `wsl.exe -d Ubuntu --exec sleep infinity` at boot whether or not you are logged on, with no time limit, and restarts it if it exits. If the task does not stay running, open it in Task Scheduler and switch it to "Run only when user is logged on" with an "At log on" trigger.
+7. **Sleep**: a sleeping PC pauses the distro too. `powercfg /change standby-timeout-ac 0` keeps it awake on mains power.
+
+`http://localhost:8787` and `:6080` reach the app from Windows through WSL's localhost forwarding. Chrome's GL flags (`src/chrome.ts`) expect a render node at `/dev/dri/renderD128`, which WSL2 may not have; without it Chrome may fall back to software rendering and change the WebGL fingerprint, so run the [browser audit](browser.md) before the first real application.
+
 ## Profile, Gmail and config
 
 1. **Profile** (Profile tab, or edit `profile/` directly). `profile/` is not tracked: on start, the app copies each file of `profile.example/` that is missing from it (never over one that exists), so a fresh checkout starts from working templates. Nothing is assessed or applied while a file still contains `TODO-FILL`; the examples carry it only where the choice is yours (`targets.md`, `personal.yml`, `answers.md`).

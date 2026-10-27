@@ -12,7 +12,7 @@ systemctl --user status auto-apply
 
 | | |
 |---|---|
-| [docs/setup.md](docs/setup.md) | prerequisites, installing the service, the profile, Gmail, who can reach the app; the Setup page checks each step |
+| [docs/setup.md](docs/setup.md) | prerequisites, installing the service (Linux, or Windows through WSL2), the profile, Gmail, who can reach the app; the Setup page checks each step |
 | [docs/operations.md](docs/operations.md) | auto apply, parked applications and Questions, the daily digest, the observation journal, Workday recovery |
 | [docs/pipeline.md](docs/pipeline.md) | sources and scanning, duplicates, freshness, resumes |
 | [docs/browser.md](docs/browser.md) | the browsers, the pacing proxy, and the fingerprint audit |
@@ -61,5 +61,5 @@ An employer is judged once. In the practice phase, a job at an employer an earli
 - `src/status.ts`: the job statuses, their groups, and what each move between them writes. Every status change goes through `to`. `src/fill-state.ts`: where an application stands between approval and a recorded outcome.
 - `src/setup.ts`: what a new install still needs, for the Setup page. `src/models.ts`: the models omp and Claude Code list, and the model per stage. `src/resume-import.ts`: uploaded files into the stock resume. `profile.example/`: the templates a new `profile/` is seeded from.
 - `src/config.ts`: reads `config.yml`; `src/config-check.ts` is what the file must look like. `src/template.ts`: fills a prompt's placeholders.
-- `deploy/systemd/`: the service and timer units. `docs/`: everything this page links to.
+- `deploy/systemd/`: the service and timer units. `deploy/wsl/`: what running under WSL2 adds. `docs/`: everything this page links to.
 - `data/`: SQLite DB, per-job resume copies, omp sessions, Chrome profile (git-ignored; holds site passwords and Gmail tokens).
