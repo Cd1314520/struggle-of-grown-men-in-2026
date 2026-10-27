@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
-import { config, PROFILE } from "./config";
+import { config, describing, PROFILE } from "./config";
 import { assessPractice, practiceVerdict, type Listed, type PracticeAssessment } from "./practice";
 
 type Phase = "practice" | "real";
@@ -38,7 +38,8 @@ export interface ChecklistItem {
 }
 export interface Verdict {
   decision: "apply" | "hold" | "skip";
-  score: number; // for the current phase
+  rubric: Phase; // the one that scored it: real for a target employer, practice for any other
+  score: number; // on that rubric
   threshold: number;
   reason: string;
   items: ChecklistItem[];
@@ -59,23 +60,21 @@ export function loadRubric(file = join(PROFILE, "rubric.yml")): Rubric {
   return r as Rubric;
 }
 
-// In practice the real rubric is answered too, to decide what to hold back.
-const phasesToAsk = (): Phase[] => (config.phase === "practice" ? ["practice", "real"] : ["real"]);
+// Both are answered: which one scores the job depends on whether its employer turns out to be a target.
+const PHASES: Phase[] = ["practice", "real"];
 
-export const currentThreshold = () => loadRubric()[config.phase].threshold;
+export const thresholds = (r = loadRubric()) => ({ practice: r.practice.threshold, real: r.real.threshold });
 
 export function checklistText(r = loadRubric()) {
-  return phasesToAsk()
-    .flatMap(phase => r[phase].criteria.map(c => `- \`${phase}.${c.id}\`: ${c.statement}`))
-    .join("\n");
+  return PHASES.flatMap(phase => r[phase].criteria.map(c => `- \`${phase}.${c.id}\`: ${c.statement}`)).join("\n");
 }
 
 // ---- the screen: a cheap read of the posting before the full assessment
 
-// The rubrics that can decide a job. In practice, whether it is a practice job is the full
-// assessment's judgment unless the employer is listed, so a job is only ruled out when it fails both.
+// The rubrics that can decide a job. Whether its employer is a target is the full assessment's
+// judgment unless the employer is listed, so a job is only ruled out when it fails both.
 function decidingPhases(listed: Listed | null): Phase[] {
-  if (config.phase === "real" || listed === "frontier") return ["real"];
+  if (listed === "frontier") return ["real"];
   return listed === "practice" ? ["practice"] : ["practice", "real"];
 }
 
@@ -147,82 +146,30 @@ export function evaluate(raw: unknown, practiceEvidence?: unknown): Verdict | st
     if (!answer) return `answer for ${a.id} must be yes, no or unclear`;
     answers.set(a.id, { answer, evidence: ("evidence" in a && typeof a.evidence === "string" ? a.evidence : "").slice(0, 300) });
   }
-  const expected = phasesToAsk().flatMap(phase => r[phase].criteria.map(c => `${phase}.${c.id}`));
+  const expected = PHASES.flatMap(phase => r[phase].criteria.map(c => `${phase}.${c.id}`));
   const missing = expected.filter(k => !answers.has(k));
   if (missing.length) return `missing answers for: ${missing.join(", ")}`;
 
-  const current = scorePhase(r, config.phase, answers);
-  const items = [...current.items];
-  if (config.phase === "practice") {
-    const real = scorePhase(r, "real", answers);
-    items.push(...real.items);
-    const practice = assessPractice(practiceEvidence);
-    const { qualifies, reason } = practiceVerdict(practice);
-    // Not one to practise on: whether it is worth keeping for later is the real search's question,
-    // so the real rubric decides between holding and skipping it, not the practice fit.
-    if (!qualifies) {
-      const kept = { score: real.score, threshold: real.threshold, items, practice };
-      if (real.failed.length)
-        return {
-          ...kept,
-          decision: "skip",
-          reason: `not a practice job, and failed real requirement: ${real.failed.map(i => i.key.split(".")[1]).join(", ")}`,
-        };
-      if (real.score < real.threshold)
-        return { ...kept, decision: "skip", reason: `not a practice job, and real score ${real.score} below threshold ${real.threshold}` };
+  const practiceFit = scorePhase(r, "practice", answers);
+  const real = scorePhase(r, "real", answers);
+  const items = [...practiceFit.items, ...real.items];
+  const practice = assessPractice(practiceEvidence);
+  const { qualifies, reason } = practiceVerdict(practice, describing());
+  const failedIds = (failed: ChecklistItem[]) => failed.map(i => i.key.split(".")[1]).join(", ");
+  // A target employer: the real rubric decides whether the job is worth it, and holdBack whether it is
+  // applied to now or kept for later.
+  if (!qualifies) {
+    const kept = { rubric: "real" as const, score: real.score, threshold: real.threshold, items, practice };
+    if (real.failed.length) return { ...kept, decision: "skip", reason: `not a practice job, and failed real requirement: ${failedIds(real.failed)}` };
+    if (real.score < real.threshold)
+      return { ...kept, decision: "skip", reason: `not a practice job, and real score ${real.score} below threshold ${real.threshold}` };
+    if (config.targets.holdBack)
       return { ...kept, decision: "hold", reason: `not a practice job: ${reason}; real score ${real.score} (threshold ${real.threshold})` };
-    }
-    if (current.failed.length)
-      return {
-        decision: "skip",
-        score: current.score,
-        threshold: current.threshold,
-        items,
-        practice,
-        reason: `failed requirement: ${current.failed.map(i => i.key.split(".")[1]).join(", ")}`,
-      };
-    if (current.score < current.threshold)
-      return {
-        decision: "skip",
-        score: current.score,
-        threshold: current.threshold,
-        items,
-        practice,
-        reason: `score ${current.score} below threshold ${current.threshold}`,
-      };
-    return {
-      decision: "apply",
-      score: current.score,
-      threshold: current.threshold,
-      items,
-      practice,
-      reason: `${reason}; score ${current.score} (threshold ${current.threshold})`,
-    };
+    return { ...kept, decision: "apply", reason: `${reason}; real score ${real.score} (threshold ${real.threshold})` };
   }
-  if (current.failed.length)
-    return {
-      decision: "skip",
-      score: current.score,
-      threshold: current.threshold,
-      items,
-      practice: null,
-      reason: `failed requirement: ${current.failed.map(i => i.key.split(".")[1]).join(", ")}`,
-    };
-  if (current.score < current.threshold)
-    return {
-      decision: "skip",
-      score: current.score,
-      threshold: current.threshold,
-      items,
-      practice: null,
-      reason: `score ${current.score} below threshold ${current.threshold}`,
-    };
-  return {
-    decision: "apply",
-    score: current.score,
-    threshold: current.threshold,
-    items,
-    practice: null,
-    reason: `score ${current.score} (threshold ${current.threshold})`,
-  };
+  const kept = { rubric: "practice" as const, score: practiceFit.score, threshold: practiceFit.threshold, items, practice };
+  if (practiceFit.failed.length) return { ...kept, decision: "skip", reason: `failed requirement: ${failedIds(practiceFit.failed)}` };
+  if (practiceFit.score < practiceFit.threshold)
+    return { ...kept, decision: "skip", reason: `score ${practiceFit.score} below threshold ${practiceFit.threshold}` };
+  return { ...kept, decision: "apply", reason: `${reason}; score ${practiceFit.score} (threshold ${practiceFit.threshold})` };
 }

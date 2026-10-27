@@ -28,6 +28,7 @@ import { useMedia, WIDE } from "../../lib/media";
 import { navigate, setParams, useRoute } from "../../lib/router";
 import { JobDetail } from "../job/detail";
 import { ArchiveRow } from "./row";
+import { thresholdOf } from "../job/model";
 
 type View = "held" | "rejected";
 
@@ -58,7 +59,6 @@ export function ArchivePage() {
   const record = useOpenRecord({ base: `archive/${view}`, view, lp, search });
   const { data: list, query, openId } = record;
   const { data: summary } = useSummary();
-  const threshold = summary?.threshold ?? null;
   const compact = useMedia(WIDE) && openId !== null;
 
   const counts = summary?.counts ?? {};
@@ -155,7 +155,7 @@ export function ArchivePage() {
         ) : rows.length === 0 ? (
           <NoMatch noun="jobs" q={lp.q} filtered={lp.filters.length > 0 || !!lp.group} onClear={lp.clear} />
         ) : (
-          rows.map(job => <ArchiveRow key={job.id} job={job} threshold={threshold} uniform={uniform} link={record.rowProps(job.id)} />)
+          rows.map(job => <ArchiveRow key={job.id} job={job} threshold={thresholdOf(job.rubric, summary)} uniform={uniform} link={record.rowProps(job.id)} />)
         )}
       </Workspace>
     </Tabs>

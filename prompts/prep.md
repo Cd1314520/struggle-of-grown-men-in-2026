@@ -13,22 +13,15 @@ Judge the employer as well; statements about the employer and the organisation m
 
 {{employers}}
 
-In the practice phase, also send the `practice` object:
-- `employerType`, one of:
-  - `tech_scaled`: a software or tech-first company past early stage (roughly 300+ people, or a large established product) whose core product is the software. Well-funded, scaled AI-native companies belong here, not under startup.
-  - `startup`: a small or early tech company (roughly under 300 people, or seed to Series B).
-  - `non_tech_enterprise`: the business is not technology (insurance, banking operations, energy, healthcare providers, retail, manufacturing, logistics, media, education), even for an "AI Engineer" role.
-  - `it_services`: IT services, consulting, staffing, outsourcing, systems integrators, agencies.
-  - `government`: government or the public sector, public universities, and contractors whose business is services to government (staffing, IT and engineering services on government contracts).
-  Who the customers are does not decide the type: a tech company at scale that sells its own software or hardware products to governments or militaries (defense tech, govtech platforms) is `tech_scaled`, and a small one is `startup`.
-- `employerEvidence`: one sentence naming what about the company decides its type. Never empty.
+Also send the `practice` object, which says what kind of employer this is:
+{{targets}}- `employerEvidence`: one sentence naming what about the company decides what kind of employer it is (its size and stage, its core business). Never empty.
 - `agentNative`: whether the engineering organisation visibly builds and ships with AI agents.
   - `"yes"`: concrete signs such as agents used in daily engineering, agentic products, internal agent platforms, or public engineering writing about it.
   - `"no"`: concrete signs it is behind, such as a posting that introduces AI coding tools as new, a legacy stack with no AI work in sight, or a team described as just starting on AI.
   - `"unclear"`: anything else. Do not guess.
 - `agentNativeEvidence`: the fact that decides a yes or no; empty only when unclear.
 
-Call `submit_checklist` with an answer for every checklist id and, in the practice phase, the `practice` object. The orchestrator computes the score from fixed weights and replies either CONTINUE or STOP. On STOP you are finished: do not tailor anything.
+Call `submit_checklist` with an answer for every checklist id and the `practice` object. The orchestrator computes the score from fixed weights and replies either CONTINUE or STOP. On STOP you are finished: do not tailor anything.
 
 ## Step 2: tailor the resume
 

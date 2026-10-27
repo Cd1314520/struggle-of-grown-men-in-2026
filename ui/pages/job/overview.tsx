@@ -1,6 +1,6 @@
 // The Overview tab: why the job fits, what to watch out for, and the few facts that bear on the decision.
 import { ArrowRight, Check, CircleAlert, ExternalLink, X } from "lucide-react";
-import type { JobDetail } from "../../../src/api-types";
+import type { JobDetail, Summary } from "../../../src/api-types";
 import { Button, Clamp, Properties, Section, Subhead } from "../../components/ui";
 import { checklistOf, itemLabel, practiceOf, resumeNote, risksOf, verdictOf, type Item, type Phase } from "./model";
 
@@ -31,11 +31,11 @@ function CheckList({ title, items, met }: { title: string; items: Item[]; met: b
   );
 }
 
-export function Overview({ job, phase, openTab }: { job: JobDetail; phase: Phase; openTab: (tab: string) => void }) {
+export function Overview({ job, phase, targets, openTab }: { job: JobDetail; phase: Phase; targets: Summary["targets"]; openTab: (tab: string) => void }) {
   const items = checklistOf(job).filter(i => i.phase === phase);
   const { misses, hits } = verdictOf(items);
   const risks = risksOf(job.concerns).slice(0, 3);
-  const practice = practiceOf(job, phase);
+  const practice = practiceOf(job, targets);
   // The header counts the employer's other roles; what bears on this one is whether any went out.
   const sentThere = job.siblings.filter(s => ["submitted", "interview", "offer", "rejected_by_company", "withdrawn"].includes(s.status)).length;
 

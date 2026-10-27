@@ -13,7 +13,7 @@ import { useJobActions } from "./actions";
 import { Activity } from "./activity";
 import { DecisionBar, DecisionCard, useDecision, useDecisionKeys } from "./decision";
 import { Fit } from "./fit";
-import { decisionOf, fitLeads, headerStatus, setAsideOf, type Phase } from "./model";
+import { decisionOf, fitLeads, headerStatus, rubricOf, setAsideOf, thresholdOf, type Phase } from "./model";
 import { Overview } from "./overview";
 import { Posting } from "./posting";
 import { NextSteps } from "./process";
@@ -204,8 +204,9 @@ function PanelBar({ job, position, onClose, condensed }: Pick<JobDetailProps, "p
 
 function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layout"]; onActed: JobDetailProps["onActed"] }) {
   const { data: summary } = useSummary();
-  const phase: Phase = summary?.phase ?? "practice";
-  const threshold = summary?.threshold ?? null;
+  const targets = summary?.targets ?? { holdBack: true, describe: "" };
+  const phase: Phase = rubricOf(job, !!targets.describe);
+  const threshold = thresholdOf(phase, summary);
   const [tab, setTab] = useState<Tab>(lastTab);
   const open = (t: string) => {
     const next = TABS.find(([k]) => k === t)?.[0];
@@ -295,10 +296,10 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
                   {k === "overview" && (
                     <div className="flex flex-col gap-8">
                       {!lead && card && <div className="border-b border-border pb-8">{card}</div>}
-                      <Overview job={job} phase={phase} openTab={open} />
+                      <Overview job={job} phase={phase} targets={targets} openTab={open} />
                     </div>
                   )}
-                  {k === "fit" && <Fit job={job} phase={phase} threshold={threshold} />}
+                  {k === "fit" && <Fit job={job} phase={phase} targets={targets} threshold={threshold} />}
                   {k === "resume" && <Resume job={job} />}
                   {k === "posting" && <Posting job={job} />}
                   {k === "activity" && <Activity job={job} />}

@@ -57,14 +57,26 @@ export function SettingRow({
   description,
   children,
   stack,
+  block,
   className,
 }: {
   label: string;
   description?: ReactNode;
   children?: ReactNode;
-  stack?: boolean;
+  stack?: boolean; // the control goes under the label on a phone
+  block?: boolean; // and at every width, across the row
   className?: string;
 }) {
+  if (block)
+    return (
+      <div className={cn("flex flex-col gap-3 py-4", className)}>
+        <div className="max-w-xl min-w-0">
+          <p className="text-base font-medium text-fg">{label}</p>
+          {description && <div className="mt-0.5 text-sm text-fg-muted">{description}</div>}
+        </div>
+        {children !== undefined && <div className="flex min-w-0 items-start gap-2 text-sm text-fg">{children}</div>}
+      </div>
+    );
   return (
     <div className={cn("flex gap-4 py-4 sm:items-center sm:gap-8", stack ? "flex-col sm:flex-row" : "items-start", className)}>
       <div className="max-w-xl min-w-0 flex-1">

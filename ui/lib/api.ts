@@ -106,7 +106,7 @@ export const api = {
   recover: (id: number, gateId: string) => post(`/api/jobs/${id}/recover`, { gateId }),
   // Quiet: the caller shows a 409 as "already tracked" with a link rather than as an error.
   addPosting: (url: string) => post<{ id: number }>("/api/jobs", { url }, true),
-  run: (what: "scan" | "track" | "discover" | "release_held") => post("/api/run", { what }),
+  run: (what: "scan" | "track" | "discover" | "release_held" | "release_targets") => post("/api/run", { what }),
   answer: (gateId: string, answer: string, scope: "application" | "standing") =>
     post<AnswerResult>(`/api/questions/${encodeURIComponent(gateId)}/answer`, { answer, scope }),
   sendDigest: () => post<DigestResult>("/api/digest/send", {}),

@@ -49,19 +49,19 @@ describe("config.yml", () => {
     ).toEqual(["schedule.scanMinutes: expected a number of at least 0, got -1"]);
     expect(
       withChange(c => {
-        (c as Record<string, unknown>)["phase"] = "production";
+        (c as Record<string, unknown>)["approval"] = "sometimes";
       }),
-    ).toEqual(['phase: expected one of practice, real, got "production"']);
+    ).toEqual(['approval: expected one of auto, gated, got "sometimes"']);
     expect(
       withChange(c => {
-        (c as Record<string, unknown>)["confirmBeforeSubmit"] = "yes";
+        (c["targets"] ??= {})["holdBack"] = "yes";
       }),
-    ).toEqual(['confirmBeforeSubmit: expected true or false, got "yes"']);
+    ).toEqual(['targets.holdBack: expected true or false, got "yes"']);
     expect(
       withChange(c => {
-        (c["autoApply"] ??= {})["phases"] = ["practice", "live"];
+        (c["targets"] ??= {})["describe"] = 3;
       }),
-    ).toEqual(['autoApply.phases[1]: expected one of practice, real, got "live"']);
+    ).toEqual(["targets.describe: expected text, got 3"]);
     expect(
       withChange(c => {
         (c["chrome"] ??= {})["display"] = "99";
@@ -140,6 +140,25 @@ describe("config.local.yml", () => {
     expect(overlay(base, null)).toBeNull(); // an empty file is caught by the check, not ignored
     expect(overlay(base, {})).toEqual(base);
     expect(overlay({ mailbox: "a@example.com" }, { mailbox: null })).toEqual({ mailbox: null });
+  });
+
+  it("reads the keys from before approval and targets as those", async () => {
+    const { upgrade } = await import("../src/config");
+    expect(upgrade({ phase: "practice", confirmBeforeSubmit: true, autoApply: { enabled: true, phases: ["practice"], submit: true, perDay: 9 } })).toEqual({
+      targets: { holdBack: true },
+      approval: "auto",
+      autoApply: { perDay: 9 },
+    });
+    // Auto apply that stopped for the submit check, or was off, is gated.
+    expect(upgrade({ phase: "real", autoApply: { enabled: true, submit: false } })).toEqual({ targets: { holdBack: false }, approval: "gated", autoApply: {} });
+    expect(upgrade({ autoApply: { enabled: false } })).toEqual({ approval: "gated", autoApply: {} });
+    // New keys in the same file win.
+    expect(upgrade({ phase: "real", targets: { holdBack: true }, approval: "gated", autoApply: { enabled: true, submit: true } })).toEqual({
+      targets: { holdBack: true },
+      approval: "gated",
+      autoApply: {},
+    });
+    expect(upgrade({ port: 8787 })).toEqual({ port: 8787 });
   });
 
   it("has an example that fits over the shipped file", async () => {

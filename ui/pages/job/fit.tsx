@@ -1,7 +1,7 @@
 // The Fit tab: the whole checklist the score came from, what cost points first, and the practice verdict.
 import { Check, CircleHelp, X } from "lucide-react";
 import { useState } from "react";
-import type { JobDetail } from "../../../src/api-types";
+import type { JobDetail, Summary } from "../../../src/api-types";
 import { Disclosure, EmptyState, Properties, Score, Section } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { checklistOf, groupsOf, itemLabel, practiceOf, tally, type Item, type Phase } from "./model";
@@ -68,8 +68,8 @@ function Checklist({ items }: { items: Item[] }) {
   );
 }
 
-function PracticeEvidence({ job, phase }: { job: JobDetail; phase: Phase }) {
-  const p = practiceOf(job, phase);
+function PracticeEvidence({ job, targets }: { job: JobDetail; targets: Summary["targets"] }) {
+  const p = practiceOf(job, targets);
   if (!p) return null;
   return (
     <Section title="Practice eligibility">
@@ -95,19 +95,20 @@ function PracticeEvidence({ job, phase }: { job: JobDetail; phase: Phase }) {
   );
 }
 
-export function Fit({ job, phase, threshold }: { job: JobDetail; phase: Phase; threshold: number | null }) {
+// `phase` is the rubric the score is on; the other one, answered too, folds away under it.
+export function Fit({ job, phase, targets, threshold }: { job: JobDetail; phase: Phase; targets: Summary["targets"]; threshold: number | null }) {
   const items = checklistOf(job);
   const here = items.filter(i => i.phase === phase),
-    real = phase === "practice" ? items.filter(i => i.phase === "real") : [];
+    other = items.filter(i => i.phase !== phase);
   if (job.score == null && !items.length)
     return (
       <div className="flex flex-col gap-8">
         <EmptyState title="Not scored yet" description="The checklist shows here once the job is assessed." className="py-10" />
-        <PracticeEvidence job={job} phase={phase} />
+        <PracticeEvidence job={job} targets={targets} />
       </div>
     );
   const t = tally(here),
-    r = tally(real);
+    o = tally(other);
   return (
     <div className="flex flex-col gap-8">
       <div className="flex items-center gap-5">
@@ -123,19 +124,20 @@ export function Fit({ job, phase, threshold }: { job: JobDetail; phase: Phase; t
             )}
           </p>
           <p>
-            {phase === "practice" ? "Practice" : "Real"} phase{threshold != null && `, needs ${threshold}`}
+            {phase === "practice" ? "Practice rubric: not a target employer" : "Real rubric: a target employer"}
+            {threshold != null && `, needs ${threshold}`}
           </p>
         </div>
       </div>
       {here.length ? <Checklist items={here} /> : <p className="text-sm text-fg-muted">This assessment predates the checklist.</p>}
-      {real.length > 0 && (
-        <Disclosure id="real-phase" summary={`Real-phase score: ${r.points} of ${r.of} points`}>
+      {other.length > 0 && (
+        <Disclosure id="other-rubric" summary={`${phase === "practice" ? "Real" : "Practice"} rubric: ${o.points} of ${o.of} points`}>
           <div className="pt-2">
-            <Checklist items={real} />
+            <Checklist items={other} />
           </div>
         </Disclosure>
       )}
-      <PracticeEvidence job={job} phase={phase} />
+      <PracticeEvidence job={job} targets={targets} />
     </div>
   );
 }

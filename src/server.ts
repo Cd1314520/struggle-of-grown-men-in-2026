@@ -21,6 +21,7 @@ import {
   openedAt,
   recentEvents,
   releaseHeldJobs,
+  releaseTargetHolds,
   siblingJobs,
   statusCounts,
   statusHistory,
@@ -37,7 +38,7 @@ import { acceptImport, beginImport, discardImport, draftPdf, importState, import
 import { readBase, setSetting, settingsState } from "./settings";
 import { setupStatus } from "./setup";
 import { autoApply } from "./auto";
-import { currentThreshold } from "./rubric";
+import { thresholds } from "./rubric";
 import { forgetDeferredApproval } from "./deferred-approvals";
 import { usedToday } from "./limits";
 import { isExample, PLACEHOLDER, profileProblems, seedProfile } from "./profile";
@@ -53,9 +54,9 @@ import { isListView, listJobs } from "./listing";
 import { stats } from "./stats";
 
 const PROFILE_FILES = ["targets.md", "rubric.yml", MAIN, "resume-notes.md", "answers.md", "personal.yml", "companies.yml", "employers.yml"];
-const safeThreshold = () => {
+const safeThresholds = () => {
   try {
-    return currentThreshold();
+    return thresholds();
   } catch {
     return null;
   }
@@ -115,15 +116,15 @@ function settings(scheduler: Scheduler): Omit<Summary, "attention"> {
     scanMinutes: config.schedule.scanMinutes,
     boards: boardCount(),
     lastTrack: kvGet("last.track"),
-    confirmBeforeSubmit: config.confirmBeforeSubmit,
-    autoApply: { ...autoApply(), approvedToday: usedToday("auto") },
+    approval: config.approval,
+    targets: { holdBack: config.targets.holdBack, describe: config.targets.describe?.trim() ?? "" },
+    autoApply: { ...autoApply(), perEmployer: Number.isFinite(autoApply().perEmployer) ? autoApply().perEmployer : null, approvedToday: usedToday("auto") },
     applyPerDay: config.limits.applyPerDay,
-    threshold: safeThreshold(),
+    thresholds: safeThresholds(),
     vncUrl: config.chrome.vncPort ? vncUrl() : null,
     browsers: config.chrome.vncPort ? Array.from({ length: browserCount() }, (_, slot) => vncUrl(slot)) : [],
     redirectUri: gmail.redirectUri(),
     mailbox: config.mailbox,
-    phase: config.phase,
     profileFiles: PROFILE_FILES,
     setupRemaining: setupStatus(cachedCatalog()).remaining,
   };
@@ -218,7 +219,7 @@ function jobAction(scheduler: Scheduler, job: Job, action: string, text: string)
       scheduler.abortFill(job.id);
       updateJob(job.id, to.rejected(text || null));
       break;
-    case "hold": // set aside for later, like a job the phase rules hold back; retry releases it
+    case "hold": // set aside for later, like a job at a target employer held back; retry releases it
       if (job.status === "held") return "already held";
       if (job.status === "rejected") return "rejected; reconsider it first";
       if (wasSent(job)) return "this application was already sent; it cannot be held";
@@ -237,7 +238,7 @@ function jobAction(scheduler: Scheduler, job: Job, action: string, text: string)
       break;
     case "retry":
       if (!RETRYABLE.includes(job.status)) return "nothing to retry";
-      // A held job the user picks out by hand is assessed and tailored regardless of the phase rules.
+      // A held job the user picks out by hand is assessed and tailored regardless of the hold-back rule.
       if (job.status === "held") kvSet(`feedback.${job.id}`, "The candidate chose to apply to this job now. Do not hold it back.");
       kvSet(`locate.tries.${job.id}`, "0");
       updateJob(job.id, existsSync(workingPdf(job.id)) ? to.awaitingApproval(null) : isBoardUrl(job.url) ? to.locating() : to.triaged());
@@ -545,9 +546,14 @@ export function createHandler(scheduler: Scheduler) {
         if (bad.length) return fail("fill in profile/targets.md first");
         void scheduler.scan({ discover: what === "discover" });
       } else if (what === "release_held") {
-        // back through triage, which now judges them against the current phase
+        // back through triage, which judges them again against the current targets
         const n = releaseHeldJobs();
         logEvent("user", `released ${n} held jobs for re-triage`);
+        void scheduler.scan();
+      } else if (what === "release_targets") {
+        // the jobs held back at target employers, once they are no longer held back
+        const n = releaseTargetHolds();
+        logEvent("user", `released ${n} jobs held at target employers for re-triage`);
         void scheduler.scan();
       } else if (what === "track") void scheduler.track();
       else return fail("unknown run target");

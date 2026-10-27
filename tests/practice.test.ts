@@ -1,7 +1,16 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { assessPractice, needsJudgment, parsePracticeAssessment, practiceReason, practiceRefusal, type PracticeAssessment } from "../src/practice";
+import {
+  assessPractice,
+  DEFAULT_TARGETS,
+  needsJudgment,
+  parsePracticeAssessment,
+  practiceReason,
+  practiceRefusal,
+  targetsKey,
+  type PracticeAssessment,
+} from "../src/practice";
 import { evaluate, type Verdict } from "../src/rubric";
 import { autoApproval, checkAutoApprovedPractice, confirmsSubmit, reconsiderAutoApproval } from "../src/auto";
 import { config, PROFILE } from "../src/config";
@@ -37,46 +46,45 @@ beforeEach(restoreConfig);
 afterEach(restoreConfig);
 afterAll(restoreConfig);
 
-// Evidence a worker sends today, before the host adds `listed`.
+// Evidence a worker sends today, before the host adds `listed` and `against`.
 const judged = (fields: Record<string, unknown> = {}) => ({
-  employerType: "non_tech_enterprise",
+  target: "no",
   employerEvidence: "Regional insurer; internal claims tooling",
   agentNative: "unclear",
   agentNativeEvidence: "",
   ...fields,
 });
 const scaledTech = (fields: Record<string, unknown> = {}) =>
-  judged({ employerType: "tech_scaled", employerEvidence: "Payments platform, thousands of engineers", ...fields });
-// Stored assessments: one that makes a job practice, and one that keeps it for the real search.
+  judged({ target: "yes", employerEvidence: "Payments platform, thousands of engineers", ...fields });
+// Stored assessments: one that makes a job practice, and one that keeps it for later.
 const QUALIFIES: PracticeAssessment = {
-  version: 3,
-  employerType: "non_tech_enterprise",
+  version: 4,
+  target: "no",
   employerEvidence: "Regional insurer; internal claims tooling",
   agentNative: "unclear",
   agentNativeEvidence: "",
   listed: null,
+  against: targetsKey(DEFAULT_TARGETS),
 };
-const KEPT: PracticeAssessment = { ...QUALIFIES, employerType: "tech_scaled", employerEvidence: "Payments platform, thousands of engineers" };
+const KEPT: PracticeAssessment = { ...QUALIFIES, target: "yes", employerEvidence: "Payments platform, thousands of engineers" };
 
 describe("practice assessment boundaries", () => {
   const CASES: [string, unknown, boolean][] = [
-    ["a non-tech enterprise qualifies", judged(), true],
-    ["an IT services firm qualifies", judged({ employerType: "it_services", employerEvidence: "Systems integrator" }), true],
-    ["government qualifies", judged({ employerType: "government", employerEvidence: "State agency" }), true],
-    ["an early-stage startup qualifies", judged({ employerType: "startup", employerEvidence: "Seed-stage, 20 people" }), true],
-    // Even an agent-native non-tech employer is ruled out of the real search.
-    ["a non-tech enterprise qualifies whatever its agent use", judged({ agentNative: "yes", agentNativeEvidence: "Internal agent platform" }), true],
-    ["a tech company at scale with unclear agent adoption does not", scaledTech(), false],
-    ["an agent-native tech company at scale does not", scaledTech({ agentNative: "yes", agentNativeEvidence: "Ships agents to customers" }), false],
+    ["an employer judged not a target qualifies", judged(), true],
+    // Even an agent-native employer that is not a target is fine to practise on.
+    ["a non-target qualifies whatever its agent use", judged({ agentNative: "yes", agentNativeEvidence: "Internal agent platform" }), true],
+    ["a target with unclear agent adoption does not", scaledTech(), false],
+    ["an agent-native target does not", scaledTech({ agentNative: "yes", agentNativeEvidence: "Ships agents to customers" }), false],
     [
-      "a tech company at scale behind on agents does not: a rejection there follows the candidate across teams",
+      "a target behind on agents does not: a rejection there follows the candidate across teams",
       scaledTech({ agentNative: "no", agentNativeEvidence: "Posting introduces Copilot as a new pilot" }),
       false,
     ],
     ["the frontier list overrides the judgment", judged({ listed: "frontier" }), false],
     ["the practice list overrides the judgment", scaledTech({ agentNative: "yes", agentNativeEvidence: "Agentic product", listed: "practice" }), true],
-    ["an employer type without evidence fails closed", judged({ employerEvidence: "  " }), false],
-    ["an unknown employer type fails closed", judged({ employerType: "nonprofit" }), false],
+    ["a judgment without evidence fails closed", judged({ employerEvidence: "  " }), false],
+    ["a target answer that is not yes or no fails closed", judged({ target: "maybe" }), false],
+    ["an employer not judged against targets does not qualify", judged({ target: null }), false],
     ["an agent judgment without evidence fails closed", scaledTech({ agentNative: "no", agentNativeEvidence: "" }), false],
     ["an agent judgment that is not yes, no or unclear fails closed", judged({ agentNative: "maybe" }), false],
     ["an unknown list fails closed", judged({ listed: "favourites" }), false],
@@ -86,15 +94,32 @@ describe("practice assessment boundaries", () => {
   for (const [name, input, qualifies] of CASES) {
     it(name, () => {
       const assessed = assessPractice(input);
-      const reason = practiceReason(assessed);
+      const reason = practiceReason(assessed, true);
       expect(Boolean(reason)).toBe(qualifies);
     });
   }
+
+  it("leaves the frontier list alone to decide when targets are not described", () => {
+    expect(practiceReason(assessPractice(scaledTech({ target: null })), false)).toBe(
+      "practice: not on your frontier list (Payments platform, thousands of engineers)",
+    );
+    expect(practiceReason(assessPractice(judged({ target: null, listed: "frontier" })), false)).toBeNull();
+  });
 });
 
 describe("parsePracticeAssessment version gate", () => {
+  const v3 = (fields: Record<string, unknown> = {}) => ({
+    version: 3,
+    employerType: "non_tech_enterprise",
+    employerEvidence: "Regional insurer",
+    agentNative: "unclear",
+    agentNativeEvidence: "",
+    listed: null,
+    ...fields,
+  });
   const PARSE_CASES: [string, string | null | undefined, boolean][] = [
-    ["valid version 3 parses", JSON.stringify({ version: 3, listed: null, ...judged() }), true],
+    ["valid version 4 parses", JSON.stringify(KEPT), true],
+    ["version 3 parses, its employer type read as a judgment against targets", JSON.stringify(v3()), true],
     [
       "version 1 parses, as not judged",
       JSON.stringify({ version: 1, annualBaseMaxUsd: 70000, salaryEvidence: "$70k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }),
@@ -103,8 +128,10 @@ describe("parsePracticeAssessment version gate", () => {
     ["version 2 parses, as not judged", JSON.stringify({ version: 2, annualBaseMaxUsd: null, highEndTech: "no", highEndTechEvidence: "Insurer" }), true],
     ["missing version fails closed", JSON.stringify(judged()), false],
     ["old version 0 fails closed", JSON.stringify({ version: 0, ...judged() }), false],
-    ["future version 4 fails closed", JSON.stringify({ version: 4, ...judged() }), false],
-    ["malformed version 3 fails closed", JSON.stringify({ version: 3, ...judged({ employerType: "nonprofit" }) }), false],
+    ["future version 5 fails closed", JSON.stringify({ ...KEPT, version: 5 }), false],
+    ["version 3 with an unknown employer type fails closed", JSON.stringify(v3({ employerType: "nonprofit" })), false],
+    ["version 3 without evidence fails closed", JSON.stringify(v3({ employerEvidence: " " })), false],
+    ["malformed version 4 fails closed", JSON.stringify({ ...KEPT, target: "maybe" }), false],
     ["malformed json fails closed", "{ bad json", false],
     ["null input fails closed", null, false],
   ];
@@ -115,26 +142,48 @@ describe("parsePracticeAssessment version gate", () => {
       expect(Boolean(parsed)).toBe(valid);
     });
   }
+
+  it("reads a version 3 tech company at scale as a target, judged against the default description", () => {
+    expect(parsePracticeAssessment(JSON.stringify(v3({ employerType: "tech_scaled", employerEvidence: "Payments platform" })))).toEqual({
+      version: 4,
+      target: "yes",
+      employerEvidence: "tech company at scale: Payments platform",
+      agentNative: "unclear",
+      agentNativeEvidence: "",
+      listed: null,
+      against: targetsKey(DEFAULT_TARGETS),
+    });
+    expect(parsePracticeAssessment(JSON.stringify(v3()))?.target).toBe("no");
+  });
 });
 
 describe("why a job is or is not one for practice", () => {
-  it("names the kind of employer that makes it practice", () => {
-    expect(practiceReason(assessPractice(judged()))).toBe("practice: non-tech enterprise (Regional insurer; internal claims tooling)");
+  it("says what about the employer makes it practice", () => {
+    expect(practiceReason(assessPractice(judged()), true)).toBe("practice: not a target employer (Regional insurer; internal claims tooling)");
   });
 
-  it("says why a tech company at scale is kept back", () => {
-    expect(practiceRefusal(assessPractice(scaledTech()))).toBe("a tech company at scale, kept for the real search (Payments platform, thousands of engineers)");
-    expect(practiceRefusal(assessPractice(judged({ listed: "frontier" })))).toBe("the employer is on your frontier list");
+  it("says why a target is kept back", () => {
+    expect(practiceRefusal(assessPractice(scaledTech()), true)).toBe("a target employer, kept for later (Payments platform, thousands of engineers)");
+    expect(practiceRefusal(assessPractice(judged({ listed: "frontier" })), true)).toBe("the employer is on your frontier list");
   });
 
   it("reads an assessment from before version 3 as not judged, so the job is assessed again", () => {
     const old = parsePracticeAssessment(
       JSON.stringify({ version: 2, annualBaseMaxUsd: 65000, salaryEvidence: "$65k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }),
     );
-    expect(practiceRefusal(old)).toBe("the employer has not been judged under the current practice rules");
-    expect(needsJudgment(old)).toBe(true);
-    expect(needsJudgment(assessPractice(judged()))).toBe(false);
-    expect(needsJudgment(null)).toBe(false);
+    expect(practiceRefusal(old, true)).toBe("the employer has not been judged under the current practice rules");
+    expect(needsJudgment(old, true)).toBe(true);
+    expect(needsJudgment(assessPractice(judged()), true)).toBe(false);
+    // Judged before targets were described: only a description in use asks for the judgment.
+    expect(needsJudgment(assessPractice(judged({ target: null })), true)).toBe(true);
+    expect(needsJudgment(assessPractice(judged({ target: null })), false)).toBe(false);
+    expect(needsJudgment(null, true)).toBe(false);
+  });
+
+  it("fingerprints a description by its words, not its spacing or case", () => {
+    expect(targetsKey("  A Tech company\n at scale ")).toBe(targetsKey("a tech company at scale"));
+    expect(targetsKey("a tech company at scale")).not.toBe(targetsKey("a developer tools company"));
+    expect(targetsKey("   ")).toBe("");
   });
 });
 
@@ -174,25 +223,39 @@ function answersList(overrides: Record<string, "yes" | "no" | "unclear"> = {}) {
 }
 
 describe("rubric evaluate", () => {
-  it("applies when practice qualifications pass at an employer the real search rules out", () => {
-    config.phase = "practice";
+  it("applies on the practice rubric at an employer that is not a target", () => {
+    config.targets.holdBack = true;
     const res = evaluate(answersList(), judged()) as Verdict;
     expect(res.decision).toBe("apply");
+    expect(res.rubric).toBe("practice");
     expect(res.practice).not.toBeNull();
   });
 
-  it("holds a tech company at scale on the real rubric, whatever its practice fit", () => {
-    config.phase = "practice";
+  it("holds a target on the real rubric, whatever its practice fit", () => {
+    config.targets.holdBack = true;
     // A poor practice fit does not throw away a job the real search wants.
     const answers = answersList({ "practice.python": "no", "practice.coding_is_core": "no", "practice.skills_overlap": "no" });
     const res = evaluate(answers, scaledTech()) as Verdict;
     expect(res.decision).toBe("hold");
+    expect(res.rubric).toBe("real");
     expect(res.reason).toMatch(/^not a practice job: .*; real score 100 \(threshold 65\)$/);
     expect(res.score).toBe(100);
   });
 
-  it("skips a tech company at scale the real rubric turns down", () => {
-    config.phase = "practice";
+  it("applies to a target on the real rubric when nothing is held back", () => {
+    config.targets.holdBack = false;
+    const answers = answersList({ "practice.python": "no", "practice.coding_is_core": "no", "practice.skills_overlap": "no" });
+    const res = evaluate(answers, scaledTech()) as Verdict;
+    expect(res.decision).toBe("apply");
+    expect(res.rubric).toBe("real");
+    expect(res.score).toBe(100);
+    expect(res.reason).toBe("a target employer, kept for later (Payments platform, thousands of engineers); real score 100 (threshold 65)");
+    // An employer that is not a target is still scored on the practice rubric.
+    expect((evaluate(answersList(), judged()) as Verdict).rubric).toBe("practice");
+  });
+
+  it("skips a target the real rubric turns down", () => {
+    config.targets.holdBack = true;
     const low = answersList({
       "real.scale": "no",
       "real.agent_native": "no",
@@ -207,36 +270,42 @@ describe("rubric evaluate", () => {
   });
 
   it("skips new-grad and AI-training roles whatever the employer", () => {
-    config.phase = "practice";
-    expect((evaluate(answersList({ "practice.not_new_grad": "no" }), judged()) as Verdict).decision).toBe("skip");
-    expect((evaluate(answersList({ "practice.not_ai_training": "no" }), judged()) as Verdict).decision).toBe("skip");
-    config.phase = "real";
-    expect((evaluate(answersList({ "real.not_new_grad": "no" })) as Verdict).decision).toBe("skip");
-    expect((evaluate(answersList({ "real.employer_ok": "no" })) as Verdict).decision).toBe("skip");
+    for (const holdBack of [true, false]) {
+      config.targets.holdBack = holdBack;
+      expect((evaluate(answersList({ "practice.not_new_grad": "no" }), judged()) as Verdict).decision).toBe("skip");
+      expect((evaluate(answersList({ "practice.not_ai_training": "no" }), judged()) as Verdict).decision).toBe("skip");
+      expect((evaluate(answersList({ "real.not_new_grad": "no" }), scaledTech()) as Verdict).decision).toBe("skip");
+      expect((evaluate(answersList({ "real.employer_ok": "no" }), scaledTech()) as Verdict).decision).toBe("skip");
+    }
   });
 
   it("skips on qualification failure regardless of employer", () => {
-    config.phase = "practice";
+    config.targets.holdBack = true;
     const answers = answersList({ "practice.engineering_work": "no" });
     const res = evaluate(answers, judged()) as Verdict;
     expect(res.decision).toBe("skip");
   });
 
-  it("leaves real phase behavior unchanged with practice: null", () => {
-    config.phase = "real";
-    const res = evaluate(answersList(), judged()) as Verdict;
-    expect(res.decision).toBe("apply");
-    expect(res.practice).toBeNull();
+  it("asks both rubrics whether or not targets are held back", () => {
+    config.targets.holdBack = false;
+    expect(
+      evaluate(
+        answersList().filter(a => a.id.startsWith("real.")),
+        judged(),
+      ),
+    ).toMatch(/^missing answers for: practice\./);
   });
 });
 
 describe("autoApproval and submission safety", () => {
   it("autoApproval independently requires practiceReason in practice mode", () => {
-    config.phase = "practice";
-    config.autoApply = { enabled: true, phases: ["practice"], minScore: 60, perDay: 5 };
+    config.targets.holdBack = true;
+    config.approval = "auto";
+    config.autoApply = { minScore: 60, perDay: 5 };
 
     const baseVerdict: Verdict = {
       decision: "apply",
+      rubric: "practice",
       score: 80,
       threshold: 60,
       reason: "passed",
@@ -278,50 +347,37 @@ describe("autoApproval and submission safety", () => {
     expect(employerRes.note).toMatch(/already applying to 1 other role at this employer/);
   });
 
-  it("confirmsSubmit fails closed for auto jobs even when confirmBeforeSubmit is false", () => {
-    config.confirmBeforeSubmit = false;
-    config.phase = "practice";
-    config.autoApply = { enabled: true, phases: ["practice"], submit: true };
+  it("confirmsSubmit fails closed for auto jobs that no longer prove practice while targets are held back", () => {
+    config.approval = "auto";
+    config.targets.holdBack = true;
     const validEvidence = JSON.stringify(QUALIFIES);
 
     // Missing or invalid evidence -> fails closed (true)
     expect(confirmsSubmit({ approved_by: "auto", practice_assessment: null })).toBe(true);
     expect(confirmsSubmit({ approved_by: "auto", practice_assessment: JSON.stringify({ version: 0 }) })).toBe(true);
-    expect(
-      confirmsSubmit({
-        approved_by: "auto",
-        practice_assessment: JSON.stringify(KEPT),
-      }),
-    ).toBe(true);
-
-    // Phase mismatch with confirmBeforeSubmit=false -> fails closed (true) even with valid evidence
-    config.phase = "real";
-    expect(confirmsSubmit({ approved_by: "auto", practice_assessment: null })).toBe(true);
-    expect(confirmsSubmit({ approved_by: "auto", practice_assessment: validEvidence })).toBe(true);
-
-    // Disabled submit rule with confirmBeforeSubmit=false -> fails closed (true)
-    config.phase = "practice";
-    config.autoApply = { enabled: true, phases: ["practice"], submit: false };
-    expect(confirmsSubmit({ approved_by: "auto", practice_assessment: validEvidence })).toBe(true);
-
-    // Disabled autoApply entirely with confirmBeforeSubmit=false -> fails closed (true)
-    config.autoApply = { enabled: false, phases: ["practice"], submit: true };
-    expect(confirmsSubmit({ approved_by: "auto", practice_assessment: validEvidence })).toBe(true);
+    expect(confirmsSubmit({ approved_by: "auto", practice_assessment: JSON.stringify(KEPT) })).toBe(true);
 
     // Fully qualifying auto job -> skips confirmation (false)
-    config.autoApply = { enabled: true, phases: ["practice"], submit: true };
     expect(confirmsSubmit({ approved_by: "auto", practice_assessment: validEvidence })).toBe(false);
+
+    // Targets not held back: an auto-approved target is sent like any other.
+    config.targets.holdBack = false;
+    expect(confirmsSubmit({ approved_by: "auto", practice_assessment: JSON.stringify(KEPT) })).toBe(false);
+
+    // Gated: everything stops for the user.
+    config.approval = "gated";
+    expect(confirmsSubmit({ approved_by: "auto", practice_assessment: validEvidence })).toBe(true);
   });
 
-  it("confirmsSubmit preserves global semantics for manual approvals", () => {
-    config.confirmBeforeSubmit = true;
+  it("confirmsSubmit follows the approval mode for jobs the user approved", () => {
+    config.approval = "gated";
     expect(confirmsSubmit({ approved_by: "user" })).toBe(true);
-    config.confirmBeforeSubmit = false;
+    config.approval = "auto";
     expect(confirmsSubmit({ approved_by: "user" })).toBe(false);
   });
 
   it("checkAutoApprovedPractice guards fill start before freeze or browser", () => {
-    config.phase = "practice";
+    config.targets.holdBack = true;
     // Manual job always passes
     expect(checkAutoApprovedPractice({ approved_by: "user" }).ok).toBe(true);
 
@@ -359,32 +415,31 @@ describe("applications already under way when the rules asked for a judgment", (
   const sha = "a".repeat(64);
 
   it("may carry on filling, but never submit without the user", () => {
-    config.phase = "practice";
-    config.confirmBeforeSubmit = false;
-    config.autoApply = { enabled: true, phases: ["practice"], submit: true };
+    config.targets.holdBack = true;
+    config.approval = "auto";
     expect(checkAutoApprovedPractice({ approved_by: "auto", practice_assessment: unjudged, resume_sha: sha }).ok).toBe(true);
     expect(confirmsSubmit({ approved_by: "auto", practice_assessment: unjudged })).toBe(true);
   });
 
   it("are still stopped when not started, or when the employer settles it", () => {
-    config.phase = "practice";
+    config.targets.holdBack = true;
     expect(checkAutoApprovedPractice({ approved_by: "auto", practice_assessment: unjudged, resume_sha: null }).ok).toBe(false);
     expect(checkAutoApprovedPractice({ approved_by: "auto", practice_assessment: unjudged }).ok).toBe(false);
     const stopped = checkAutoApprovedPractice({ approved_by: "auto", practice_assessment: kept, resume_sha: sha });
     expect(stopped.ok).toBe(false);
-    expect(stopped.reason).toBe(
-      "auto-approved, but not a practice job: a tech company at scale, kept for the real search (Payments platform, thousands of engineers)",
-    );
+    expect(stopped.reason).toBe("auto-approved, but not a practice job: a target employer, kept for later (Payments platform, thousands of engineers)");
   });
 });
 
 describe("autoApproval deferred 'daily_cap' contract", () => {
   it("returns deferred: 'daily_cap' ONLY when all other gates pass and daily quota denies", () => {
-    config.phase = "practice";
-    config.autoApply = { enabled: true, phases: ["practice"], minScore: 80, perDay: 5, allowConcerns: false };
+    config.targets.holdBack = true;
+    config.approval = "auto";
+    config.autoApply = { minScore: 80, perDay: 5, allowConcerns: false };
 
     const validVerdict: Verdict = {
       decision: "apply",
+      rubric: "practice",
       score: 90,
       threshold: 60,
       reason: "passed",
@@ -455,7 +510,7 @@ describe("autoApproval deferred 'daily_cap' contract", () => {
     expect(handPickedRes.deferred).toBeUndefined();
 
     // Prior gate failure: autoApply disabled does NOT get deferred
-    config.autoApply.enabled = false;
+    config.approval = "gated";
     const disabledRes = autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 5 });
     expect(disabledRes.approve).toBe(false);
     expect(disabledRes.deferred).toBeUndefined();
@@ -471,8 +526,9 @@ describe("reconsiderAutoApproval pure helper", () => {
   }
 
   it("defers when cap is hit, then approves upon daily cap reset (snapshot/restore)", () => {
-    config.phase = "practice";
-    config.autoApply = { enabled: true, phases: ["practice"], minScore: 80, perDay: 5 };
+    config.targets.holdBack = true;
+    config.approval = "auto";
+    config.autoApply = { minScore: 80, perDay: 5 };
     const job = {
       id: 101,
       status: "awaiting_approval" as const,
@@ -501,12 +557,13 @@ describe("reconsiderAutoApproval pure helper", () => {
     expect(resetRes.reason).toBeNull();
     expect(resetRes.verdict?.decision).toBe("apply");
     expect(resetRes.verdict?.score).toBeGreaterThanOrEqual(80);
-    expect(resetRes.verdict?.practice?.employerType).toBe("non_tech_enterprise");
+    expect(resetRes.verdict?.practice?.target).toBe("no");
   });
 
   it("approves when autoApply perDay limit is increased", () => {
-    config.phase = "practice";
-    config.autoApply = { enabled: true, phases: ["practice"], minScore: 80, perDay: 5 };
+    config.targets.holdBack = true;
+    config.approval = "auto";
+    config.autoApply = { minScore: 80, perDay: 5 };
 
     const job = {
       id: 102,
@@ -531,8 +588,9 @@ describe("reconsiderAutoApproval pure helper", () => {
   });
 
   it("evaluates stored checklist mapping key->id from persisted JSON array", () => {
-    config.phase = "practice";
-    config.autoApply = { enabled: true, phases: ["practice"], minScore: 80, perDay: 10 };
+    config.targets.holdBack = true;
+    config.approval = "auto";
+    config.autoApply = { minScore: 80, perDay: 10 };
 
     // 1. Array with item.key
     const resKey = reconsiderAutoApproval(
@@ -568,8 +626,9 @@ describe("reconsiderAutoApproval pure helper", () => {
   });
 
   it("fails closed on malformed checklist or missing answers", () => {
-    config.phase = "practice";
-    config.autoApply = { enabled: true, phases: ["practice"], minScore: 80, perDay: 10 };
+    config.targets.holdBack = true;
+    config.approval = "auto";
+    config.autoApply = { minScore: 80, perDay: 10 };
 
     const base = {
       status: "awaiting_approval" as const,
@@ -594,8 +653,9 @@ describe("reconsiderAutoApproval pure helper", () => {
   });
 
   it("fails closed on stale qualifications (missing current rubric items)", () => {
-    config.phase = "practice";
-    config.autoApply = { enabled: true, phases: ["practice"], minScore: 80, perDay: 10 };
+    config.targets.holdBack = true;
+    config.approval = "auto";
+    config.autoApply = { minScore: 80, perDay: 10 };
 
     const partial = validStoredChecklistArray().slice(0, 5);
     const res = reconsiderAutoApproval(
@@ -615,8 +675,9 @@ describe("reconsiderAutoApproval pure helper", () => {
   });
 
   it("fails closed on unknown required items (answer: unclear)", () => {
-    config.phase = "practice";
-    config.autoApply = { enabled: true, phases: ["practice"], minScore: 80, perDay: 10 };
+    config.targets.holdBack = true;
+    config.approval = "auto";
+    config.autoApply = { minScore: 80, perDay: 10 };
 
     const unclearAnswers = validStoredChecklistArray({ "practice.us_employer": "unclear" });
     const res = reconsiderAutoApproval(
@@ -636,8 +697,9 @@ describe("reconsiderAutoApproval pure helper", () => {
   });
 
   it("fails closed on low fit (score below auto-apply bar or failed required)", () => {
-    config.phase = "practice";
-    config.autoApply = { enabled: true, phases: ["practice"], minScore: 80, perDay: 10 };
+    config.targets.holdBack = true;
+    config.approval = "auto";
+    config.autoApply = { minScore: 80, perDay: 10 };
 
     const base = {
       status: "awaiting_approval" as const,
@@ -668,8 +730,9 @@ describe("reconsiderAutoApproval pure helper", () => {
   });
 
   it("fails closed on malformed checklist: coerced array answer, key array, object evidence, and duplicate keys", () => {
-    config.phase = "practice";
-    config.autoApply = { enabled: true, phases: ["practice"], minScore: 80, perDay: 10 };
+    config.targets.holdBack = true;
+    config.approval = "auto";
+    config.autoApply = { minScore: 80, perDay: 10 };
 
     const base = {
       status: "awaiting_approval" as const,
@@ -709,8 +772,9 @@ describe("reconsiderAutoApproval pure helper", () => {
   });
 
   it("fails closed on high salary and invalid practice assessment", () => {
-    config.phase = "practice";
-    config.autoApply = { enabled: true, phases: ["practice"], minScore: 80, perDay: 10 };
+    config.targets.holdBack = true;
+    config.approval = "auto";
+    config.autoApply = { minScore: 80, perDay: 10 };
 
     const base = {
       status: "awaiting_approval" as const,
@@ -722,20 +786,21 @@ describe("reconsiderAutoApproval pure helper", () => {
       checklist: JSON.stringify(validStoredChecklistArray()),
     };
 
-    // A tech company at scale, kept for the real search
+    // A target employer, kept for later
     const highSalaryObj = KEPT;
     const resHigh = reconsiderAutoApproval({ ...base, practice_assessment: JSON.stringify(highSalaryObj) }, { handPicked: false, approvedToday: 0 });
     expect(resHigh.approved).toBe(false);
 
     // A version this code does not know
-    const badVersion = { ...validPracticeObj, version: 4 };
+    const badVersion = { ...validPracticeObj, version: 5 };
     const resVer = reconsiderAutoApproval({ ...base, practice_assessment: JSON.stringify(badVersion) }, { handPicked: false, approvedToday: 0 });
     expect(resVer.approved).toBe(false);
   });
 
   it("protects handpicked, manual approvals, and frozen/submitted states", () => {
-    config.phase = "practice";
-    config.autoApply = { enabled: true, phases: ["practice"], minScore: 80, perDay: 10 };
+    config.targets.holdBack = true;
+    config.approval = "auto";
+    config.autoApply = { minScore: 80, perDay: 10 };
 
     const baseJob = {
       status: "awaiting_approval" as const,
@@ -766,8 +831,9 @@ describe("reconsiderAutoApproval pure helper", () => {
   });
 
   it("guards disabled autoApply", () => {
-    config.phase = "practice";
-    config.autoApply = { enabled: false, phases: ["practice"], minScore: 80, perDay: 10 };
+    config.targets.holdBack = true;
+    config.approval = "gated";
+    config.autoApply = { minScore: 80, perDay: 10 };
 
     const baseJob = {
       status: "awaiting_approval" as const,

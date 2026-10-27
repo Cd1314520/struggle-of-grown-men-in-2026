@@ -12,8 +12,9 @@
 #   score            = points earned / total positive weight * 100
 #   unclear          earns this fraction of the weight (the posting did not say)
 #
-# In the practice phase a job is held back unless its employer is one the real search rules out
-# (src/practice.ts and profile/employers.yml), independent of the real fit score.
+# A job at a target employer (targets in config.yml, and the frontier list in profile/employers.yml) is
+# scored on `real`, any other on `practice`. While targets are held back, a target's job that passes is
+# held for later instead of applied to.
 # Edits take effect on the next job; no restart needed.
 
 unclear: 0.5

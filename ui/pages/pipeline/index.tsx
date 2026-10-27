@@ -30,6 +30,7 @@ import { href, setParams } from "../../lib/router";
 import { JobDetail } from "../job/detail";
 import { FitFact } from "../job/fit";
 import { stageSegments, STAGES } from "./stages";
+import { thresholdOf } from "../job/model";
 
 const STUCK = new Set(["needs_you", "questions", "failed"]);
 // A score from before a job went back to be assessed again says nothing yet.
@@ -83,7 +84,6 @@ export function PipelinePage() {
   const compact = openId !== null && wide;
   const current = data?.groups.find(g => g.key === group);
   const empty = EMPTY[group];
-  const threshold = summary?.threshold ?? null;
   // Nothing in Assessing has a score yet: its fact is how long it has been there. Sorted longest waiting,
   // a stage paused on the owner says for how long instead of the fit.
   const scored = group !== "assessing";
@@ -193,7 +193,15 @@ export function PipelinePage() {
               secondary={unent(r.company)}
               // What it waits on where the stages differ (Needs you's gates); else where it is.
               gist={mixed ? <Stage row={r} /> : !!r.location?.trim() && <span title={r.location}>{place(r.location)}</span>}
-              fact={waiting ? <Time at={at} short prefix="Waiting " /> : scored ? <FitFact value={score} threshold={threshold} /> : <Time at={at} short />}
+              fact={
+                waiting ? (
+                  <Time at={at} short prefix="Waiting " />
+                ) : scored ? (
+                  <FitFact value={score} threshold={thresholdOf(r.rubric, summary)} />
+                ) : (
+                  <Time at={at} short />
+                )
+              }
             />
           );
         })

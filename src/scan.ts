@@ -134,15 +134,16 @@ async function triage(run: RunWorker) {
     });
     await done;
     if (!kept) throw new Error("triage worker finished without reporting; will retry on the next scan");
-    const keep = new Set<number>(kept);
-    const hold = new Set<number>(held);
+    // With nothing held back, what the targets would keep for later is read now.
+    const keep = new Set<number>(config.targets.holdBack ? kept : [...kept, ...held]);
+    const hold = new Set<number>(config.targets.holdBack ? held : []);
     for (const j of batch) {
       if (keep.has(j.id) && isBoardUrl(j.url)) updateJob(j.id, to.locating());
       else if (keep.has(j.id)) {
         // Boards that list titles only: get the body now that the posting is worth reading.
         const description = j.description ? undefined : await fetchDescription(j.url);
         updateJob(j.id, { ...to.triaged(), ...(description ? { description } : {}) });
-      } else if (hold.has(j.id)) updateJob(j.id, to.held(`held back during the ${config.phase} phase`));
+      } else if (hold.has(j.id)) updateJob(j.id, to.held("held back at triage"));
       else updateJob(j.id, to.skipped("dropped at triage"));
     }
     logEvent("system", `Triage: kept ${keep.size}, held ${hold.size} of ${batch.length}`);

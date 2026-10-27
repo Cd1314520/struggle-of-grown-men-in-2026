@@ -119,10 +119,11 @@ export type BoardJob = Pick<
   | "submitted_at"
 >;
 // Every job in the given statuses, without the long text columns: a job list before it is paged.
+// With the practice assessment, which decides the rubric a row's score is on.
 export const listedJobs = (statuses: readonly Status[]) =>
   db
-    .query<BoardJob, [string]>(
-      `SELECT id, url, source, company, title, location, status, score, pending, note, found_at, posted_at, updated_at, submitted_at
+    .query<BoardJob & Pick<Job, "practice_assessment">, [string]>(
+      `SELECT id, url, source, company, title, location, status, score, pending, note, found_at, posted_at, updated_at, submitted_at, practice_assessment
       FROM jobs WHERE status IN (SELECT value FROM json_each(?))`,
     )
     .all(JSON.stringify(statuses));
@@ -536,6 +537,14 @@ export const requeueInterruptedPrep = () => db.query("UPDATE jobs SET status = '
 // Sends held jobs back through triage. Returns how many.
 export const releaseHeldJobs = () =>
   db.query("UPDATE jobs SET status = 'found', note = NULL, updated_at = datetime('now') WHERE status = 'held' RETURNING id").all().length;
+// Only the jobs held because their employer is a target (prep.ts, rubric.ts) or at triage (scan.ts),
+// not those the owner held by hand.
+export const releaseTargetHolds = () =>
+  db
+    .query(
+      "UPDATE jobs SET status = 'found', note = NULL, updated_at = datetime('now') WHERE status = 'held' AND (note LIKE 'not a practice job:%' OR note LIKE 'held back %') RETURNING id",
+    )
+    .all().length;
 
 // ---- status history: written by triggers on jobs (schema.ts), only read here
 

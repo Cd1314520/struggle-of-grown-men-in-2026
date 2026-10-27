@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import type { Database } from "bun:sqlite";
 import { join } from "node:path";
-import { DATA } from "../src/config";
+import { DATA, describing } from "../src/config";
 import { needsJudgment, parsePracticeAssessment } from "../src/practice";
 import { openDatabase } from "../src/schema";
 
@@ -98,7 +98,7 @@ function selectAndFilter(db: Database) {
 
     // Skip rows that already have a valid practice assessment made under the current rules
     const assessment = parsePracticeAssessment(j.practice_assessment);
-    if (assessment !== null && !needsJudgment(assessment)) {
+    if (assessment !== null && !needsJudgment(assessment, describing())) {
       excludedByReason["already_has_practice_assessment"] = (excludedByReason["already_has_practice_assessment"] ?? 0) + 1;
       continue;
     }

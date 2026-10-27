@@ -1,7 +1,7 @@
 // Prep: score one job against the rubric and, when it clears, tailor the resume for it.
 import { existsSync } from "node:fs";
 import { autoApply, autoApproval, employerCapNote } from "./auto";
-import { config, jobDir, readProfile } from "./config";
+import { config, describing, jobDir, readProfile } from "./config";
 import { appliedLocation, employerApplications, getJob, jobSources, kvGet, logEvent, updateJob, type Job } from "./db";
 import { deferApproval, forgetDeferredApproval } from "./deferred-approvals";
 import { countOne, uncountOne, usedToday } from "./limits";
@@ -9,7 +9,7 @@ import { placeOf } from "./location";
 import { arg, S, schema, type RunWorker } from "./worker";
 import { employerListing, employersText, rememberedEmployer } from "./employers";
 import { isCapacityError } from "./errors";
-import { assessPractice, EMPLOYER_LABELS, EMPLOYER_TYPES, type PracticeAssessment } from "./practice";
+import { assessPractice, targetsKey, type PracticeAssessment } from "./practice";
 import { changedTemplateFiles, MAIN, pageCount, PDF_NAME, stageResume, stockPages, workingPdf } from "./resume";
 import { checklistText, evaluate, screenChecklistText, screenVerdict, type Verdict } from "./rubric";
 import { to } from "./status";
@@ -32,12 +32,7 @@ export async function prep(job: Job, run: RunWorker) {
   }
   // An employer judged before settles what the full assessment would only judge again.
   const settled = feedback ? null : settledByEmployer(job);
-  if (settled?.decision === "skip") {
-    uncountOne("prep");
-    updateJob(job.id, to.skipped(settled.reason));
-    return;
-  }
-  if (settled?.decision === "hold") {
+  if (settled) {
     // The real rubric decides whether a job held for the real search is worth keeping. Its plain
     // requirements are left to the cheap screen; the rest wait until the job is released.
     if (job.description) {
@@ -89,6 +84,9 @@ export async function prep(job: Job, run: RunWorker) {
         : "",
       checklist: checklistText(),
       employers: employersText(),
+      targets: describing()
+        ? `- \`target\`: \`yes\` when the employer fits the candidate's description of a target employer below, \`no\` when it does not. Judge the employer as a whole, not this team or role.\n\n  > ${(config.targets.describe ?? "").trim().replace(/\s+/g, " ")}\n\n`
+        : "",
       notes: readProfile("resume-notes.md"),
       main: MAIN,
       pdfName: PDF_NAME,
@@ -110,10 +108,18 @@ export async function prep(job: Job, run: RunWorker) {
             },
             practice: {
               type: "object",
-              description: "Practice phase: what kind of employer this is, and whether its engineering organisation is agent-native.",
+              description: "What kind of employer this is, and whether its engineering organisation is agent-native.",
               properties: {
-                employerType: { type: "string", enum: [...EMPLOYER_TYPES], description: "What kind of employer this is" },
-                employerEvidence: S.str("One sentence naming what about the company decides its type"),
+                ...(describing()
+                  ? {
+                      target: {
+                        type: "string",
+                        enum: ["yes", "no"],
+                        description: "Whether the employer fits the candidate's description of a target employer",
+                      },
+                    }
+                  : {}),
+                employerEvidence: S.str("One sentence naming what about the company decides what kind of employer it is"),
                 agentNative: {
                   type: "string",
                   enum: ["yes", "no", "unclear"],
@@ -121,25 +127,30 @@ export async function prep(job: Job, run: RunWorker) {
                 },
                 agentNativeEvidence: S.str("The fact that decides a yes or no; empty only if unclear"),
               },
-              required: ["employerType", "employerEvidence", "agentNative", "agentNativeEvidence"],
+              required: [...(describing() ? ["target"] : []), "employerEvidence", "agentNative", "agentNativeEvidence"],
               additionalProperties: false,
             },
           },
-          config.phase === "practice" ? ["answers", "practice"] : ["answers"],
+          ["answers", "practice"],
         ),
         handler: args => {
           if (!stillPrepping()) return WITHDRAWN;
           const answers = args["answers"];
           let practice = args["practice"];
-          if (config.phase === "practice") {
-            if (!practice || typeof practice !== "object" || Array.isArray(practice)) {
-              return "ERROR: 'practice' evidence object is required in the practice phase with employerType, employerEvidence, agentNative, and agentNativeEvidence. Call submit_checklist again with practice evidence.";
-            }
-            // Whether the employer is on one of the candidate's lists is the host's to say, not the worker's.
-            practice = { ...practice, listed: employerListing(job.company) };
-            if (!assessPractice(practice)) {
-              return `ERROR: malformed practice evidence. Ensure: employerType is one of ${EMPLOYER_TYPES.join(", ")} with a non-empty employerEvidence; agentNative is 'yes', 'no', or 'unclear', with agentNativeEvidence stating the deciding fact unless unclear. Do not include a version field. Call submit_checklist again.`;
-            }
+          if (!practice || typeof practice !== "object" || Array.isArray(practice)) {
+            return `ERROR: the 'practice' object is required, with ${describing() ? "target, " : ""}employerEvidence, agentNative and agentNativeEvidence. Call submit_checklist again with it.`;
+          }
+          // Whether the employer is on one of the candidate's lists, and the description it was judged
+          // against, are the host's to say, not the worker's.
+          const { target } = practice as Record<string, unknown>;
+          practice = {
+            ...practice,
+            target: describing() ? target : null,
+            listed: employerListing(job.company),
+            against: targetsKey(config.targets.describe ?? ""),
+          };
+          if (!assessPractice(practice) || (describing() && target !== "yes" && target !== "no")) {
+            return `ERROR: malformed practice evidence. Ensure: ${describing() ? "target is 'yes' or 'no'; " : ""}employerEvidence is a non-empty sentence; agentNative is 'yes', 'no', or 'unclear', with agentNativeEvidence stating the deciding fact unless unclear. Do not include a version field. Call submit_checklist again.`;
           }
           const result = evaluate(answers, practice);
           if (typeof result === "string") return `ERROR: ${result}. Call submit_checklist again with every statement answered.`;
@@ -222,38 +233,27 @@ export async function prep(job: Job, run: RunWorker) {
 // Why auto apply would never take this job: its employer already has autoApply.perEmployer applications.
 function employerCapped(job: Job): string | null {
   const rules = autoApply();
-  if (!rules.enabled || !rules.phases.includes(config.phase)) return null;
+  if (!rules.enabled) return null;
   const others = employerApplications(job);
   return others >= rules.perEmployer ? employerCapNote(others) : null;
 }
 
-// What the employer alone decides about a job, before a full assessment is spent on it. In practice a
-// tech company at scale is never one to practise on, so its jobs are held for the real search; in the
-// real search, an employer judged anything else fails the real rubric's employer requirement. The
-// lists in profile/employers.yml outrank an earlier judgment, and a practice-listed employer is left
-// to the full assessment in either phase.
-function settledByEmployer(job: Job): { decision: "hold"; reason: string; practice: PracticeAssessment | null } | { decision: "skip"; reason: string } | null {
+// What the employer alone decides about a job, before a full assessment is spent on it: while target
+// employers are held back, a job at one is held without the practice assessment. The lists in
+// profile/employers.yml outrank an earlier judgment, and a practice-listed employer is left to the full
+// assessment.
+function settledByEmployer(job: Job): { reason: string; practice: PracticeAssessment | null } | null {
+  if (!config.targets.holdBack) return null;
   const listed = employerListing(job.company);
   if (listed === "practice") return null;
   const unassessed = "held without a full assessment until it is released";
-  if (config.phase === "practice" && listed === "frontier")
-    return { decision: "hold", reason: `not a practice job: the employer is on your frontier list; ${unassessed}`, practice: null };
-  if (listed) return null;
+  if (listed === "frontier") return { reason: `not a practice job: the employer is on your frontier list; ${unassessed}`, practice: null };
   const known = rememberedEmployer(job);
-  if (!known) return null;
-  const { employerType, employerEvidence } = known.assessment;
-  if (config.phase === "practice" && employerType === "tech_scaled")
-    return {
-      decision: "hold",
-      reason: `not a practice job: a tech company at scale, as judged on job #${known.jobId} (${employerEvidence}); ${unassessed}`,
-      practice: { ...known.assessment, listed: null },
-    };
-  if (config.phase === "real" && employerType && employerType !== "tech_scaled")
-    return {
-      decision: "skip",
-      reason: `failed real requirement: employer_ok (${EMPLOYER_LABELS[employerType]}, as judged on job #${known.jobId}: ${employerEvidence})`,
-    };
-  return null;
+  if (known?.assessment.target !== "yes") return null;
+  return {
+    reason: `not a practice job: a target employer, as judged on job #${known.jobId} (${known.assessment.employerEvidence}); ${unassessed}`,
+    practice: { ...known.assessment, listed: null },
+  };
 }
 
 // A cheap model reads the posting for the requirements it settles on its own, and a job that plainly

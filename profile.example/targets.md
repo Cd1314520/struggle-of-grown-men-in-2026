@@ -4,7 +4,7 @@
 replace every placeholder: nothing is assessed or applied while one is left. Triage, discovery and every
 assessment read this file, so say plainly what you want and what you never want. -->
 
-The current phase is set by `phase` in `config.yml` and is stated at the top of every task. Use the section for that phase and ignore the other one, except where it says otherwise.
+Every task starts with the application phase. PRACTICE: target employers (described by `targets.describe` in `config.yml`, plus the frontier list in `employers.yml`) are held back, and the Practice phase section applies. PRACTICE AND REAL: nothing is held back; a job at a target employer is judged by the Real phase section, any other by the Practice phase section.
 
 ## What I am after (both phases)
 
@@ -14,13 +14,13 @@ TODO-FILL: what matters most when two good roles compete (learning, pay, locatio
 
 ### Employer types
 
-The assessment sorts every employer into one of these. The practice phase applies only where your real search would not.
+What kind of employer a company is. Which of them are targets, saved for the real search, is said in words by `targets.describe` in `config.yml` (Settings → General); by default, a tech company at scale.
 
-- **Tech company at scale** (`tech_scaled`): software or tech-first company past early stage (roughly 300+ people, or a large established product) whose core product is the software.
-- **Early-stage startup** (`startup`): small or early tech company (roughly under 300 people, or seed to Series B).
-- **Non-tech enterprise** (`non_tech_enterprise`): an employer whose business is not technology (insurance, banking, energy, healthcare, retail, manufacturing, logistics, media, education).
-- **IT services or consultancy** (`it_services`): IT services, consulting, staffing, outsourcing, systems integrators, agencies.
-- **Government or public sector** (`government`): government, public universities, and contractors whose work is for the government.
+- **Tech company at scale**: software or tech-first company past early stage (roughly 300+ people, or a large established product) whose core product is the software.
+- **Early-stage startup**: small or early tech company (roughly under 300 people, or seed to Series B).
+- **Non-tech enterprise**: an employer whose business is not technology (insurance, banking, energy, healthcare, retail, manufacturing, logistics, media, education).
+- **IT services or consultancy**: IT services, consulting, staffing, outsourcing, systems integrators, agencies.
+- **Government or public sector**: government, public universities, and contractors whose work is for the government.
 
 ### Never (both phases)
 

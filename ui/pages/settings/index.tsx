@@ -9,18 +9,17 @@ import { Button, ConfirmDialog, Disclosure, ListNotice, SectionNav, Skeleton, Sk
 import { api, refreshAll, useSettings, useSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { num, plural } from "../../lib/format";
-import type { Tone } from "../../lib/labels";
 import { href, useRoute } from "../../lib/router";
 import { Mail } from "./mail";
 import { Models } from "./models";
-import { ConfigRow } from "./field";
+import { ConfigRow, type Confirm } from "./field";
 import { SavedLocally, SettingFold, SettingRow, SettingsPanel } from "./parts";
 import { BrowserRows, Schedule, Server, Sources } from "./sections";
 
 const SECTIONS = [
   ["general", "General"],
   ["models", "Models"],
-  ["auto-apply", "Auto apply"],
+  ["auto-apply", "Auto-apply"],
   ["schedule", "Schedule & limits"],
   ["sources", "Sources"],
   ["mail", "Mail & digest"],
@@ -67,9 +66,9 @@ function Nav({ ready }: { ready: boolean }) {
   );
 }
 
-const PHASES = [
-  { value: "practice", label: "Practice" },
-  { value: "real", label: "Real" },
+const APPROVALS = [
+  { value: "auto", label: "Auto-apply" },
+  { value: "gated", label: "Gated" },
 ] as const;
 
 // Settings the app reads only at start, saved but not yet in use.
@@ -83,52 +82,81 @@ function RestartNotice() {
   );
 }
 
-function autoState(s: Summary): [Tone, string, string] {
-  const a = s.autoApply;
-  if (!a.enabled) return ["neutral", "Off", "Every application waits for your approval in Review."];
-  if (!a.phases.includes(s.phase)) return ["neutral", `Off in the ${s.phase} phase`, `It runs in the ${a.phases.join(" and ") || "no"} phase.`];
-  return [
-    "success",
-    "On",
-    `Jobs scoring ${a.minScore} or more with verified practice evidence${a.allowConcerns ? "" : " and no concerns raised"} are approved for you.`,
-  ];
-}
+// Turning hold-back off or on changes what happens to every job at a target employer, so it is asked first.
+const holdBackConfirm =
+  (s: Summary) =>
+  (next: unknown): Confirm | null =>
+    next === false
+      ? {
+          title: "Stop holding back target employers?",
+          description: `Jobs at target employers are applied to from now on${s.approval === "auto" ? ", and auto-apply may approve them" : ""}, scored on the real rubric. The jobs held back at them go back through triage to be assessed again; jobs you held yourself stay held.`,
+          confirm: "Stop holding back",
+          danger: true,
+          then: () => api.run("release_targets"),
+        }
+      : next === true
+        ? {
+            title: "Hold back target employers?",
+            description: "New jobs at target employers are set aside in Archive → Held instead of applied to. Applications already under way carry on.",
+            confirm: "Hold them back",
+          }
+        : null;
 
 function General({ s }: { s: Summary }) {
   const held = s.counts["held"] ?? 0;
+  const t = s.thresholds;
   return (
     <SettingsPanel id="general" title="General" footer={<SavedLocally />}>
       <ConfigRow
-        path="phase"
-        label="Phase"
+        path="approval"
+        label="Approval"
         description={
-          s.phase === "practice"
-            ? "Applies only where your real search wouldn't, to practise. Everything else is held for the real search."
-            : "Applies to the jobs you're after, the roles in the Real phase section of profile/targets.md."
+          s.approval === "auto"
+            ? "The app approves the jobs that clear the auto-apply bar and sends every application without asking. Jobs you add by hand, and questions it can't answer, still wait for you."
+            : "You approve every job in Review, and OK every filled-in application before it's sent."
         }
-        field={{ kind: "choice", options: PHASES }}
+        field={{ kind: "choice", options: APPROVALS }}
       />
-      {s.phase === "practice" && (
-        <SettingRow label="Held for the real search" description="They go back through triage once you switch phase.">
+      <ConfigRow
+        path="targets.holdBack"
+        label="Hold back target employers"
+        description={
+          s.targets.holdBack
+            ? "Jobs at target employers are set aside for later; everything else is applied to, as practice."
+            : "Jobs at target employers are applied to as well, scored on the real rubric."
+        }
+        field={{ kind: "bool" }}
+        confirm={holdBackConfirm(s)}
+      />
+      <ConfigRow
+        path="targets.describe"
+        label="Target employers"
+        description={
+          <>
+            Besides the frontier list in{" "}
+            <a className="text-accent-text underline-offset-2 hover:underline" href={href("profile", "employers.yml")}>
+              employers.yml
+            </a>
+            , any employer the assessment judges to fit this description. Empty: the list alone. Changing it judges employers afresh.
+          </>
+        }
+        field={{ kind: "words", placeholder: "The list alone" }}
+      />
+      {s.targets.holdBack && (
+        <SettingRow label="Held for later" description="Jobs at target employers go back through triage once you stop holding them back.">
           <span className="tabular font-medium">{num(held)}</span>
           <Button asChild size="sm" variant="link" className="-my-1 px-0 touch:-my-1.5 touch:px-0">
             <a href={href("archive", "held")}>View</a>
           </Button>
         </SettingRow>
       )}
-      {s.threshold != null && (
-        <SettingRow label="Fit threshold" description="Postings that score below it are skipped. Set in profile/rubric.yml, on the Profile page.">
-          <span className="tabular font-medium">{s.threshold}</span>
+      {t && (
+        <SettingRow label="Fit thresholds" description="Postings that score below them are skipped. Set in profile/rubric.yml, on the Profile page.">
+          <span className="tabular">
+            Practice <span className="font-medium">{t.practice}</span>, real <span className="font-medium">{t.real}</span>
+          </span>
         </SettingRow>
       )}
-      <ConfigRow
-        path="confirmBeforeSubmit"
-        label="Confirm before submitting"
-        description={
-          s.confirmBeforeSubmit ? "Applications you approve stop for your OK before they're sent." : "Applications you approve are sent without asking again."
-        }
-        field={{ kind: "bool" }}
-      />
       <SettingRow stack label="Add a posting" description="Paste a job URL to have it assessed like any posting a scan finds.">
         <Button
           size="sm"
@@ -146,20 +174,24 @@ function General({ s }: { s: Summary }) {
 
 function AutoApply({ s }: { s: Summary }) {
   const a = s.autoApply;
-  const [tone, label, note] = autoState(s);
-  const on = tone === "success";
-  const autoSubmits = on && a.submit;
-  const confirmNote =
-    (s.confirmBeforeSubmit ? "Manual approvals require your OK before submitting." : "Manually approved jobs submit without confirmation.") +
-    (autoSubmits ? " Eligible auto-approved jobs submit directly." : " Auto-approved jobs still require your OK before submitting.");
   const used = Math.min(1, a.perDay ? a.approvedToday / a.perDay : 0);
   return (
-    <SettingsPanel id="auto-apply" title="Auto apply" description="Approves practice jobs for you, so they skip Review." footer={<SavedLocally />}>
-      <SettingRow label="Status" description={note}>
-        <StatusLabel tone={tone} label={label} className="text-fg" />
+    <SettingsPanel
+      id="auto-apply"
+      title="Auto-apply"
+      description="The bar for the approvals the app gives itself while Approval is Auto-apply."
+      footer={<SavedLocally />}
+    >
+      <SettingRow
+        label="Status"
+        description={
+          a.enabled
+            ? `Jobs scoring ${a.minScore} or more${a.allowConcerns ? "" : " with no concerns raised"} are approved and sent for you.`
+            : "Approval is Gated: every application waits for you in Review."
+        }
+      >
+        <StatusLabel tone={a.enabled ? "success" : "neutral"} label={a.enabled ? "On" : "Off"} className="text-fg" />
       </SettingRow>
-      <ConfigRow path="autoApply.enabled" label="Auto apply" description="Off: every application waits for you in Review." field={{ kind: "bool" }} />
-      <ConfigRow path="autoApply.phases" label="Runs in" field={{ kind: "choices", options: PHASES }} />
       <ConfigRow
         path="autoApply.minScore"
         label="Minimum fit"
@@ -195,25 +227,20 @@ function AutoApply({ s }: { s: Summary }) {
           </span>
         </div>
       </SettingRow>
-      <ConfigRow
-        path="autoApply.submit"
-        label="Submits on its own"
-        description={a.submit ? "Approved jobs are sent without your confirmation." : "Approved jobs still stop for your OK before they're sent."}
-        field={{ kind: "bool" }}
-      />
       <SettingFold>
-        <Disclosure id="settings-auto" summary="How auto apply decides">
+        <Disclosure id="settings-auto" summary="How auto-apply decides">
           <div className="space-y-3">
             <p>
-              <span className="font-medium text-fg">Practice gate. </span>A job counts as practice only when its employer is one your real search rules out: on
-              your practice list, or judged an early-stage startup, a non-tech enterprise, an IT services firm or consultancy, or government. Employers on your
-              frontier list, and every tech company at scale (a rejection there follows you across its teams), are held back for the real search. Pay, location
-              and a low real score are not practice proof.
+              <span className="font-medium text-fg">Target employers. </span>
+              {s.targets.holdBack
+                ? "While they are held back, a job counts as practice only when its employer is not a target: on your practice list, or judged not to fit your description of a target employer and not on your frontier list. Anything else is held for later. Pay, location and a low real score are not practice proof."
+                : "They are not held back, so a job at one may be approved too, on its real-rubric score. Its employer must still have been judged."}
             </p>
             <p>
-              <span className="font-medium text-fg">Safeguards. </span>Missing practice proof is held back (not spent); low fit or failed qualifications are
-              skipped. Hand-picked postings{a.allowConcerns ? "" : " and jobs with concerns"} wait in Review.
-              {a.allowConcerns ? " Concerns alone do not block a proven practice role." : ""} Invalid auto-approvals are held before fill. {confirmNote}
+              <span className="font-medium text-fg">Safeguards. </span>Missing employer evidence never qualifies; low fit or failed qualifications are skipped.
+              Hand-picked postings{a.allowConcerns ? "" : " and jobs with concerns"} wait in Review.
+              {a.allowConcerns ? " Concerns alone do not block a job." : ""} Auto-approvals that no longer qualify are held before they fill, and stop for your
+              OK before they're sent.
             </p>
           </div>
         </Disclosure>
@@ -282,7 +309,9 @@ function DangerZone({ s }: { s: Summary }) {
         stack
         label="Release held jobs"
         description={
-          held ? `Send all ${plural(held, "held job")} back through triage, where each is assessed again against the current phase.` : "No jobs are held back."
+          held
+            ? `Send all ${plural(held, "held job")} back through triage, where each is assessed again against the current targets.`
+            : "No jobs are held back."
         }
       >
         <Button

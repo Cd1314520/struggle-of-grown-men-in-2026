@@ -22,10 +22,27 @@ questionDigest:
   time: "09:00"
   timeZone: America/Chicago
 
-# practice = apply only where the employer is one the real search rules out (startup, non-tech, IT services,
-#            government; never a tech company at scale); profile/employers.yml settles employers by hand.
-# real = apply to the roles in the Real phase section of profile/targets.md.
-phase: practice
+# Who gives the go-ahead for an application.
+#   auto   the app approves the jobs that clear autoApply below, and sends every application without
+#          asking again. Jobs you add or send back by hand, and questions the agent can't answer, still wait for you.
+#   gated  you approve every job in Review, and OK every filled-in application before it is sent.
+approval: auto
+
+# Target employers: the ones you are saving for later. The frontier list in profile/employers.yml, plus
+# any employer the assessment judges to fit `describe` (empty or null: the list alone).
+#   holdBack: true   their jobs are set aside in Archive → Held, and the rest are applied to (practice)
+#   holdBack: false  they are applied to as well; a target's job is scored on the `real` rubric in
+#                    profile/rubric.yml, any other on the `practice` one
+# Judgments are remembered per employer against these exact words: changing them judges employers afresh.
+targets:
+  holdBack: true
+  describe: >-
+    A software or tech-first company past early stage (roughly 300+ people, or a large established product)
+    whose core product is the software, including well-funded, scaled AI-native companies. Not an early-stage
+    startup, a non-tech business (insurance, banking, energy, healthcare, retail, manufacturing, logistics,
+    media, education), an IT services, consulting or staffing firm, or government and its contractors. Who
+    the customers are does not decide it: a tech company at scale that sells its own products to governments
+    counts.
 
 # Models per stage. null = whatever omp's default role resolves to. A claude-code/<model> one (claude-code/opus,
 # claude-code/sonnet, ...) runs on Claude Code instead of omp (docs/harnesses.md). Settings → Models changes them
@@ -43,21 +60,13 @@ models:
 
 # Scoring weights and thresholds live in profile/rubric.yml.
 
-# Keep final approval for manual jobs; eligible auto-approved practice jobs use autoApply.submit.
-confirmBeforeSubmit: true
-
-# Auto apply: let the app give approvals itself. Off = every application waits for you at gate 1.
-# Fresh assessments must prove definite-practice eligibility and clear the interview-fit rubric.
-# Missing/old practice evidence never qualifies. Hand-picked jobs and unclear requirements wait
-# for review; ordinary concerns do not veto an eligible job.
+# The bar for the approvals the app gives itself (approval: auto). A practice job must also be proven
+# one: its employer judged not a target. Anything that misses the bar waits for you in Review.
 autoApply:
-  enabled: true
-  phases: [practice] # phases in which it runs
-  minScore: 60 # align with the practice interview-fit threshold; score alone never authorizes practice
+  minScore: 60 # align with the practice interview-fit threshold; score alone never makes a job practice
   allowConcerns: true # expected dealbreakers are the point; hard requirements and evidence gates still apply
   perDay: 100 # auto-approvals a day; limits.applyPerDay still caps new applications
   perEmployer: 1 # applications per employer, ever (sent or under way); further passing roles there wait for your review
-  submit: true # only eligible auto-approved jobs skip gate 2; manual approvals still pause
 
 # Minutes between automatic runs. 0 disables that run (use the UI buttons).
 #   scan      re-reads every watched company board and the feeds below; only new postings cost anything

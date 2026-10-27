@@ -5,7 +5,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import YAML from "yaml";
-import { config, LOCAL_CONFIG, overlay, ROOT, started } from "./config";
+import { config, LOCAL_CONFIG, overlay, ROOT, started, upgrade } from "./config";
 import { configProblems } from "./config-check";
 
 // Read once, at start: the server's port, the browsers and their ports (started with the app, one per
@@ -16,8 +16,8 @@ const needsRestart = (path: readonly string[]) => RESTART.some(prefix => path.jo
 const isSection = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const getIn = (value: unknown, path: readonly string[]): unknown => path.reduce<unknown>((at, key) => (isSection(at) ? at[key] : undefined), value);
 
-export const readBase = (): unknown => YAML.parse(readFileSync(join(ROOT, "config.yml"), "utf8"));
-const readLocal = (file: string): unknown => (existsSync(file) ? YAML.parse(readFileSync(file, "utf8")) : null) ?? {};
+export const readBase = (): unknown => upgrade(YAML.parse(readFileSync(join(ROOT, "config.yml"), "utf8")));
+const readLocal = (file: string): unknown => upgrade((existsSync(file) ? YAML.parse(readFileSync(file, "utf8")) : null) ?? {});
 
 // The settings as the files have them (what the app runs with, or will after a restart), which of them
 // config.local.yml sets, and those saved but not yet in use.
@@ -46,7 +46,7 @@ export function setSetting(path: readonly string[], value: unknown, file = LOCAL
     }
   } else doc.setIn(path, doc.createNode(value));
   const text = doc.toString();
-  const merged = overlay(readBase(), YAML.parse(text) ?? {});
+  const merged = overlay(readBase(), upgrade(YAML.parse(text) ?? {}));
   const problems = configProblems(merged);
   if (problems.length) throw new Error(problems[0]);
   const staged = join(dirname(file), ".config.local.yml.tmp");

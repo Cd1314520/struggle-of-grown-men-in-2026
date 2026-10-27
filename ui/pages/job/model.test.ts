@@ -4,36 +4,41 @@ import type { Gate } from "../../../src/questions";
 import { decisionOf, enteredOf, leadOf, practiceOf, setAsideOf, stepStateOf, timelineOf } from "./model";
 
 const job = (assessment: object | null) => ({ score: 70, practice_assessment: assessment && JSON.stringify(assessment) }) as JobDetail;
-const judged = { version: 3, agentNative: "unclear", agentNativeEvidence: "", listed: null };
+const judged = { version: 4, agentNative: "unclear", agentNativeEvidence: "", listed: null, against: "k" };
+const HELD = { holdBack: true, describe: "A tech company at scale" };
 
 describe("practice eligibility on the job page", () => {
-  it("reads the assessments the server writes today (version 3)", () => {
-    const p = practiceOf(job({ ...judged, employerType: "non_tech_enterprise", employerEvidence: "Regional insurer; internal claims tooling" }), "practice");
+  it("reads the assessments the server writes today (version 4)", () => {
+    const p = practiceOf(job({ ...judged, target: "no", employerEvidence: "Regional insurer; internal claims tooling" }), HELD);
     expect(p?.verdict).toBe("Eligible");
-    expect(p?.rows).toContainEqual(["Employer", "Non-tech enterprise", "Regional insurer; internal claims tooling"]);
+    expect(p?.rows).toContainEqual(["Employer", "Not a target employer", "Regional insurer; internal claims tooling"]);
     expect(p?.rows).toContainEqual(["Agent adoption", "Not clear from the posting", ""]);
   });
 
+  it("reads a version 3 employer type as a judgment against targets", () => {
+    const p = practiceOf(job({ ...judged, version: 3, employerType: "tech_scaled", employerEvidence: "Payments infrastructure" }), HELD);
+    expect(p?.verdict).toBe("Not eligible");
+    expect(p?.rows).toContainEqual(["Employer", "A target employer", "tech company at scale: Payments infrastructure"]);
+  });
+
   it("gives the server's reason when a job is not for practice", () => {
-    const p = practiceOf(job({ ...judged, employerType: "tech_scaled", employerEvidence: "Payments infrastructure", listed: "frontier" }), "practice");
+    const p = practiceOf(job({ ...judged, target: "yes", employerEvidence: "Payments infrastructure", listed: "frontier" }), HELD);
     expect(p?.verdict).toBe("Not eligible");
     expect(p?.reason).toBe("The employer is on your frontier list");
     expect(p?.rows[0]).toEqual(["Your lists", "On your frontier list", ""]);
   });
 
   it("reads older versions as not judged, and says so when nothing usable is stored", () => {
-    const old = practiceOf(
-      job({ version: 2, annualBaseMaxUsd: 60000, salaryEvidence: "$60k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }),
-      "practice",
-    );
+    const old = practiceOf(job({ version: 2, annualBaseMaxUsd: 60000, salaryEvidence: "$60k", mandatoryNonlocalOnsite: "no", locationEvidence: "" }), HELD);
     expect(old?.verdict).toBe("Not eligible");
     expect(old?.rows.map(r => r[1])).toEqual(["Not judged", "Not judged"]);
-    expect(practiceOf(job(null), "practice")?.verdict).toBe("Not assessed");
+    expect(practiceOf(job(null), HELD)?.verdict).toBe("Not assessed");
   });
 
-  it("stays out of the way in the real phase unless the job was assessed for it", () => {
-    expect(practiceOf(job(null), "real")).toBeNull();
-    expect(practiceOf(job({ ...judged, employerType: "startup", employerEvidence: "Seed stage" }), "real")?.verdict).toBe("Eligible");
+  it("stays out of the way when nothing is held back, unless the job was assessed for it", () => {
+    const open = { holdBack: false, describe: "" };
+    expect(practiceOf(job(null), open)).toBeNull();
+    expect(practiceOf(job({ ...judged, target: null, employerEvidence: "Seed stage" }), open)?.verdict).toBe("Eligible");
   });
 });
 

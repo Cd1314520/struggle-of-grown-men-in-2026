@@ -2,7 +2,6 @@
 // most recently opened first, when there is allowance again.
 import { existsSync } from "node:fs";
 import { autoApply, reconsiderAutoApproval } from "./auto";
-import { config } from "./config";
 import { db, employerApplications, getJob, openedAt, kvDelete, kvEntries, kvGet, kvSet, logEvent, notifyJobChange, updateJob, writeJob } from "./db";
 import { countOne, usedToday } from "./limits";
 import { profileProblems } from "./profile";
@@ -16,7 +15,7 @@ export const forgetDeferredApproval = (jobId: number) => kvDelete(`${DEFERRED_PR
 export function pumpDeferredApprovals() {
   if (profileProblems().length > 0) return;
   const rules = autoApply();
-  if (!rules.enabled || !rules.phases.includes(config.phase)) return;
+  if (!rules.enabled) return;
 
   const limit = rules.perDay;
   if (usedToday("auto") >= limit) return;

@@ -22,7 +22,7 @@ const fingerprint = () =>
   createHash("sha256")
     .update(
       JSON.stringify([
-        config.phase,
+        config.targets.holdBack,
         readProfile("personal.yml"),
         readProfile("answers.md"),
         readPrompt("recheck"),

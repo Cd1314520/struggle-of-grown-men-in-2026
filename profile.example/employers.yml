@@ -4,10 +4,10 @@
 # employer is, so a listed employer overrides what the assessment judges. Names match the way jobs
 # are grouped by employer (case, punctuation and Inc/LLC ignored). Edits take effect on the next job.
 #
-#   frontier  the employers you most want: the real targets. Never spent on practice; held during the
-#             practice phase.
-#   practice  employers the real search rules out: always fine to practise on. A tech company at
-#             scale is never practice on its own judgment; listing it here is the only way.
+#   frontier  the employers you most want: always target employers, whatever targets.describe in
+#             config.yml says. Never spent on practice; held while target employers are held back.
+#   practice  employers that are never targets: always fine to practise on. An employer judged to fit
+#             targets.describe is never practice on its own judgment; listing it here is the only way.
 
 frontier: []
 

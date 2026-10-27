@@ -46,8 +46,7 @@ globalThis.fetch = Object.assign(
 
 const { config, jobDir } = await import("../../../src/config");
 config.schedule = { scanMinutes: 0, discoverMinutes: 0, trackMinutes: 0 }; // nothing runs unasked
-config.autoApply = { enabled: false }; // every application waits at gate 1
-config.confirmBeforeSubmit = true; // and again at gate 2
+config.approval = "gated"; // every application waits at gate 1, and again at gate 2
 config.concurrency.fill = 1;
 config.fillPauseSeconds = [0, 0];
 config.limits.applySpreadHours = 0; // a new application starts as soon as the slot is free, not ~14 min apart

@@ -156,14 +156,16 @@ if (scenario === "action-guards") {
   for (let i = 0; i < 3; i++) assert.equal((await handle(new Request(`${BASE}/api/state`))).status, 200);
   assert.equal(errors(), 1);
 } else if (scenario === "standing-approvals") {
-  config.phase = "practice";
+  config.approval = "auto";
+  config.targets.holdBack = true;
   const practice = {
-    version: 3,
-    employerType: "non_tech_enterprise",
+    version: 4,
+    target: "no",
     employerEvidence: "Insurer, internal tools",
     agentNative: "unclear",
     agentNativeEvidence: "",
     listed: null,
+    against: "k",
   };
   // Made under the pay and location rules, which never judged the employer.
   const oldRules = { version: 2, annualBaseMaxUsd: null, salaryEvidence: "", mandatoryNonlocalOnsite: "yes", locationEvidence: "Onsite in Denver" };
@@ -177,7 +179,7 @@ if (scenario === "action-guards") {
     );
     return id;
   };
-  const kept = approved({ ...practice, employerType: "tech_scaled", employerEvidence: "Autonomy company at scale" });
+  const kept = approved({ ...practice, target: "yes", employerEvidence: "Autonomy company at scale" });
   const ordinary = approved(practice);
   writeFileSync(join(PROFILE, "employers.yml"), "frontier: [Stripe]\n");
   const listed = approved(practice, { company: "Stripe, Inc." });
@@ -192,10 +194,7 @@ if (scenario === "action-guards") {
   for (const id of [ordinary, byHand, started]) assert.equal(statusOf(id), "approved", `job ${id}`);
   // No longer a practice job: held for the user, with the reason, and no longer approved.
   assert.equal(statusOf(kept), "held");
-  assert.equal(
-    getJob(kept)?.note,
-    "needs your review: auto-approved, but not a practice job: a tech company at scale, kept for the real search (Autonomy company at scale)",
-  );
+  assert.equal(getJob(kept)?.note, "needs your review: auto-approved, but not a practice job: a target employer, kept for later (Autonomy company at scale)");
   assert.equal(getJob(kept)?.approved_by, null);
   // The employer lists as they stand now, over what was stored.
   assert.equal(statusOf(listed), "held");
@@ -214,9 +213,9 @@ if (scenario === "action-guards") {
   assert.equal(statusHistory(kept).length, 1);
   assert.equal(statusOf(ordinary), "approved");
 
-  // Outside the practice phase the practice rules do not apply.
-  config.phase = "real";
-  const real = approved({ ...practice, employerType: "tech_scaled" });
+  // With target employers no longer held back, the practice rules do not apply.
+  config.targets.holdBack = false;
+  const real = approved({ ...practice, target: "yes" });
   reviewStandingApprovals();
   assert.equal(statusOf(real), "approved");
 } else if (scenario === "steps") {

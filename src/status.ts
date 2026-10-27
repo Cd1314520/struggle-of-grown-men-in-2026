@@ -18,7 +18,7 @@ import type { Job, JobFields } from "./db";
  * interview         the employer came back with a next step (see steps.ts); shown as "In process"
  * offer / rejected_by_company   outcomes seen in mail, or recorded by the user
  * withdrawn         the user pulled out of an application that was sent
- * held              good match set aside during the practice phase; released later
+ * held              good match set aside for later (a target employer held back, or by hand); released later
  * skipped           triage or score said no
  * rejected          user said no
  * failed            worker errored; can be retried

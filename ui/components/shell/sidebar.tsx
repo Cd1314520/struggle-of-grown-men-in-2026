@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import type { Summary } from "../../../src/api-types";
 import { api, refreshAll, useSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
-import { ago, cap } from "../../lib/format";
+import { ago } from "../../lib/format";
 import { modKey } from "../../lib/hotkeys";
 import { href, useRoute } from "../../lib/router";
 import { setTheme, useTheme } from "../../lib/theme";
@@ -98,7 +98,7 @@ function WorkspaceMenu() {
   );
 }
 
-// What the machine is doing, at the foot of the sidebar: the phase, the last scan, and a way to scan now.
+// What the machine is doing, at the foot of the sidebar: how it applies, the last scan, and a way to scan now.
 function SystemStatus({ summary }: { summary: Summary | undefined }) {
   if (!summary) return null;
   const scanning = summary.running.scan;
@@ -106,7 +106,9 @@ function SystemStatus({ summary }: { summary: Summary | undefined }) {
     <div className="rounded-lg border border-border bg-surface p-3 shadow-xs">
       <div className="flex items-center gap-2">
         <StatusDot tone={scanning ? "info" : summary.setupRemaining ? "warning" : "success"} pulse={scanning} />
-        <span className="flex-1 text-sm font-medium text-fg">{scanning ? "Scanning…" : `${cap(summary.phase)} phase`}</span>
+        <span className="flex-1 text-sm font-medium text-fg">
+          {scanning ? "Scanning…" : `${summary.approval === "auto" ? "Auto-apply" : "Gated"}${summary.targets.holdBack ? ", targets held" : ""}`}
+        </span>
         <Tooltip content="Scan job boards now">
           <button
             type="button"

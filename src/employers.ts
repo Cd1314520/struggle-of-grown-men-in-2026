@@ -3,8 +3,8 @@
 // assessment judges: `frontier` ones are never spent on practice, `practice` ones always may be.
 import YAML from "yaml";
 import { companyKey, employerAssessments, type Job } from "./db";
-import { readProfile } from "./config";
-import { parsePracticeAssessment, type Listed, type PracticeAssessment } from "./practice";
+import { config, readProfile } from "./config";
+import { parsePracticeAssessment, targetsKey, type Listed, type PracticeAssessment } from "./practice";
 
 interface EmployerLists {
   frontier: string[];
@@ -37,17 +37,19 @@ export function employersText(lists = loadEmployers()) {
   return `- Frontier (agent-native, at scale; real targets): ${line(lists.frontier)}\n- Practice (behind; fine to practise on): ${line(lists.practice)}`;
 }
 
-// What earlier assessments made of a job's employer, so one employer is judged the same way every
-// time. One that judged it a tech company at scale settles it: holding a job back costs a review,
-// while practising on a frontier employer costs its record of the candidate. Otherwise the most recent
-// judgment stands. Only full assessments count, not the copies held jobs carry. `jobId` is the job the
-// judgment was made on.
+// What earlier assessments made of a job's employer against the description of a target employer in
+// use now, so one employer is judged the same way every time. One that judged it a target settles it:
+// holding a job back costs a review, while practising on a target costs its record of the candidate.
+// Otherwise the most recent judgment stands. Only full assessments count, not the copies held jobs
+// carry. `jobId` is the job the judgment was made on.
 export function rememberedEmployer(job: Pick<Job, "id" | "company_key">): { assessment: PracticeAssessment; jobId: number } | null {
+  const key = targetsKey(config.targets.describe ?? "");
+  if (!key) return null;
   let latest = null as { assessment: PracticeAssessment; jobId: number } | null;
   for (const row of employerAssessments(job)) {
     const assessment = parsePracticeAssessment(row.practice_assessment);
-    if (!assessment?.employerType) continue;
-    if (assessment.employerType === "tech_scaled") return { assessment, jobId: row.id };
+    if (!assessment?.target || assessment.against !== key) continue;
+    if (assessment.target === "yes") return { assessment, jobId: row.id };
     latest ??= { assessment, jobId: row.id };
   }
   return latest;

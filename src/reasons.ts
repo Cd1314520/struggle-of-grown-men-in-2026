@@ -2,7 +2,7 @@
 // same few notes, so the reason names what tells one from another and leaves the rest (the employer's
 // size evidence, the score again) to `detail`, which the list shows on hover.
 import type { BlockerCause } from "./blockers";
-import { EMPLOYER_LABELS, type Listed } from "./practice";
+import type { Listed } from "./practice";
 import type { GateKind } from "./questions";
 import type { Status } from "./status";
 
@@ -24,9 +24,11 @@ const strip = (note: string) =>
     .replace(/^cleared:\s*/i, "")
     .replace(/;\s*real score \d+ \(threshold \d+\)$/i, "");
 
-// The words practice.ts judges employers in, so its notes and these reasons cannot drift apart.
+// The words practice.ts judges employers in, so its notes and these reasons cannot drift apart. Notes
+// written before targets were described in words name the one employer type that was a target.
 const FRONTIER: Listed = "frontier";
-const TECH_SCALED = EMPLOYER_LABELS.tech_scaled;
+const TARGET = "a target employer";
+const TECH_SCALED = "tech company at scale";
 
 // Keyed by kind, so a new gate kind or stop cause fails the typecheck until it has words here.
 const GATE: Record<GateKind, string> = {
@@ -57,9 +59,10 @@ const matches = (re: RegExp, label: string) => (note: string) => (re.test(note) 
 type Rule = readonly [label: (note: string) => string | null, detail?: string | ((note: string) => string)];
 const RULES: readonly Rule[] = [
   // Triage (scan.ts) sees only the title, company and place.
-  [matches(/^held back during the \w+ phase$/i, "Held at triage"), "Held back on the title, company and place alone, before a full assessment"],
+  [matches(/^held back (at triage|during the \w+ phase)$/i, "Held at triage"), "Held back on the title, company and place alone, before a full assessment"],
   [n => (n.toLowerCase().includes(FRONTIER) ? "Frontier employer" : null)],
-  // practiceVerdict's "a tech company at scale, kept for the real search (<the assessment's evidence>)".
+  // practiceVerdict's "a target employer, kept for later (<the assessment's evidence>)".
+  [n => (n.toLowerCase().includes(TARGET) ? "Target employer" : null), n => /\((.+)\)(; .*)?$/.exec(n)?.[1] ?? cap(n)],
   [n => (n.toLowerCase().includes(TECH_SCALED) ? cap(TECH_SCALED) : null), n => /\((.+)\)$/.exec(n)?.[1] ?? cap(n)],
   // employerCapNote (auto.ts), and the wordings before it: "second parked role at X (auto apply allows 1 per employer)".
   [matches(/\(auto apply allows \d+/i, "Already applying at this employer")],

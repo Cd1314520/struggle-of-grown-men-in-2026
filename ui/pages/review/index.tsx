@@ -12,6 +12,7 @@ import { TABLET, useMedia, WIDE } from "../../lib/media";
 import { setParams } from "../../lib/router";
 import { JobDetail } from "../job/detail";
 import { QueueRow } from "./queue-row";
+import { thresholdOf } from "../job/model";
 
 const SORTS = [
   { value: "newest", label: "Newest" },
@@ -28,7 +29,6 @@ export function ReviewPage() {
   const record = useOpenRecord({ base: "review", view: "review", lp, search, autoOpen: wide });
   const { data: list, query, openId } = record;
   const { data: summary } = useSummary();
-  const threshold = summary?.threshold ?? null;
 
   if (list?.all === 0) return <AllClear />;
 
@@ -136,7 +136,7 @@ export function ReviewPage() {
             return (
               <div key={job.id} className="contents">
                 {heading}
-                <QueueRow job={job} threshold={threshold} underCompany={clustered} link={record.rowProps(job.id)} />
+                <QueueRow job={job} threshold={thresholdOf(job.rubric, summary)} underCompany={clustered} link={record.rowProps(job.id)} />
               </div>
             );
           })

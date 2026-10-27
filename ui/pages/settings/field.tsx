@@ -4,7 +4,7 @@
 import { RotateCcw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { Button, Checkbox, Combobox, Input, Select, Switch, Tooltip, type Option } from "../../components/ui";
+import { Button, Checkbox, Combobox, ConfirmDialog, Input, Select, Switch, Textarea, Tooltip, type Option } from "../../components/ui";
 import { api, queryClient, refreshAll, useSettings } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { SettingRow } from "./parts";
@@ -14,6 +14,8 @@ export type FieldKind =
   | { kind: "number"; min?: number; step?: number; unit?: string }
   | { kind: "pair"; min?: number; step?: number; unit?: string }
   | { kind: "text"; type?: "text" | "url" | "email"; nullable?: boolean; placeholder?: string; mono?: boolean; short?: boolean }
+  // Free text over several lines; empty saves null.
+  | { kind: "words"; placeholder?: string }
   | { kind: "list"; placeholder?: string }
   | { kind: "choice"; options: readonly Option[] }
   | { kind: "choices"; options: readonly Option[] }
@@ -47,6 +49,8 @@ function Typed({
   placeholder?: string;
   min?: number;
   step?: number;
+  // A box of several lines: Enter starts a new one, Ctrl/⌘+Enter saves.
+  multiline?: boolean;
 }) {
   const [draft, setDraft] = useState(value);
   // A value saved (or changed elsewhere) since replaces the text.
@@ -63,25 +67,24 @@ function Typed({
       setDraft(value);
     } else if (!(await onCommit(parsed.value))) setDraft(value);
   };
-  return (
-    <Input
-      {...props}
-      value={draft}
-      disabled={disabled}
-      onChange={e => {
-        setDraft(e.target.value);
-      }}
-      onBlur={() => void commit()}
-      onKeyDown={e => {
-        if (e.key === "Enter") e.currentTarget.blur();
-        if (e.key === "Escape") {
-          setDraft(value);
-          e.currentTarget.blur();
-        }
-      }}
-      className={className}
-    />
-  );
+  const { multiline, ...rest } = props;
+  const editing = {
+    value: draft,
+    disabled,
+    onChange: (e: { target: { value: string } }) => {
+      setDraft(e.target.value);
+    },
+    onBlur: () => void commit(),
+    onKeyDown: (e: { key: string; ctrlKey: boolean; metaKey: boolean; currentTarget: HTMLElement }) => {
+      if (e.key === "Enter" && (!multiline || e.ctrlKey || e.metaKey)) e.currentTarget.blur();
+      if (e.key === "Escape") {
+        setDraft(value);
+        e.currentTarget.blur();
+      }
+    },
+    className,
+  };
+  return multiline ? <Textarea {...rest} {...editing} /> : <Input {...rest} {...editing} />;
 }
 
 const number = (min: number | undefined, step: number | undefined) => (text: string) => {
@@ -167,6 +170,19 @@ function Control({
           className={cn(field.short ? "w-24" : "w-full sm:w-72", field.mono && "font-mono")}
         />
       );
+    case "words":
+      return (
+        <Typed
+          multiline
+          aria-label={label}
+          value={typeof value === "string" ? value : ""}
+          placeholder={field.placeholder ?? "Not set"}
+          parse={text => ({ value: text.trim().replace(/\s+/g, " ") || null })}
+          onCommit={save}
+          disabled={busy}
+          className="min-h-28 w-full"
+        />
+      );
     case "list":
       return (
         <Typed
@@ -231,19 +247,43 @@ function Control({
   }
 }
 
-// `path`: the setting's keys, dotted ("schedule.scanMinutes").
-export function ConfigRow({ path, label, description, field }: { path: string; label: string; description?: ReactNode; field: FieldKind }) {
+// What to ask before a change is saved, and what to do once it is.
+export interface Confirm {
+  title: string;
+  description: string;
+  confirm: string;
+  danger?: boolean;
+  then?: () => Promise<unknown>;
+}
+
+// `path`: the setting's keys, dotted ("schedule.scanMinutes"). `confirm`, when it gives one for the
+// new value, is asked first; a reset to config.yml's value is not asked about.
+export function ConfigRow({
+  path,
+  label,
+  description,
+  field,
+  confirm,
+}: {
+  path: string;
+  label: string;
+  description?: ReactNode;
+  field: FieldKind;
+  confirm?: (next: unknown) => Confirm | null;
+}) {
   const { data } = useSettings();
   const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState<{ next: unknown; spec: Confirm } | null>(null);
   const keys = path.split(".");
   const value = getIn(data?.values, keys);
   const changed = getIn(data?.local, keys) !== undefined;
   const restart = under(path, data?.restart ?? []);
   const waiting = under(path, data?.pending ?? []) && changed;
-  const save = async (next: unknown) => {
+  const save = async (next: unknown, then?: () => Promise<unknown>) => {
     setBusy(true);
     try {
       const r = await api.setSetting(keys, next);
+      await then?.();
       toast.success(next === undefined ? `${label} reset` : `${label} saved`, r.restart ? { description: "Used from the next restart." } : undefined);
       await queryClient.invalidateQueries({ queryKey: ["settings"] });
       void refreshAll();
@@ -255,10 +295,23 @@ export function ConfigRow({ path, label, description, field }: { path: string; l
       setBusy(false);
     }
   };
-  const wide = (field.kind === "text" && !field.short) || field.kind === "pair" || field.kind === "list" || field.kind === "zone" || field.kind === "choices";
+  const ask = (next: unknown) => {
+    const spec = confirm?.(next);
+    if (!spec) return save(next);
+    setAsking({ next, spec });
+    return Promise.resolve(false);
+  };
+  const wide =
+    (field.kind === "text" && !field.short) ||
+    field.kind === "words" ||
+    field.kind === "pair" ||
+    field.kind === "list" ||
+    field.kind === "zone" ||
+    field.kind === "choices";
   return (
     <SettingRow
       stack={wide}
+      block={field.kind === "words"}
       label={label}
       description={
         (description || restart) && (
@@ -282,8 +335,21 @@ export function ConfigRow({ path, label, description, field }: { path: string; l
               </Button>
             </Tooltip>
           )}
-          <Control field={field} value={value} label={label} save={save} busy={busy} />
+          <Control field={field} value={value} label={label} save={ask} busy={busy} />
         </>
+      )}
+      {asking && (
+        <ConfirmDialog
+          open
+          onOpenChange={open => {
+            if (!open) setAsking(null);
+          }}
+          title={asking.spec.title}
+          description={asking.spec.description}
+          confirm={asking.spec.confirm}
+          danger={asking.spec.danger ?? false}
+          onConfirm={() => void save(asking.next, asking.spec.then)}
+        />
       )}
     </SettingRow>
   );

@@ -9,26 +9,37 @@ import { practiceRefusal, type PracticeAssessment } from "../src/practice";
 import { setAsideReason } from "../src/reasons";
 
 const judged = (fields: Partial<PracticeAssessment>): PracticeAssessment => ({
-  version: 3,
-  employerType: "tech_scaled",
+  version: 4,
+  target: "yes",
   employerEvidence: "Smarsh sells an established compliance platform (SaaS) to banks.",
   agentNative: "unclear",
   agentNativeEvidence: "",
   listed: null,
+  against: "k",
   ...fields,
 });
 // The notes as their writers word them: rubric.ts holds a job with "not a practice job: <refusal>;
 // real score …", the fill guard with "needs your review: auto-approved, but not a practice job: …".
-const refusal = (fields: Partial<PracticeAssessment>) => practiceRefusal(judged(fields)) ?? "";
+const refusal = (fields: Partial<PracticeAssessment>) => practiceRefusal(judged(fields), true) ?? "";
 const held = (fields: Partial<PracticeAssessment>) => `not a practice job: ${refusal(fields)}; real score 88 (threshold 65)`;
 
 describe("why a job was set aside", () => {
   it("names what tells one held job from another, without the real-search preamble", () => {
-    expect(setAsideReason("held back during the practice phase")).toEqual({
-      label: "Held at triage",
-      detail: "Held back on the title, company and place alone, before a full assessment",
+    for (const note of ["held back at triage", "held back during the practice phase"])
+      expect(setAsideReason(note)).toEqual({
+        label: "Held at triage",
+        detail: "Held back on the title, company and place alone, before a full assessment",
+      });
+    expect(setAsideReason(held({}))).toEqual({ label: "Target employer", detail: "Smarsh sells an established compliance platform (SaaS) to banks." });
+    // Without the full assessment: the judgment remembered from another job at the employer (prep.ts).
+    expect(
+      setAsideReason("not a practice job: a target employer, as judged on job #12 (Payments platform); held without a full assessment until it is released"),
+    ).toEqual({ label: "Target employer", detail: "Payments platform" });
+    // Notes from before targets were described in words.
+    expect(setAsideReason("not a practice job: a tech company at scale, kept for the real search (Smarsh SaaS); real score 88 (threshold 65)")).toEqual({
+      label: "Tech company at scale",
+      detail: "Smarsh SaaS",
     });
-    expect(setAsideReason(held({}))).toEqual({ label: "Tech company at scale", detail: "Smarsh sells an established compliance platform (SaaS) to banks." });
     expect(setAsideReason(held({ listed: "frontier" }))).toEqual({ label: "Frontier employer", detail: "The employer is on your frontier list" });
     expect(setAsideReason(`needs your review: auto-approved, but not a practice job: ${refusal({ listed: "frontier" })}`)?.label).toBe("Frontier employer");
     expect(setAsideReason(`needs your review: ${employerCapNote(1)}`)?.label).toBe("Already applying at this employer");
@@ -141,7 +152,7 @@ describe("job lists", () => {
 
   it("give held and rejected jobs their reason, and no other view's", () => {
     scenario(`
-      job({ note: "held back during the practice phase" });
+      job({ note: "held back at triage" });
       const turned = job({ status: "awaiting_approval" });
       updateJob(turned, { status: "rejected", note: null });
       job({ status: "awaiting_approval", note: "needs your review: you asked for this one yourself" });

@@ -2,7 +2,7 @@
 // workers are running, which job has which browser) and starts whatever work is waiting. The workers
 // themselves live in scan.ts, locate.ts, prep.ts, fill.ts and track.ts.
 import * as chrome from "./chrome";
-import { browserCount, config } from "./config";
+import { browserCount, config, describing } from "./config";
 import {
   dedupeExisting,
   employerApplications,
@@ -183,7 +183,7 @@ export function reviewStandingApprovals() {
     const guard = checkAutoApprovedPractice(job);
     if (guard.ok) continue;
     forgetDeferredApproval(job.id);
-    if (needsJudgment(parsePracticeAssessment(job.practice_assessment))) {
+    if (needsJudgment(parsePracticeAssessment(job.practice_assessment), describing())) {
       updateJob(job.id, { ...to.triaged("assessing again: the practice rules now judge the employer, not the pay or location"), approved_by: null });
       logEvent("auto", "Auto-approval withdrawn for a fresh assessment under the current practice rules", job.id);
     } else {

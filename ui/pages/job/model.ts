@@ -1,6 +1,6 @@
 // What the open job shows, worked out from the record: no React and no DOM, so the tests read it directly.
-import type { JobDetail } from "../../../src/api-types";
-import { EMPLOYER_LABELS, parsePracticeAssessment, practiceVerdict } from "../../../src/practice";
+import type { JobDetail, Summary } from "../../../src/api-types";
+import { parsePracticeAssessment, practiceVerdict, rubricOf as rubricOfAssessment } from "../../../src/practice";
 import { setAsideReason, type Reason } from "../../../src/reasons";
 import type { Answer, ChecklistItem } from "../../../src/rubric";
 import type { Status } from "../../../src/status";
@@ -9,6 +9,12 @@ import { ago, brief, cap, DAY, dateTime, parseAt } from "../../lib/format";
 import { GATE, STATUS, type Tone } from "../../lib/labels";
 
 export type Phase = "practice" | "real";
+
+// The rubric a job's score is on, as src/rubric.ts scores it.
+export const rubricOf = (j: { practice_assessment?: string | null }, describing: boolean): Phase =>
+  rubricOfAssessment(parsePracticeAssessment(j.practice_assessment), describing);
+// The bar a score on `rubric` is held to.
+export const thresholdOf = (rubric: Phase, summary: Summary | undefined) => summary?.thresholds?.[rubric] ?? null;
 
 // ---- the gate an action answers
 
@@ -150,10 +156,10 @@ export interface Practice {
   reason: string;
   rows: (readonly [label: string, value: string, evidence: string])[];
 }
-// Shown for every job while practising, and afterwards for any job that was assessed for it. The rule is
-// the server's (src/practice.ts), so the page cannot disagree with it.
-export function practiceOf(j: Pick<JobDetail, "practice_assessment">, phase: Phase): Practice | null {
-  if (phase !== "practice" && !j.practice_assessment) return null;
+// Shown for any job assessed for it, and for every job while target employers are held back. The rule
+// is the server's (src/practice.ts), so the page cannot disagree with it.
+export function practiceOf(j: Pick<JobDetail, "practice_assessment">, targets: Summary["targets"]): Practice | null {
+  if (!targets.holdBack && !j.practice_assessment) return null;
   const pa = parsePracticeAssessment(j.practice_assessment);
   if (!pa)
     return {
@@ -162,14 +168,24 @@ export function practiceOf(j: Pick<JobDetail, "practice_assessment">, phase: Pha
       reason: "No valid practice assessment is recorded, so this job is treated as not for practice until it is assessed again",
       rows: [],
     };
-  const { qualifies, reason } = practiceVerdict(pa);
+  const { qualifies, reason } = practiceVerdict(pa, !!targets.describe);
   return {
     verdict: qualifies ? "Eligible" : "Not eligible",
     qualifies,
     reason: cap(reason.replace(/^practice: /, "")),
     rows: [
       ...(pa.listed ? [["Your lists", LISTED[pa.listed], ""] as const] : []),
-      ["Employer", pa.employerType ? cap(EMPLOYER_LABELS[pa.employerType]) : "Not judged", pa.employerEvidence],
+      [
+        "Employer",
+        pa.target === "yes"
+          ? "A target employer"
+          : pa.target === "no"
+            ? "Not a target employer"
+            : pa.employerEvidence
+              ? "Not judged against targets"
+              : "Not judged",
+        pa.employerEvidence,
+      ],
       ["Agent adoption", pa.agentNative ? AGENTS[pa.agentNative] : "Not judged", pa.agentNativeEvidence],
     ],
   };

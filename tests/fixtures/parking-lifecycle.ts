@@ -12,13 +12,12 @@ import type { Browser } from "../../src/fill-session";
 assert(process.env["AUTO_APPLY_DATA"] && process.env["AUTO_APPLY_PROFILE"] && process.env["AUTO_APPLY_RESUME_DIR"], "isolated paths required");
 const scenario = process.argv[2];
 const { config, jobDir, DATA } = await import("../../src/config");
-config.phase = "real";
-config.confirmBeforeSubmit = true;
+config.approval = "gated"; // every application waits at both gates
+config.targets.holdBack = false;
 config.concurrency.fill = scenario?.startsWith("restart-") || scenario === "recovery-prefix" ? 2 : 1;
 config.concurrency.prep = 0;
 config.fillPauseSeconds = [0, 0];
 config.schedule = { scanMinutes: 0, discoverMinutes: 0, trackMinutes: 0 };
-config.autoApply = { enabled: false };
 config.limits.applyPerDay = 50;
 config.limits.applySpreadHours = 0;
 

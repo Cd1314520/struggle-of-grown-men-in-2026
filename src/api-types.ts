@@ -32,23 +32,22 @@ export interface AppState {
   scanMinutes: number;
   boards: number;
   lastTrack: string | null;
-  confirmBeforeSubmit: boolean;
+  approval: "auto" | "gated";
+  targets: { holdBack: boolean; describe: string };
   autoApply: {
     enabled: boolean;
-    phases: string[];
     minScore: number;
     allowConcerns: boolean;
     perDay: number;
-    submit: boolean;
+    perEmployer: number | null; // null: no limit
     approvedToday: number;
   };
   applyPerDay: number;
-  threshold: number | null;
+  thresholds: { practice: number; real: number } | null;
   vncUrl: string | null;
   browsers: string[];
   redirectUri: string;
   mailbox: string | null;
-  phase: "practice" | "real";
   profileFiles: string[];
   setupRemaining: number; // required setup steps not done (src/setup.ts)
 }

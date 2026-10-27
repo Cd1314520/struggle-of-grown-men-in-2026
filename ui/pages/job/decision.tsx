@@ -451,7 +451,7 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       title: "Apply to this job?",
       lead: job.resumeFrozen
         ? "This application already started with its frozen resume, so the resume can no longer be changed."
-        : summary?.confirmBeforeSubmit === false
+        : summary?.approval === "auto"
           ? "The agent fills the form and sends it."
           : "The agent fills the form, then asks before sending.",
       primary: { key: "approve", label: "Approve", icon: <Check />, keyable: true, run: () => void a.act("approve") },

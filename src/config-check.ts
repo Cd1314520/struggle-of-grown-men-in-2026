@@ -15,6 +15,7 @@ const check =
     if (!ok(value)) problems.push(`${path}: expected ${expected}, got ${show(value)}`);
   };
 const text = check(v => typeof v === "string" && !!v.trim(), "non-empty text");
+const words = check(v => typeof v === "string", "text");
 const bool = check(v => typeof v === "boolean", "true or false");
 const count = (min = 0) => check(v => typeof v === "number" && Number.isInteger(v) && v >= min, `a whole number of at least ${min}`);
 const amount = (min = 0) => check(v => typeof v === "number" && Number.isFinite(v) && v >= min, `a number of at least ${min}`);
@@ -65,16 +66,15 @@ const shape =
     }
   };
 
-const phase = oneOf("practice", "real");
 const model = orNull(text);
 
 const CONFIG = shape(
   {
     port,
-    phase,
+    approval: oneOf("auto", "gated"),
+    targets: shape({ holdBack: bool }, { describe: orNull(words) }),
     // import was added later: a config.yml from before it still loads, and the resume import uses omp's default.
     models: shape({ triage: model, discover: model, locate: model, screen: model, prep: model, fill: model, track: model, recheck: model }, { import: model }),
-    confirmBeforeSubmit: bool,
     schedule: shape({ scanMinutes: amount(), discoverMinutes: amount(), trackMinutes: amount() }),
     concurrency: shape({ prep: count() }, { fill: count(1) }),
     limits: shape({ prepPerDay: count(), applyPerDay: count() }, { locatePerDay: count(), applySpreadHours: amount() }),
@@ -86,10 +86,7 @@ const CONFIG = shape(
     publicUrl: orNull(url),
     vncUrl: orNull(url),
     mailbox: orNull(matching(/^\S+@\S+$/, "an email address")),
-    autoApply: shape(
-      {},
-      { enabled: bool, phases: listOf(phase), minScore: amount(), allowConcerns: bool, perDay: count(), perEmployer: count(), submit: bool },
-    ),
+    autoApply: shape({}, { minScore: amount(), allowConcerns: bool, perDay: count(), perEmployer: count() }),
     questionDigest: shape({}, { enabled: bool, time: matching(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:mm in 24-hour local time"), timeZone: text }),
     // Each feed and board takes its own extra parameters.
     feeds: shape({}, {}, shape({ minutes: amount() }, {}, anything)),

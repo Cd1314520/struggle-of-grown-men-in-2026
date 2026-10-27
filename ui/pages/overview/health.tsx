@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import type { Summary } from "../../../src/api-types";
 import type { DigestStatus } from "../../../src/digest";
 import { ListBody, ListRow, StatusLabel } from "../../components/ui";
-import { ago, cap, MINUTE, num } from "../../lib/format";
+import { ago, cap, MINUTE, num, plural } from "../../lib/format";
 import type { Tone } from "../../lib/labels";
 import { RailHead } from "./rail";
 
@@ -66,24 +66,21 @@ function rows(s: Summary): Row[] {
     ? { name: "Mailbox", state: ["Connected", "success"], detail: s.lastTrack ? `Checked ${ago(s.lastTrack)}` : (s.gmail.address ?? "Not checked yet") }
     : { name: "Mailbox", state: ["Not connected", "warning"], detail: "Connect Gmail to track replies and codes" };
   const auto: Row = !a.enabled
-    ? { name: "Auto apply", state: ["Off", "neutral"], detail: "Every match waits for your review" }
-    : !a.phases.includes(s.phase)
-      ? { name: "Auto apply", state: ["Paused", "neutral"], detail: `On in the ${a.phases.join(" and ") || "no"} phase only` }
-      : { name: "Auto apply", state: ["On", "success"], detail: `${num(a.approvedToday)} of ${num(a.perDay)} approved today` };
+    ? { name: "Approval", state: ["Gated", "neutral"], detail: "You approve every job and OK every send" }
+    : { name: "Approval", state: ["Auto-apply", "success"], detail: `${num(a.approvedToday)} of ${num(a.perDay)} approved today` };
   const digest: Row = !d.enabled
     ? { name: "Daily digest", state: ["Off", "neutral"], detail: "Questions wait here, not in your inbox" }
     : { name: "Daily digest", state: DIGEST[d.deliveryState] ?? [cap(d.deliveryState), "neutral"], detail: d.lastError ?? nextDigest(d) };
-  const phase: Row = {
-    name: "Phase",
-    state: [cap(s.phase), s.phase === "real" ? "accent" : "neutral"],
-    detail:
-      s.phase === "practice" && held
-        ? `${num(held)} strong matches held for the real search`
-        : s.phase === "practice"
-          ? "Practising on lower-stakes roles"
-          : "Applying to target roles",
+  const targets: Row = {
+    name: "Target employers",
+    state: s.targets.holdBack ? ["Held back", "neutral"] : ["Applying", "accent"],
+    detail: s.targets.holdBack
+      ? held
+        ? `${plural(held, "job")} held for later`
+        : "Saved for later; the rest are practice"
+      : "Applied to alongside practice jobs",
   };
-  return [scanner, mailbox, auto, digest, phase];
+  return [scanner, mailbox, auto, digest, targets];
 }
 
 export function Health({ summary }: { summary: Summary | undefined }) {

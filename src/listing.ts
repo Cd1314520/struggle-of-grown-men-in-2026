@@ -1,10 +1,11 @@
 // The job lists the UI pages through: one view at a time, searched, filtered, grouped and sorted here,
 // so a section of thousands of jobs arrives one page at a time with true totals for every group.
 import type { ListedJob } from "./api-types";
-import { config } from "./config";
+import { config, describing } from "./config";
 import { countByCompany, lastMovedFrom, listedJobs, openedAt } from "./db";
 import { homeOf, nearHome } from "./home";
 import { openGateKinds, type GateKind } from "./questions";
+import { parsePracticeAssessment, rubricOf } from "./practice";
 import { setAsideReason, type Reason } from "./reasons";
 import type { Status } from "./status";
 import { nextSteps, type NextStep } from "./steps";
@@ -30,6 +31,7 @@ export interface ListRow extends ListedJob {
   appliedThere: number;
   companyCount: number; // jobs at the same employer in this view, this one included, before search, filters and group
   reason: Reason | null; // why it was held or rejected (held and rejected views only)
+  rubric: "practice" | "real"; // the one its score is on
 }
 export interface ListGroup {
   key: string;
@@ -193,9 +195,10 @@ function viewRows(view: ListView): ListRow[] {
   // A job rejected without a note is explained by where it was stopped.
   const from = view === "held" || view === "rejected" ? lastMovedFrom(jobs.filter(j => !j.note).map(j => j.id)) : null;
   const spec = SPECS[view];
-  return jobs.map(j => {
+  return jobs.map(({ practice_assessment, ...j }) => {
     const row: ListRow = {
       ...j,
+      rubric: rubricOf(parsePracticeAssessment(practice_assessment), describing()),
       opened_at: openedAt(j),
       next: next.get(j.id) ?? null,
       gate: gates.get(j.id) ?? null,
