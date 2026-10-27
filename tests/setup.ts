@@ -2,10 +2,10 @@
 // src/db.ts opens and migrates the database under AUTO_APPLY_DATA as soon as it is imported. Without
 // this, running the tests would upgrade the live database with whatever migrations are in the
 // working tree. Scenarios that need their own state still pass their own AUTO_APPLY_DATA.
-// The profile is a fresh copy of profile.example, so the tests read neither the owner's profile nor
-// a missing one (a fresh checkout or CI has no profile/).
+// The profile is a fresh copy of profile.example and the stock resume is the example one, so the
+// tests read neither the owner's files nor missing ones (a fresh checkout or CI has neither).
 import { afterAll } from "bun:test";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,6 +13,11 @@ const dir = mkdtempSync(join(tmpdir(), "auto-apply-test-run-"));
 process.env["AUTO_APPLY_DATA"] = dir;
 cpSync(join(import.meta.dir, "..", "profile.example"), join(dir, "profile"), { recursive: true });
 process.env["AUTO_APPLY_PROFILE"] = join(dir, "profile");
+const resume = join(import.meta.dir, "..", "basic-resume");
+mkdirSync(join(dir, "resume"));
+for (const f of ["resume.typ", "main.example.typ"]) copyFileSync(join(resume, f), join(dir, "resume", f));
+copyFileSync(join(resume, "main.example.typ"), join(dir, "resume", "main.typ"));
+process.env["AUTO_APPLY_RESUME_DIR"] = join(dir, "resume");
 afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
