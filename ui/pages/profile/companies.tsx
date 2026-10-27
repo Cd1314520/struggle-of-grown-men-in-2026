@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { parse } from "yaml";
 import { NoMatch } from "../../components/list";
 import { CompanyMark, ListRow, Pagination, SearchInput } from "../../components/ui";
+import { scrollPageTop } from "../../lib/scroller";
 
 export interface Board {
   name: string;
@@ -73,7 +74,7 @@ export function useBoards(boards: readonly Board[]) {
         noun="companies"
         onChange={o => {
           setOffset(o);
-          scrollTo({ top: 0 });
+          scrollPageTop();
         }}
       />
     ),

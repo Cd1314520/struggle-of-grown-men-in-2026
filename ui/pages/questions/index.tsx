@@ -51,7 +51,7 @@ const HINT = "What application forms asked that your profile can't answer.";
 
 function Loading() {
   return (
-    <div className="flex lg:h-dvh">
+    <div className="flex lg:h-(--app-h)">
       <div className={cn("w-full", COLUMN)}>
         <Workspace frame="column" aria-label="Questions" bar={{ title: "Questions", search: <Skeleton className="h-8 w-full touch:h-10" /> }}>
           <SkeletonRows rows={8} />

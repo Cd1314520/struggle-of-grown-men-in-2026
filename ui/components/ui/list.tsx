@@ -1,7 +1,8 @@
-// Lists of records: the one list system. A list fills its Workspace edge to edge (workspace.tsx: the bar,
-// then the rows, then the footer), and every row is a ListRow: a lead (mark or icon), a title, one second
-// line (the meta, then the gist behind a dash) and ONE fact at the right. No columns, no header row, at any
-// width. Groups are small uppercase ListGroup labels. See docs/ui.md, "Lists".
+// Lists of records: the one list system, after Linear's. A list fills its Workspace edge to edge (workspace.tsx:
+// the bar, then the rows, then the footer), and every row is a ListRow: a lead (mark or icon), a title, the
+// meta and the gist, and ONE fact at the right. On a wide list with a mouse that is one 44px line; in a
+// column beside an open record, on a phone and on touch, two. No columns, no header row. Groups are tinted
+// ListGroup bands. See docs/ui.md, "Lists".
 import { isValidElement, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
@@ -10,7 +11,7 @@ import { cn } from "../../lib/cn";
 const X = "px-[var(--list-x,1rem)]";
 
 // The grid tracks of a row: lead | body | fact | actions.
-const LEAD = "2rem",
+const LEAD = "auto", // the lead's own box: 32px, 24px on a wide list
   BODY = "minmax(0,1fr)";
 const tracks = (...t: (string | false | undefined)[]) => t.filter(Boolean).join(" ");
 const shown = (n: ReactNode) => n !== undefined && n !== null && n !== false;
@@ -40,9 +41,10 @@ export type ListRowProps = Omit<ComponentProps<"a">, "title" | "ref"> & {
   columns?: string; // a dense row only: those leads' widths, "4.5rem 8rem"
 };
 
-// No boxed lines: each row draws an inset hairline under itself, from the title's x to the window's edge.
+// No boxed lines: each row draws a hairline under itself, edge to edge on a one-line list, from the title's x
+// on a two-line one.
 const ROW =
-  "group relative scroll-mt-12 scroll-mb-12 text-sm text-fg outline-none transition-colors after:pointer-events-none after:absolute after:right-0 after:bottom-0 after:h-px after:bg-border focus-visible:bg-subtle focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-inset";
+  "group relative scroll-mt-12 scroll-mb-12 text-sm text-fg outline-none transition-colors after:pointer-events-none after:absolute after:right-0 after:bottom-0 after:h-px after:bg-border/70 focus-visible:bg-subtle focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-inset";
 
 export function ListRow({
   href,
@@ -68,11 +70,7 @@ export function ListRow({
   // A div when the row holds links of its own; typed as the link, whose props are a superset.
   const Row = (href ? "a" : "div") as "a";
   const link = href !== undefined;
-  const frame = cn(
-    ROW,
-    link && "cursor-pointer hover:bg-subtle",
-    selected && "bg-accent-soft/60 before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-accent hover:bg-accent-soft/80",
-  );
+  const frame = cn(ROW, link && "cursor-pointer hover:bg-subtle", selected && "bg-muted/70 hover:bg-muted");
   const tooltip = typeof title === "string" ? title : undefined;
 
   if (dense) {
@@ -84,7 +82,7 @@ export function ListRow({
         style={{ "--row": tracks(columns, BODY), ...style } as CSSProperties}
         className={cn(
           frame,
-          "grid min-h-10 grid-cols-(--row) items-center gap-x-3 py-2 after:left-[var(--list-x,1rem)] touch:flex touch:flex-wrap touch:items-baseline touch:gap-x-3 touch:gap-y-0.5 touch:py-2.5",
+          "grid min-h-9 grid-cols-(--row) items-center gap-x-3 py-1.5 after:left-0 touch:flex touch:flex-wrap touch:items-baseline touch:gap-x-3 touch:gap-y-0.5 touch:py-2.5",
           X,
           className,
         )}
@@ -109,6 +107,8 @@ export function ListRow({
   const hasLead = lead !== undefined || indent;
   const hasFact = shown(fact),
     hasActions = shown(actions);
+  // One line where the list is wide: everything but a prose row, whose snippet needs the room under the title.
+  const one = !shown(snippet) && titleLines !== "none";
   return (
     <Row
       role="row"
@@ -118,33 +118,51 @@ export function ListRow({
       className={cn(
         frame,
         "grid min-h-16 grid-cols-(--row) items-center gap-x-3 py-3 touch:min-h-[4.5rem] touch:items-start touch:py-3.5",
-        // The hairline starts where the title does: past the 32px lead and its 12px gap.
+        // On two lines the hairline starts where the title does: past the 32px lead and its 12px gap.
         hasLead ? "after:left-[calc(var(--list-x,1rem)+2.75rem)]" : "after:left-[var(--list-x,1rem)]",
+        "row-wide:after:left-0",
+        // A prose row keeps its lines: the small icon and the fact level with the first.
+        one ? "row-wide:min-h-11 row-wide:py-1.5" : "row-wide:min-h-12 row-wide:items-start row-wide:py-2.5",
         X,
         className,
       )}
       {...props}
     >
       {hasLead && (
-        <div role="cell" className="flex size-8 items-center justify-center touch:mt-0.5">
+        <div
+          role="cell"
+          className={cn(
+            "flex size-8 items-center justify-center touch:mt-0.5",
+            // On a wide list the mark shrinks to 24px, as Linear's row icons sit small beside the title.
+            "row-wide:size-6 row-wide:[&>*]:size-6 row-wide:[&>*]:text-2xs row-wide:[&_svg]:size-3.5",
+          )}
+        >
           {lead}
         </div>
       )}
-      <div role="cell" className="min-w-0">
+      <div role="cell" className={cn("min-w-0", one && "row-wide:flex row-wide:items-center row-wide:gap-3")}>
         <div
           title={tooltip}
           className={cn(
             "text-base font-medium break-words text-fg",
             titleLines !== "none" && cn(LINES[titleLines], DESK[titleLines], "@4xl/ws:line-clamp-1"),
+            // The title takes what it needs, up to two thirds of the line; the meta and gist the rest.
+            one && "row-wide:block row-wide:max-w-[66%] row-wide:shrink-0 row-wide:truncate row-wide:text-sm",
             titleClassName,
           )}
         >
           {title}
         </div>
         {(shown(secondary) || shown(gist)) && (
-          // One line, the meta then the gist, truncating; a list column too. Only a phone (under 40rem, below
-          // lg) gives the gist a line of its own under the meta, rather than the two truncating to a word apiece.
-          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-fg-muted max-lg:@max-[40rem]/ws:flex-col max-lg:@max-[40rem]/ws:items-stretch max-lg:@max-[40rem]/ws:gap-0">
+          // One line, the meta then the gist, truncating; after the title on a wide list, under it in a column.
+          // Only a phone (under 40rem, below lg) gives the gist a line of its own under the meta, rather than the
+          // two truncating to a word apiece.
+          <div
+            className={cn(
+              "mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-fg-muted max-lg:@max-[40rem]/ws:flex-col max-lg:@max-[40rem]/ws:items-stretch max-lg:@max-[40rem]/ws:gap-0",
+              one && "row-wide:mt-0 row-wide:flex-1",
+            )}
+          >
             {shown(secondary) && (
               <div
                 className={cn(
@@ -175,7 +193,7 @@ export function ListRow({
       </div>
       {hasFact && (
         // On touch it sits level with the title's first line.
-        <div role="cell" className="tabular flex items-center gap-2 pl-1 text-sm whitespace-nowrap text-fg-muted touch:pt-0.5">
+        <div role="cell" className={cn("tabular flex items-center gap-2 pl-1 text-sm whitespace-nowrap text-fg-muted touch:pt-0.5", !one && "row-wide:pt-0.5")}>
           {fact}
         </div>
       )}
@@ -191,8 +209,9 @@ export function ListRow({
   );
 }
 
-// A group label inside a list: a time band, an employer, a day. Small and uppercase on the sheet, no band.
-// A row, so it reads as one ("Your move 6"). It sticks under the bar (`--group-top`, set by the Workspace).
+// A group inside a list: a time band, an employer, a day. A tinted band across the list, as Linear's groups
+// are, its label in sentence case with the count beside it. A row, so it reads as one ("Your move 6"). It
+// sticks under the bar (`--group-top`, set by the Workspace).
 export function ListGroup({
   label,
   count,
@@ -212,17 +231,17 @@ export function ListGroup({
     <div
       role="row"
       className={cn(
-        "relative flex h-9 min-w-0 items-end gap-2 bg-surface/95 pb-1.5 text-2xs font-semibold tracking-[0.06em] text-fg-muted uppercase backdrop-blur touch:h-10",
-        lead && "h-11 touch:h-11",
+        "relative flex h-9 min-w-0 items-center gap-2 bg-subtle text-sm font-medium text-fg after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-border/70 touch:h-10",
+        lead && "h-10 touch:h-11",
         sticky && "sticky top-[var(--group-top,3rem)] z-10",
         X,
         className,
       )}
     >
       {lead}
-      <span className={cn("min-w-0 truncate", lead && "pb-0.5")}>{label}</span>
-      {count !== undefined && <span className={cn("tabular shrink-0 font-normal text-fg-subtle", lead && "pb-0.5")}>{count.toLocaleString()}</span>}
-      {hint && <span className={cn("shrink-0 font-normal tracking-normal text-fg-subtle normal-case", lead && "pb-0.5")}>{hint}</span>}
+      <span className="min-w-0 truncate">{label}</span>
+      {count !== undefined && <span className="tabular shrink-0 font-normal text-fg-subtle">{count.toLocaleString()}</span>}
+      {hint && <span className="shrink-0 font-normal text-fg-subtle">{hint}</span>}
     </div>
   );
 }
@@ -262,7 +281,7 @@ export function ListFooter({ center, className, ...props }: ComponentProps<"div"
   return (
     <div
       className={cn(
-        "z-10 flex min-h-11 shrink-0 items-center gap-3 border-t border-border bg-surface/95 py-1.5 text-sm text-fg-muted backdrop-blur lg:sticky lg:bottom-0",
+        "z-10 flex min-h-11 shrink-0 items-center gap-3 border-t border-border bg-surface py-1.5 text-sm text-fg-muted lg:sticky lg:bottom-0",
         center ? "justify-center text-fg-subtle" : "justify-between",
         X,
         className,

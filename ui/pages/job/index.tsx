@@ -1,4 +1,4 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ChevronRight } from "lucide-react";
 import type { Status } from "../../../src/status";
 import { Button, Workspace } from "../../components/ui";
 import { useJob } from "../../lib/api";
@@ -18,7 +18,8 @@ function homeOf(status: Status): readonly [label: string, link: string] | null {
 }
 
 // #job/<id>: a job on its own, for links from anywhere (search, Activity, Blockers), on the sheet as every
-// page is. Its bar leads with the way back to the list that holds it; the job's header is the page's h1.
+// page is. Its bar is a breadcrumb, as Linear's are: the list that holds it, then the job; the job's header
+// is the page's h1.
 // The bar is the page's own rather than a WorkspaceBar, whose title line (and so its back link) is for
 // screen readers below lg, where a phone needs the way back most.
 export function JobPage() {
@@ -29,14 +30,20 @@ export function JobPage() {
   const home = job?.id === id ? homeOf(job.status) : null;
   return (
     <Workspace>
-      <div className="z-20 flex h-[calc(3rem+1px)] items-center border-b border-border bg-surface/95 px-(--list-x) backdrop-blur lg:sticky lg:top-0">
+      <div className="z-20 flex h-[calc(3rem+1px)] min-w-0 items-center gap-1 border-b border-border bg-surface px-(--list-x) lg:sticky lg:top-0">
         {home && (
           <Button asChild variant="ghost" size="sm" className="-ml-2">
             <a href={`${home[1]}/${id}`}>
-              <ArrowLeft />
+              <ArrowLeft className="lg:hidden" />
               {home[0]}
             </a>
           </Button>
+        )}
+        {home && job && (
+          <>
+            <ChevronRight aria-hidden className="size-3.5 shrink-0 text-fg-subtle max-lg:hidden" />
+            <span className="min-w-0 truncate px-1 text-sm font-medium text-fg max-lg:hidden">{job.title}</span>
+          </>
         )}
       </div>
       <JobDetail id={id} layout="page" />

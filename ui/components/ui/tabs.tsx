@@ -2,35 +2,36 @@ import { Tabs as T } from "radix-ui";
 import { useCallback, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
 import { cn } from "../../lib/cn";
 
-// Underlined tabs: switching between different views (a job's Overview, Fit, Resume…; Archive's Held and
-// Rejected). A page's tabs sit in its Workspace bar (`tabs`, `variant="bar"`): 48px, the underline on the
-// bar's own rule.
+// Tabs: switching between different views (a job's Overview, Fit, Resume…; Archive's Held and Rejected).
+// Linear's view switchers: small pills, the selected one filled and hairlined. A page's tabs sit in its
+// Workspace bar (`tabs`, `variant="bar"`); a job's in a strip with a rule under it.
 export const Tabs = T.Root;
 export const TabsContent = T.Content;
 export function TabsList({ className, variant, ...props }: ComponentProps<typeof T.List> & { variant?: "bar" }) {
   return (
     <T.List
-      className={cn(
-        "flex h-10 items-stretch gap-5 overflow-x-auto border-b border-border",
-        variant === "bar" && "relative top-px h-12 border-b-0 [&>[role=tab]]:mb-0 [&>[role=tab]]:h-12",
-        className,
-      )}
+      className={cn("flex h-11 items-center gap-1 overflow-x-auto border-b border-border touch:h-12", variant === "bar" && "h-12 border-b-0", className)}
       {...props}
     />
   );
 }
-// The list scrolls sideways and would clip an outline: keyboard focus shows as an accent underline and label.
+// The list scrolls sideways and would clip an outline: keyboard focus shows as an inset ring.
+// A view switcher's pill, shared by tabs and segments.
+const PILL =
+  "inline-flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md border border-transparent px-2.5 text-sm font-medium whitespace-nowrap text-fg-muted transition-colors outline-none hover:bg-subtle hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-inset touch:h-9 touch:min-w-9";
+
 export function TabsTrigger({ className, count, children, ...props }: ComponentProps<typeof T.Trigger> & { count?: number | undefined }) {
   return (
     <T.Trigger
       className={cn(
-        "relative -mb-px inline-flex h-10 items-center justify-center gap-1.5 border-b-2 border-transparent text-sm font-medium whitespace-nowrap text-fg-muted transition-colors outline-none hover:text-fg data-[state=active]:border-fg data-[state=active]:text-fg focus-visible:border-accent focus-visible:text-accent-text data-[state=active]:focus-visible:border-accent data-[state=active]:focus-visible:text-accent-text touch:min-w-9",
+        PILL,
+        "data-[state=active]:border-border data-[state=active]:bg-muted/60 data-[state=active]:text-fg data-[state=active]:shadow-xs",
         className,
       )}
       {...props}
     >
       {children}
-      {count !== undefined && <span className="tabular text-sm font-normal text-fg-subtle">{count.toLocaleString()}</span>}
+      {count !== undefined && <span className="tabular text-xs font-normal text-fg-subtle">{count.toLocaleString()}</span>}
     </T.Trigger>
   );
 }
@@ -105,10 +106,7 @@ export function Segments<T extends string>({
             onClick={() => {
               onValueChange(s.value);
             }}
-            className={cn(
-              "inline-flex h-8 shrink-0 items-center touch:h-9 gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors",
-              on ? "bg-muted text-fg" : "text-fg-muted hover:bg-subtle hover:text-fg",
-            )}
+            className={cn(PILL, on && "border-border bg-muted/60 text-fg shadow-xs hover:bg-muted/60")}
           >
             {s.label}
             {s.count !== undefined && (

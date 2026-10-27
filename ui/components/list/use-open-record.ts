@@ -8,6 +8,7 @@ import { prefetchJobs, queryClient, useJobList, type ListParams } from "../../li
 import { useHotkeys } from "../../lib/hotkeys";
 import { PAGE_SIZE, type useListParams } from "../../lib/list-params";
 import { navigate, route, setParams, useRoute } from "../../lib/router";
+import { scrollPageTop } from "../../lib/scroller";
 import { useRecordHistory } from "./history";
 
 // A page to land on and which of its rows to open once it has loaded. `after`: only data fetched after this
@@ -155,7 +156,7 @@ export function useOpenRecord({ base, view, lp, search, autoOpen = false, advanc
     else {
       setSeek(null);
       lp.setOffset(offset);
-      scrollTo({ top: 0 });
+      scrollPageTop();
     }
   };
 

@@ -43,7 +43,7 @@ export function ListDetail({
     to.focus();
   };
   return (
-    <div className="lg:flex lg:h-dvh">
+    <div className="lg:flex lg:h-(--app-h)">
       <div
         ref={list}
         onKeyDown={ev => {

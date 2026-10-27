@@ -29,10 +29,10 @@ export function Tooltip({
           side={side}
           sideOffset={6}
           collisionPadding={8}
-          className="z-50 flex max-w-xs animate-in items-center gap-2 rounded-md bg-fg px-2 py-1 text-xs text-canvas shadow-md select-none"
+          className="z-50 flex max-w-xs animate-in items-center gap-2 rounded-md border border-border bg-surface px-2 py-1 text-xs text-fg shadow-md select-none"
         >
           {content}
-          {shortcut && <Kbd className="border-transparent bg-canvas/15 text-canvas shadow-none">{shortcut}</Kbd>}
+          {shortcut && <Kbd size="sm">{shortcut}</Kbd>}
         </T.Content>
       </T.Portal>
     </T.Root>

@@ -46,9 +46,9 @@ export function SettingsPanel({
   );
 }
 
-// A group of rows inside a section ("The pipeline", "Gmail"): a small uppercase label, as a heading.
+// A group of rows inside a section ("The pipeline", "Gmail"): a small muted label, as a heading.
 export function SettingsGroup({ title }: { title: string }) {
-  return <h3 className="pt-6 pb-1.5 text-2xs font-semibold tracking-[0.06em] text-fg-muted uppercase">{title}</h3>;
+  return <h3 className="pt-6 pb-1.5 text-xs font-medium text-fg-muted">{title}</h3>;
 }
 
 // The value sits beside the label at every width; `stack` puts a wide control under it on a phone.

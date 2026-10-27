@@ -41,7 +41,7 @@ const act = async (run: () => Promise<unknown>, done?: string) => {
 // The paper viewer: a resume's pages centred on the canvas, the one grey well on the sheet.
 function Viewer({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-full bg-canvas px-4 py-8 sm:px-8 lg:min-h-[calc(100dvh-3rem-1px)]">
+    <div className="min-h-full bg-canvas px-4 py-8 sm:px-8 lg:min-h-[calc(var(--app-h)-3rem-1px)]">
       <div className="mx-auto max-w-[40rem]">{children}</div>
     </div>
   );

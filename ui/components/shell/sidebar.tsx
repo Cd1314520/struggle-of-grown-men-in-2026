@@ -1,4 +1,4 @@
-import { Check, ChevronsUpDown, Keyboard, Monitor, Moon, Plus, RefreshCw, Search, Sun } from "lucide-react";
+import { Check, ChevronDown, Keyboard, Monitor, Moon, RefreshCw, Search, SquarePen, Sun } from "lucide-react";
 import { toast } from "sonner";
 import type { Summary } from "../../../src/api-types";
 import { api, refreshAll, useSummary } from "../../lib/api";
@@ -7,14 +7,14 @@ import { ago } from "../../lib/format";
 import { modKey } from "../../lib/hotkeys";
 import { href, useRoute } from "../../lib/router";
 import { setTheme, useTheme } from "../../lib/theme";
-import { Count, Kbd, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, StatusDot, Tooltip } from "../ui";
+import { Count, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, StatusDot, Tooltip } from "../ui";
 import { NAV, type NavItem } from "./nav";
 import { useShell } from "./state";
 
 export function Logo({ className }: { className?: string }) {
   return (
-    <span className={cn("flex size-6 items-center justify-center rounded-md bg-accent text-accent-fg shadow-sm", className)} aria-hidden>
-      <svg viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <span className={cn("flex size-5 items-center justify-center rounded-[5px] bg-accent text-accent-fg", className)} aria-hidden>
+      <svg viewBox="0 0 16 16" className="size-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M3 8.5 6.5 12 13 4.5" />
       </svg>
     </span>
@@ -41,11 +41,11 @@ function NavLink({
       aria-current={active ? "page" : undefined}
       onClick={onNavigate}
       className={cn(
-        "group flex h-8 items-center gap-2.5 rounded-md px-2 text-sm font-medium transition-colors touch:h-10",
-        active ? "bg-surface text-fg shadow-xs ring-1 ring-border" : "text-fg-muted hover:bg-muted/70 hover:text-fg",
+        "group flex h-7 items-center gap-2 rounded-md px-2 text-sm font-medium transition-colors touch:h-10",
+        active ? "bg-muted text-fg" : "text-fg-muted hover:bg-muted/60 hover:text-fg",
       )}
     >
-      <Icon className={cn("size-4 shrink-0", active ? "text-fg" : "text-fg-subtle group-hover:text-fg-muted")} strokeWidth={1.75} />
+      <Icon className={cn("size-4 shrink-0", active ? "text-fg" : "text-fg-muted group-hover:text-fg")} strokeWidth={1.75} />
       <span className="flex-1 truncate">{item.label}</span>
       {badge && <Count value={badge.value} tone={badge.tone} />}
     </a>
@@ -62,10 +62,10 @@ function WorkspaceMenu() {
   ] as const;
   return (
     <Menu>
-      <MenuTrigger className="flex h-9 min-w-0 touch:h-10 flex-1 items-center gap-2 rounded-md px-1.5 text-left outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-accent/30">
+      <MenuTrigger className="flex h-8 min-w-0 touch:h-10 flex-1 items-center gap-2 rounded-md px-1.5 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-accent/30">
         <Logo />
-        <span className="flex-1 truncate text-sm font-semibold text-fg">Auto Apply</span>
-        <ChevronsUpDown className="size-3.5 text-fg-subtle" />
+        <span className="min-w-0 truncate text-sm font-semibold text-fg">Auto Apply</span>
+        <ChevronDown className="size-3.5 shrink-0 text-fg-subtle" />
       </MenuTrigger>
       <MenuContent align="start" className="w-56">
         <MenuLabel>Theme</MenuLabel>
@@ -103,7 +103,7 @@ function SystemStatus({ summary }: { summary: Summary | undefined }) {
   if (!summary) return null;
   const scanning = summary.running.scan;
   return (
-    <div className="rounded-lg border border-border bg-surface p-3 shadow-xs">
+    <div className="px-2 py-1.5">
       <div className="flex items-center gap-2">
         <StatusDot tone={scanning ? "info" : summary.setupRemaining ? "warning" : "success"} pulse={scanning} />
         <span className="flex-1 text-sm font-medium text-fg">
@@ -124,16 +124,20 @@ function SystemStatus({ summary }: { summary: Summary | undefined }) {
                 () => undefined,
               );
             }}
-            className="flex size-6 items-center justify-center rounded-md text-fg-subtle hover:bg-subtle hover:text-fg disabled:opacity-50 touch:-my-1.5 touch:size-9"
+            className="flex size-6 items-center justify-center rounded-md text-fg-subtle hover:bg-muted hover:text-fg disabled:opacity-50 touch:-my-1.5 touch:size-9"
           >
             <RefreshCw className={cn("size-3.5", scanning && "animate-spin")} />
           </button>
         </Tooltip>
       </div>
-      <p className="mt-1 pl-4 text-xs text-fg-subtle">{summary.lastScan ? `Last scan ${ago(summary.lastScan)}` : "Not scanned yet"}</p>
+      <p className="mt-0.5 pl-4 text-xs text-fg-subtle">{summary.lastScan ? `Last scan ${ago(summary.lastScan)}` : "Not scanned yet"}</p>
     </div>
   );
 }
+
+// An icon button in the sidebar's head, as Linear's search and new issue.
+const HEAD_BUTTON =
+  "flex size-7 shrink-0 items-center justify-center rounded-md text-fg-muted transition-colors hover:bg-muted/60 hover:text-fg touch:size-10 [&_svg]:size-4";
 
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { page } = useRoute();
@@ -142,9 +146,22 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const group = (g: NavItem["group"]) =>
     NAV.filter(n => n.group === g).map(item => <NavLink key={item.page} item={item} active={page === item.page} summary={summary} onNavigate={onNavigate} />);
   return (
-    <div className="flex h-full flex-col gap-4 px-3 pt-3 pb-3">
-      <div className="flex items-center gap-1">
+    <div className="flex h-full flex-col gap-5 px-2.5 pt-2.5 pb-2.5">
+      <div className="flex items-center gap-0.5">
         <WorkspaceMenu />
+        <Tooltip content="Search" shortcut={`${modKey} K`}>
+          <button
+            type="button"
+            aria-label="Search"
+            onClick={() => {
+              onNavigate?.();
+              setPaletteOpen(true);
+            }}
+            className={HEAD_BUTTON}
+          >
+            <Search />
+          </button>
+        </Tooltip>
         <Tooltip content="Add a posting">
           <button
             type="button"
@@ -153,38 +170,21 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               onNavigate?.();
               setAddOpen(true);
             }}
-            className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-fg-muted shadow-xs hover:bg-subtle hover:text-fg touch:size-10"
+            className={cn(HEAD_BUTTON, "border border-border bg-surface shadow-xs hover:bg-surface")}
           >
-            <Plus className="size-4" />
+            <SquarePen />
           </button>
         </Tooltip>
       </div>
-      <button
-        type="button"
-        onClick={() => {
-          onNavigate?.();
-          setPaletteOpen(true);
-        }}
-        className="flex h-8 items-center gap-2 rounded-md border border-border bg-surface px-2.5 text-sm text-fg-subtle shadow-xs transition-colors hover:border-border-strong touch:h-10"
-      >
-        <Search className="size-3.5" />
-        <span className="flex-1 text-left">Search</span>
-        <Kbd size="sm" className="touch:hidden">
-          {modKey}
-        </Kbd>
-        <Kbd size="sm" className="touch:hidden">
-          K
-        </Kbd>
-      </button>
-      <nav aria-label="Sections" className="flex flex-col gap-0.5">
+      <nav aria-label="Sections" className="flex flex-col gap-px">
         {group("workspace")}
       </nav>
-      <nav aria-label="Library" className="flex flex-col gap-0.5">
-        <div className="px-2 pb-1 text-xs font-medium text-fg-subtle">Library</div>
+      <nav aria-label="Library" className="flex flex-col gap-px">
+        <div className="flex h-7 items-center px-2 text-xs font-medium text-fg-subtle">Library</div>
         {group("library")}
       </nav>
       <div className="mt-auto flex flex-col gap-2">
-        <nav aria-label="System" className="flex flex-col gap-0.5">
+        <nav aria-label="System" className="flex flex-col gap-px">
           {group("system")}
         </nav>
         <SystemStatus summary={summary} />

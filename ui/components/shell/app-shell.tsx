@@ -43,7 +43,7 @@ function TabBar() {
           >
             <item.icon className="size-5" strokeWidth={on ? 2 : 1.75} />
             {item.label}
-            {badge && badge.value > 0 && <Count value={badge.value} tone={badge.tone} className="absolute top-1.5 left-1/2 ml-1.5" />}
+            {badge && badge.value > 0 && <Count value={badge.value} tone={badge.tone} badge className="absolute top-1.5 left-1/2 ml-1.5" />}
           </a>
         );
       })}
@@ -97,7 +97,11 @@ function OfflineBanner() {
   const online = useOnline();
   if (online) return null;
   return (
-    <div id="offline" role="alert" className="sticky top-0 z-40 flex items-center justify-center gap-2 bg-warning-soft px-4 py-1.5 text-sm text-warning-text">
+    <div
+      id="offline"
+      role="alert"
+      className="sticky top-12 z-40 flex items-center justify-center gap-2 bg-warning-soft px-4 py-1.5 text-sm text-warning-text lg:top-0"
+    >
       <WifiOff className="size-3.5" />
       Connection lost. What you see may be out of date. Reconnecting…
     </div>
@@ -149,15 +153,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   ]);
   return (
     <div className="min-h-dvh bg-canvas">
-      {/* The one grey on screen: the nav is a rail beside the white sheet of the page. */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-border bg-canvas lg:block">
+      {/* As in Linear: the nav sits on the canvas, and from lg the page is a panel inset from the window's
+          edges, rounded and hairlined, scrolling inside itself (lib/scroller.ts). */}
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 bg-canvas lg:block">
         <SidebarContent />
       </aside>
-      <div className="lg:pl-60">
+      <TopBar />
+      <main
+        id="main"
+        className="min-h-[calc(100dvh-3rem)] bg-surface lg:fixed lg:inset-y-2 lg:right-2 lg:left-60 lg:min-h-0 lg:overflow-y-auto lg:rounded-lg lg:border lg:border-border lg:shadow-sm"
+      >
         <OfflineBanner />
-        <TopBar />
-        <main className="min-h-[calc(100dvh-3rem)] bg-surface lg:min-h-dvh">{children}</main>
-      </div>
+        {children}
+      </main>
       <TabBar />
       <Sheet open={shell.menuOpen} onOpenChange={shell.setMenuOpen} side="left" title="Navigation" className="bg-canvas">
         <SidebarContent

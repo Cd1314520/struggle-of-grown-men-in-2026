@@ -1,4 +1,4 @@
-// The workspace: every page is one white sheet from the sidebar's edge to the window's, top to bottom. A
+// The workspace: every page is one panel, inset beside the sidebar as Linear's are, filled edge to edge. A
 // slim bar heads it (title, count, tabs, segments, search, sort, actions on one line), then the rows edge to
 // edge, then a slim footer. No cards, no page header block, no column headers. See docs/ui.md, "Frames".
 import { Info } from "lucide-react";
@@ -48,7 +48,7 @@ export function WorkspaceBar({
   return (
     <div
       className={cn(
-        "@container/bar z-20 flex shrink-0 flex-wrap items-center gap-x-3 border-b border-border bg-surface/95 px-(--list-x) backdrop-blur",
+        "@container/bar z-20 flex shrink-0 flex-wrap items-center gap-x-3 border-b border-border bg-surface px-(--list-x)",
         // A column's first line has a rule under it, level with the open record's position bar beside it.
         col ? "lg:relative lg:before:absolute lg:before:inset-x-0 lg:before:top-12 lg:before:h-px lg:before:bg-border" : "lg:sticky lg:top-0",
       )}
@@ -64,9 +64,9 @@ export function WorkspaceBar({
         )}
       >
         {back}
-        <Title className="min-w-0 truncate text-base font-semibold tracking-[-0.005em] text-fg max-lg:sr-only">{title}</Title>
+        <Title className="min-w-0 truncate text-sm font-medium text-fg max-lg:sr-only">{title}</Title>
         {count !== undefined && (
-          <span className="tabular shrink-0 text-base text-fg-subtle max-lg:text-sm max-lg:text-fg-muted">
+          <span className="tabular shrink-0 text-sm text-fg-subtle max-lg:text-fg-muted">
             {count.toLocaleString()}
             {noun && <span className="lg:hidden"> {noun}</span>}
           </span>
@@ -266,7 +266,7 @@ export function WorkspaceBody({
           "min-w-0 shrink-0 border-border",
           ASIDE[asideWidth],
           asideWidth === "nav"
-            ? "sticky top-12 z-10 order-first border-b bg-surface/95 backdrop-blur lg:top-[calc(3rem+1px)] lg:h-[calc(100dvh-3rem-1px)] lg:overflow-y-auto lg:border-r lg:border-b-0 lg:bg-surface lg:backdrop-blur-none"
+            ? "sticky top-12 z-10 order-first border-b bg-surface lg:top-[calc(3rem+1px)] lg:h-[calc(var(--app-h)-3rem-1px)] lg:overflow-y-auto lg:border-r lg:border-b-0 lg:bg-surface lg:backdrop-blur-none"
             : cn(at === "xl" ? "xl:border-l" : "lg:border-l", "max-lg:border-t", at === "xl" && "lg:max-xl:border-t"),
           left && asideWidth !== "nav" && cn("order-first", at === "xl" ? "xl:border-r xl:border-l-0" : "lg:border-r lg:border-l-0"),
         )}

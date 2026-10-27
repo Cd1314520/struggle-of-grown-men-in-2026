@@ -156,7 +156,7 @@ function AllClear() {
     pipeline ? (["#pipeline", `${plural(pipeline, "application")} in the pipeline need you`] as const) : null,
   ].filter(x => x !== null);
   return (
-    <div className="flex min-h-[70dvh] items-center justify-center px-4 lg:min-h-dvh">
+    <div className="flex min-h-[70dvh] items-center justify-center px-4 lg:min-h-(--app-h)">
       <EmptyState
         icon={<Inbox />}
         title="You're all caught up"

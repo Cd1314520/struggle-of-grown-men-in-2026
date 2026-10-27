@@ -10,6 +10,7 @@ import { api, refreshAll, useSettings, useSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { num, plural } from "../../lib/format";
 import { href, useRoute } from "../../lib/router";
+import { onPageScroll, pageScroller } from "../../lib/scroller";
 import { Mail } from "./mail";
 import { Models } from "./models";
 import { ConfigRow, type Confirm } from "./field";
@@ -43,14 +44,12 @@ function Nav({ ready }: { ready: boolean }) {
         const top = document.getElementById(id)?.getBoundingClientRect().top;
         if (top !== undefined && top <= 120) current = id;
       }
-      if (innerHeight + scrollY >= document.documentElement.scrollHeight - 2) current = "danger";
+      const page = pageScroller();
+      if (page.scrollTop + page.clientHeight >= page.scrollHeight - 2) current = "danger";
       setActive(current);
     };
     onScroll();
-    addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      removeEventListener("scroll", onScroll);
-    };
+    return onPageScroll(onScroll);
   }, [ready]);
   return (
     <SectionNav

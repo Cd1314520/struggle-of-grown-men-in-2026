@@ -21,17 +21,8 @@ export function EmptyState({
   const sm = size === "sm";
   return (
     <div className={cn("flex flex-col items-center justify-center px-6 text-center", sm ? "py-10" : "py-16", className)}>
-      {icon && (
-        <div
-          className={cn(
-            "flex items-center justify-center rounded-lg border border-border bg-surface text-fg-subtle shadow-xs",
-            sm ? "mb-3 size-9 [&_svg]:size-4.5" : "mb-4 size-10 [&_svg]:size-5",
-          )}
-        >
-          {icon}
-        </div>
-      )}
-      <p className={cn("font-medium text-fg", sm ? "text-base" : "text-lg")}>{title}</p>
+      {icon && <div className={cn("flex items-center justify-center text-fg-subtle", sm ? "mb-2 [&_svg]:size-6" : "mb-3 [&_svg]:size-8")}>{icon}</div>}
+      <p className={cn("font-medium text-fg", sm ? "text-sm" : "text-base")}>{title}</p>
       {description && <p className={cn("mt-1 text-sm text-fg-muted", sm ? "max-w-64" : "max-w-sm")}>{description}</p>}
       {action && <div className={sm ? "mt-4" : "mt-5"}>{action}</div>}
     </div>
@@ -50,8 +41,8 @@ export function Skeleton({ className }: { className?: string }) {
   );
 }
 
-// Rows of placeholder while a list loads, shaped like ListRow: a mark, two lines and the fact, each with
-// its inset hairline. `dense` is the log's one line; `lead={false}` drops the mark.
+// Rows of placeholder while a list loads, shaped like ListRow: a mark, the title and meta and the fact, each
+// with its hairline, on one line or two as the rows will be. `dense` is the log's line; `lead={false}` drops the mark.
 export function SkeletonRows({ rows = 8, dense, lead = true, className }: { rows?: number; dense?: boolean; lead?: boolean; className?: string }) {
   const mark = lead && !dense;
   return (
@@ -60,16 +51,16 @@ export function SkeletonRows({ rows = 8, dense, lead = true, className }: { rows
         <div
           key={i}
           className={cn(
-            "relative flex items-center gap-3 px-[var(--list-x,1rem)] after:absolute after:right-0 after:bottom-0 after:h-px after:bg-border",
+            "relative flex items-center gap-3 px-[var(--list-x,1rem)] after:absolute after:right-0 after:bottom-0 after:h-px after:bg-border/70",
             mark ? "after:left-[calc(var(--list-x,1rem)+2.75rem)]" : "after:left-[var(--list-x,1rem)]",
-            dense ? "min-h-10 py-2" : "min-h-16 py-3 touch:min-h-[4.5rem]",
+            dense ? "min-h-9 py-1.5 after:left-0" : "min-h-16 py-3 touch:min-h-[4.5rem] row-wide:min-h-11 row-wide:py-1.5 row-wide:after:left-0",
           )}
         >
-          {mark && <Skeleton className="size-8 shrink-0 rounded-md" />}
+          {mark && <Skeleton className="size-8 shrink-0 rounded-md row-wide:size-6" />}
           {dense ? (
             <Skeleton className="h-3 flex-1" />
           ) : (
-            <div className="flex-1 space-y-2">
+            <div className="flex-1 space-y-2 row-wide:flex row-wide:items-center row-wide:gap-4 row-wide:space-y-0">
               <Skeleton className="h-3.5 w-2/5" />
               <Skeleton className="h-3 w-1/3" />
             </div>
