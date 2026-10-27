@@ -15,6 +15,10 @@ jobs:
           bun-version-file: .bun-version
       # The resume journal's tests extract text from a PDF with pdftotext.
       - run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      # Prep compiles the resume with typst; pinned to the version the app is run with.
+      - run: |
+          curl -fsSL https://github.com/typst/typst/releases/download/v0.15.1/typst-x86_64-unknown-linux-musl.tar.xz | tar -xJ -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/typst-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
       - run: bun install --frozen-lockfile
       # The same command the pre-commit hook runs: typecheck, lint, tests.
       - run: bun run check
