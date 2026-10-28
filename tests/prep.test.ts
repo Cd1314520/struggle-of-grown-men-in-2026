@@ -10,7 +10,6 @@ import { to } from "../src/status";
 const initial = { approval: config.approval, targets: { ...config.targets }, autoApply: { ...config.autoApply } };
 afterEach(() => Object.assign(config, { approval: initial.approval, targets: { ...initial.targets }, autoApply: { ...initial.autoApply } }));
 
-// An answer for every statement the screen asks, "yes" unless overridden.
 function screenAnswers(overrides: Record<string, string> = {}, text = screenChecklistText(null)) {
   return [...text.matchAll(/`([\w.]+)`/g)].map(([, id = ""]) => ({ id, answer: overrides[id] ?? "yes", evidence: "quote" }));
 }
@@ -41,7 +40,6 @@ describe("screen verdict", () => {
   });
 });
 
-// Records the workers prep starts and their prompts; `screen` answers the screen's tool the way a worker would.
 function fakeRun(screen?: (report: (args: ToolArgs) => unknown) => void, error?: string) {
   const started: string[] = [];
   const prompts: string[] = [];
@@ -101,7 +99,6 @@ describe("prep before the full assessment", () => {
   });
 });
 
-// A job at `company` that a full assessment judged to be `employerType`.
 function assessedJob(company: string, employerType: string) {
   const job = preppingJob(company);
   const practice = { version: 3, employerType, employerEvidence: `${company} evidence`, agentNative: "unclear", agentNativeEvidence: "", listed: null };
@@ -122,7 +119,6 @@ describe("prep for an employer judged before", () => {
     expect(prompts[0]).not.toContain("practice.");
     const held = getJob(job.id);
     expect(held?.status).toBe("held");
-    // Judged before targets were described in words: the default description is that judgment.
     expect(held?.note).toContain(`a target employer, as judged on job #${earlier.id} (tech company at scale: Scaled Co evidence)`);
     expect(JSON.parse(held?.practice_assessment ?? "null")).toMatchObject({ target: "yes" });
     expect(usedToday("prep")).toBe(before - 1);

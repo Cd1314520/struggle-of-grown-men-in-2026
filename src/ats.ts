@@ -1,5 +1,3 @@
-// Public job-board feeds. No browser: these are the public endpoints the boards' own career pages
-// call, mostly JSON. iCIMS and JazzHR are read from their public sitemap and listing page.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
@@ -26,10 +24,7 @@ export type Ats = (typeof ATS)[number];
 export interface Company {
   name: string;
   ats: Ats;
-  // Board id as it appears in the board's URL. Workday: "<tenant>.<wdN>/<site>", e.g. "acme.wd5/External".
-  // The others are in the table in prompts/discover.md, and boardOf reads them from a posting's URL.
   slug: string;
-  // Workday only: keyword filter, for employers with thousands of openings.
   search?: string;
 }
 export interface Posting {
@@ -39,7 +34,6 @@ export interface Posting {
   title: string;
   location: string | null;
   description: string | null;
-  // When the employer opened the posting, where the source says: an ISO time, or "YYYY-MM-DD" when it only gives the day.
   posted?: string | null;
 }
 
@@ -53,7 +47,6 @@ export function loadCompanies(): Company[] {
   }
 }
 
-// A board of only internships and new-grad programmes, which the targets rule out: never watched.
 const CAMPUS = /campus|(university|college)[\s_-]*(recruit|hiring)|early[\s_-]*careers?|internships?|\binterns?\b|new[\s_-]*grads?\b/i;
 export const isCampusBoard = (c: Pick<Company, "name" | "slug">) => CAMPUS.test(c.name) || CAMPUS.test(c.slug);
 
@@ -65,9 +58,6 @@ export function addCompany(c: Company): boolean {
   return true;
 }
 
-// Elements a reader never sees, and the attributes that hide one. Postings use hidden text to plant
-// instructions for AI applicants. White or tiny text is kept: boards also tuck recruiter tags away
-// that way, and the prompts say what to do with instructions in it.
 const UNSEEN = new Set(["script", "style", "template"]);
 const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
 const hiddenStyle = (style: string) =>
@@ -92,7 +82,6 @@ function hides(name: string, attrs: string): boolean {
   }
   return false;
 }
-// Removes hidden elements with everything inside them. One left unclosed loses only its tag.
 export function dropHidden(html: string): string {
   const tag = /<(\/?)([a-z][\w-]*)\b([^>]*)>/gi;
   let out = "",
@@ -131,7 +120,6 @@ export const htmlToText = (html: string) =>
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-// Identify ourselves honestly; these are public endpoints meant for programmatic use.
 const HEADERS = { accept: "application/json", "user-agent": "auto-apply/1.0 (personal job search)" };
 async function getJson(url: string, body?: unknown): Promise<unknown> {
   const res = await fetch(url, {
@@ -148,14 +136,12 @@ async function getText(url: string): Promise<string> {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.text();
 }
-// A source's date field as an ISO time; a bare date stays a bare date.
 export const posted = (v: unknown): string | null => {
   if (v == null || v === "") return null;
   if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
   const t = typeof v === "number" ? v : typeof v === "string" ? Date.parse(v) : NaN;
   return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null;
 };
-// Workday only says "Posted Today", "Posted Yesterday", "Posted 3 Days Ago" or "Posted 30+ Days Ago".
 const workdayPosted = (s: string | null | undefined): string | null => {
   const m = /today|yesterday|(\d+)\+?\s*days?/i.exec(s ?? "");
   if (!m) return null;
@@ -164,9 +150,9 @@ const workdayPosted = (s: string | null | undefined): string | null => {
 };
 const place = (...parts: (string | null | undefined | false)[]) => [...new Set(parts.filter(Boolean))].join(", ") || null;
 
-const WORKDAY_MAX = 200; // newest postings read per board and scan
-const NEWEST_MAX = 200; // the same for the other boards that page through thousands of postings
-const EIGHTFOLD_MAX = 100; // Eightfold answers ten at a time
+const WORKDAY_MAX = 200;
+const NEWEST_MAX = 200;
+const EIGHTFOLD_MAX = 100;
 function workday(c: Company) {
   const m = /^([\w-]+)\.(wd\d+)\/([\w-]+)$/i.exec(c.slug);
   if (!m) throw new Error(`workday slug must look like "tenant.wd5/Site", got "${c.slug}"`);
@@ -175,7 +161,6 @@ function workday(c: Company) {
   return { api: `${host}/wday/cxs/${tenant}/${site}`, page: `${host}/en-US/${site}` };
 }
 
-// A slug made of several parts, "<a>/<b>". Throws with the expected shape when one is malformed.
 function slugParts(c: Company, count: 2, shape: string): [string, string];
 function slugParts(c: Company, count: 3, shape: string): [string, string, string];
 function slugParts(c: Company, count: number, shape: string): string[] {
@@ -184,20 +169,17 @@ function slugParts(c: Company, count: number, shape: string): string[] {
   return parts;
 }
 const ADP = "https://workforcenow.adp.com/mascsr/default";
-const ADP_CCID = "19000101_000001"; // the career center nearly every ADP client uses
+const ADP_CCID = "19000101_000001";
 function adp(c: Company) {
   const [cid, ccId = ADP_CCID, ...rest] = c.slug.split("/");
   if (!cid || rest.length) throw new Error(`adp slug must look like "<cid>" or "<cid>/<ccId>", got "${c.slug}"`);
   return { cid, ccId, query: `cid=${cid}&ccId=${ccId}&lang=en_US&locale=en_US` };
 }
-// "software-developer---ai-focus" -> "Software Developer - Ai Focus": iCIMS's sitemap has the title only in the URL.
 function icimsTitle(slug: string) {
   let text = slug;
   try {
     text = decodeURIComponent(slug);
-  } catch {
-    // left as it is
-  }
+  } catch {}
   return text
     .replace(/---/g, " – ")
     .replace(/-/g, " ")
@@ -207,7 +189,6 @@ function icimsTitle(slug: string) {
     .replace(/ – /g, " - ");
 }
 
-// The fields read from each board's answer.
 interface GreenhouseBoard {
   jobs?: { absolute_url: string; title: string; location?: { name?: string } | null; content?: string; first_published?: string }[];
 }
@@ -405,7 +386,7 @@ const fetchers: Record<Ats, (c: Company) => Promise<Posting[]>> = {
           company: c.name,
           title: j.name,
           location: place(j.location?.city, j.location?.region, j.location?.country?.toUpperCase(), j.location?.remote && "Remote"),
-          description: null, // one request per posting: fetched by fetchDescription once it survives triage
+          description: null,
           posted: posted(j.releasedDate),
         });
       if (offset + 100 >= (data.totalFound ?? 0)) break;
@@ -432,7 +413,6 @@ const fetchers: Record<Ats, (c: Company) => Promise<Posting[]>> = {
     }
     return out;
   },
-  // Oracle Recruiting Cloud (HCM) candidate sites. Slug: "<host>.oraclecloud.com/<site>", e.g. "egay.fa.us6.oraclecloud.com/CX_4001".
   async oracle(c) {
     const [host, site] = slugParts(c, 2, "<host>.oraclecloud.com/<site>");
     const out: Posting[] = [];
@@ -456,7 +436,6 @@ const fetchers: Record<Ats, (c: Company) => Promise<Posting[]>> = {
     }
     return out;
   },
-  // ADP Workforce Now career centers. Slug: "<cid>", or "<cid>/<ccId>" when the career center is not the usual one.
   async adp(c) {
     const { cid, ccId, query } = adp(c);
     const out: Posting[] = [];
@@ -479,7 +458,6 @@ const fetchers: Record<Ats, (c: Company) => Promise<Posting[]>> = {
     }
     return out;
   },
-  // UKG Pro (UltiPro) recruiting. Slug: "<host>/<tenant>/<board id>", e.g. "recruiting2.ultipro.com/CRA1009CRWL/755fc3a5-077f-4395-ad9a-01ffdc6dea89".
   async ukg(c) {
     const [host, tenant, board] = slugParts(c, 3, "<host>/<tenant>/<board id>");
     const base = `https://${host}/${tenant}/JobBoard/${board}`;
@@ -512,7 +490,6 @@ const fetchers: Record<Ats, (c: Company) => Promise<Posting[]>> = {
     }
     return out;
   },
-  // iCIMS career portals, from their sitemap, which has no location. Slug: the host's first part, e.g. "careers-acme" for careers-acme.icims.com.
   async icims(c) {
     const xml = await getText(`https://${c.slug}.icims.com/sitemap.xml`);
     return [...xml.matchAll(/<loc>(https:\/\/[^<]+\/jobs\/\d+\/([^/<]+)\/job)<\/loc>(?:\s*<lastmod>([^<]+)<\/lastmod>)?/g)]
@@ -528,7 +505,6 @@ const fetchers: Record<Ats, (c: Company) => Promise<Posting[]>> = {
       .sort((a, b) => (b.posted ?? "").localeCompare(a.posted ?? ""))
       .slice(0, NEWEST_MAX);
   },
-  // Eightfold career sites, US postings only (the rest would be dropped as abroad). Slug: "<host>.eightfold.ai/<company domain>".
   async eightfold(c) {
     const [host, domain] = slugParts(c, 2, "<host>.eightfold.ai/<company domain>");
     const out: Posting[] = [];
@@ -563,7 +539,6 @@ const fetchers: Record<Ats, (c: Company) => Promise<Posting[]>> = {
       posted: posted(j.published_date),
     }));
   },
-  // JazzHR boards (<slug>.applytojob.com), from the public listing page.
   async jazzhr(c) {
     const html = await getText(`https://${c.slug}.applytojob.com/apply`);
     const out: Posting[] = [];
@@ -596,7 +571,6 @@ const fetchers: Record<Ats, (c: Company) => Promise<Posting[]>> = {
   },
 };
 
-// The board a posting's URL is on, as a company to watch, when it is one of the boards above.
 export function boardOf(url: string, name: string): Company | null {
   let u: URL;
   try {
@@ -611,7 +585,7 @@ export function boardOf(url: string, name: string): Company | null {
   if (/^(boards|job-boards)\.greenhouse\.io$/.test(host) && /^\/[\w-]+\/jobs\//.test(path) && first !== "embed") return at("greenhouse", first);
   if (host === "jobs.lever.co") return at("lever", first);
   if (host === "jobs.ashbyhq.com") return at("ashby", first);
-  if (host === "apply.workable.com" && first !== "api" && first !== "j") return at("workable", first); // /j/<id> is a short link
+  if (host === "apply.workable.com" && first !== "api" && first !== "j") return at("workable", first);
   if (host.endsWith(".recruitee.com")) return at("recruitee", host.split(".")[0]);
   if (host === "jobs.smartrecruiters.com") return at("smartrecruiters", first);
   const wd = /^([\w-]+)\.(wd\d+)\.myworkdayjobs\.com$/.exec(host);
@@ -633,12 +607,8 @@ export function boardOf(url: string, name: string): Company | null {
   return null;
 }
 
-// Two boards are one when they are the same kind with the same slug.
 const sameBoard = (a: Company) => (b: Company) => a.ats === b.ats && a.slug.toLowerCase() === b.slug.toLowerCase();
 
-// Watches the board a posting was found on, when boardOf knows it and it is not watched yet, so the
-// employer's later postings arrive with each scan rather than through a search. A board that lists
-// nothing is left alone. Returns the board when it was added.
 export async function watchBoardOf(url: string, name: string): Promise<Company | null> {
   const company = boardOf(url, name);
   if (!company || loadCompanies().some(sameBoard(company))) return null;
@@ -646,15 +616,13 @@ export async function watchBoardOf(url: string, name: string): Promise<Company |
   return postings.length && addCompany(company) ? company : null;
 }
 
-// What a board is read from, so that boards on one host are read one at a time.
 export function boardHost(c: Company): string {
   if (c.ats === "workday") return c.slug.split("/")[0] ?? c.slug;
   if (["oracle", "ukg", "eightfold"].includes(c.ats)) return c.slug.split("/")[0] ?? c.slug;
   if (["icims", "breezy", "jazzhr", "bamboohr", "recruitee"].includes(c.ats)) return `${c.ats}:${c.slug}`;
-  return c.ats; // one shared API: Greenhouse, Lever, Ashby, Workable, SmartRecruiters, ADP
+  return c.ats;
 }
 
-// Boards that list without the body text: fetch it for one posting.
 export async function fetchDescription(url: string): Promise<string | null> {
   try {
     const wd = /^(https:\/\/([\w-]+)\.wd\d+\.myworkdayjobs\.com)\/(?:[a-z]{2}-[A-Z]{2}\/)?([\w-]+)(\/job\/.+)$/.exec(url);
@@ -707,7 +675,6 @@ export async function fetchDescription(url: string): Promise<string | null> {
       const html = data.result?.jobOpening?.description;
       return html ? htmlToText(html) || null : null;
     }
-    // Any other career page: UKG's carries the posting as JSON in a script, most others as schema.org JobPosting.
     if (AGGREGATOR.test(url)) return null;
     const page = await getText(url.includes(".icims.com/") ? `${url}${url.includes("?") ? "&" : "?"}in_iframe=1` : url);
     const ukg = /CandidateOpportunityDetail\(\{[\s\S]*?"Description":("(?:[^"\\]|\\.)*")/.exec(page);
@@ -718,10 +685,8 @@ export async function fetchDescription(url: string): Promise<string | null> {
   }
 }
 
-// Job sites whose pages are read another way, if at all.
 const AGGREGATOR = /^https?:\/\/([\w-]+\.)*(linkedin|indeed)\.com\//i;
 
-// The description in a page's schema.org JobPosting, which most career sites publish for search engines.
 export function jsonLdDescription(html: string): string | null {
   for (const [, body = ""] of html.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
     let data: unknown;
@@ -740,10 +705,6 @@ export function jsonLdDescription(html: string): string | null {
   }
   return null;
 }
-
-// ---- keyword feeds: remote-job aggregators with a public JSON API. They list any employer, so each
-// posting is matched against jobs already known (see findTwin in db.ts) and folded in when it is the
-// same role. Each has its own minimum interval, since they ask for a handful of requests a day.
 
 export interface Feed {
   minutes: number;

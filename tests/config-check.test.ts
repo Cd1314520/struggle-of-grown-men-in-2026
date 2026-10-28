@@ -5,7 +5,6 @@ import YAML from "yaml";
 import { configProblems } from "../src/config-check";
 
 const shipped = () => YAML.parse(readFileSync(join(import.meta.dir, "../config.yml"), "utf8")) as Record<string, Record<string, unknown>>;
-// The shipped file with one thing changed.
 const withChange = (change: (config: Record<string, Record<string, unknown>>) => void) => {
   const config = shipped();
   change(config);
@@ -137,7 +136,7 @@ describe("config.local.yml", () => {
       resume: { dir: "basic-resume", pdfName: "a_b_resume.pdf" },
       autoApply: { phases: ["real"], perDay: 5 },
     });
-    expect(overlay(base, null)).toBeNull(); // an empty file is caught by the check, not ignored
+    expect(overlay(base, null)).toBeNull();
     expect(overlay(base, {})).toEqual(base);
     expect(overlay({ mailbox: "a@example.com" }, { mailbox: null })).toEqual({ mailbox: null });
   });
@@ -149,10 +148,8 @@ describe("config.local.yml", () => {
       approval: "auto",
       autoApply: { perDay: 9 },
     });
-    // Auto apply that stopped for the submit check, or was off, is gated.
     expect(upgrade({ phase: "real", autoApply: { enabled: true, submit: false } })).toEqual({ targets: { holdBack: false }, approval: "gated", autoApply: {} });
     expect(upgrade({ autoApply: { enabled: false } })).toEqual({ approval: "gated", autoApply: {} });
-    // New keys in the same file win.
     expect(upgrade({ phase: "real", targets: { holdBack: true }, approval: "gated", autoApply: { enabled: true, submit: true } })).toEqual({
       targets: { holdBack: true },
       approval: "gated",

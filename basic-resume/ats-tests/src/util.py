@@ -10,7 +10,7 @@ class DimensionResult:
     """One scorer's output for one backend."""
 
     name: str
-    score: float                              # 0.0 .. 1.0
+    score: float
     findings: list[str] = field(default_factory=list)
     details: dict[str, Any] = field(default_factory=dict)
 
@@ -43,8 +43,6 @@ def fuzzy_contains(haystack: str, needle: str, threshold: int = 90) -> bool:
 
     needle_tokens = n.split()
     if len(needle_tokens) <= 4:
-        # Walk windows the size of the needle (in tokens) and require a
-        # high token_sort_ratio. Catches reorderings but rejects truncation.
         hay_tokens = h.split()
         win = len(needle_tokens)
         for i in range(0, max(1, len(hay_tokens) - win + 1)):

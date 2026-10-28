@@ -1,5 +1,3 @@
-// Track: read the application mailbox and record what it says about applications already sent: each
-// new request from an employer becomes a step (steps.ts), and later mail moves those steps on.
 import { config } from "./config";
 import { applicationsAwaitingOutcome, kvGet, kvSet, logEvent, type Job } from "./db";
 import * as gmail from "./gmail";
@@ -11,7 +9,6 @@ const MAIL_STEP_STATES = ["done", "scheduled", "closed", "expired", "cancelled"]
 const ENDINGS = ["offer", "rejected_by_company"] as const;
 const day = (s: string | null | undefined) => s?.slice(0, 10) ?? "?";
 
-// One step as the agent reads it: what it is, and whose move it is.
 function stepLine(s: Step, company: string, now: number) {
   const state =
     s.state === "todo"
@@ -41,8 +38,7 @@ export async function trackMailbox(run: RunWorker) {
   const started = new Date().toISOString();
   const byId = new Map(open.map(j => [j.id, j]));
   const listed = (id: number) => byId.get(id);
-  let finished = false as boolean; // set from the tool callback
-  // A refusal goes back to the agent as text, so it can correct the call.
+  let finished = false as boolean;
   const attempt = (fn: () => string) => {
     try {
       return fn();
@@ -137,7 +133,7 @@ export async function trackMailbox(run: RunWorker) {
             const status = arg.oneOf(args, "status", ENDINGS),
               note = arg.str(args, "note");
             recordOutcome(job.id, status, note);
-            job.status = status; // so later mail in this run cannot add steps to it
+            job.status = status;
             logEvent("mail", `${status}: ${note}`, job.id, "track");
             return "Recorded.";
           }),

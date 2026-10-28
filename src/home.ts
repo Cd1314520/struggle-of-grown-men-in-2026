@@ -1,8 +1,5 @@
-// What config.boards.location names, so a list's "near" filter can say what it narrows to. The job
-// boards are searched within `boards.distance` of it; a company's own board lists postings anywhere.
 import { placeOf } from "./location";
 
-// Name and postal code of each state, as boards write them ("Austin, Texas", "Austin, TX").
 const STATES = new Map(
   (
     "Alabama AL|Alaska AK|Arizona AZ|Arkansas AR|California CA|Colorado CO|Connecticut CT|Delaware DE|Florida FL|Georgia GA|Hawaii HI|" +
@@ -25,8 +22,6 @@ const COUNTRY = /^(the )?(united states( of america)?|usa?|u\.s\.(a\.)?|america)
 
 export type Home = { kind: "city"; name: string } | { kind: "state"; name: string; code: string };
 
-// The city or state the boards search around, or null for a whole country (or nothing set): a filter
-// for it would narrow a list no further than the search already did.
 export function homeOf(location: string | null | undefined): Home | null {
   const parts = (location ?? "")
     .split(",")
@@ -36,13 +31,10 @@ export function homeOf(location: string | null | undefined): Home | null {
   if (!first) return null;
   const state = parts.length === 1 ? STATES.get(first.toLowerCase()) : undefined;
   if (state) return { kind: "state", ...state };
-  // A single name abroad may be a country or a city. Taken for a country, so a list never offers "Near Canada".
   if (parts.length === 1 && placeOf(first) === "abroad") return null;
   return { kind: "city", name: first.replace(/\b\w/g, c => c.toUpperCase()) };
 }
 
-// The filter's label, and whether a listing's place is in the home area. Listings from the job boards
-// were found by searching there.
 export function nearHome(home: Home): { label: string; test: (place: string | null, source: string) => boolean } {
   const board = (source: string) => source === "linkedin" || source === "indeed";
   if (home.kind === "city") {

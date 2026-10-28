@@ -3,8 +3,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Each scenario imports the production modules in a fresh process with throwaway state, in a fixed
-// zone so that local days are known: noon on Oct 25 2026 in Chicago (UTC-5) is the clock.
 const prelude = `
 import assert from "node:assert/strict";
 import { db, notifyJobChange } from ${JSON.stringify(join(import.meta.dir, "../src/db.ts"))};
@@ -52,11 +50,9 @@ describe("stats", () => {
   it("counts postings found and applications sent on the local day they happened", () => {
     scenario(`
       job({ found_at: "2026-10-25 15:00:00" });
-      // 02:00 UTC on the 25th is still the evening of the 24th in Chicago.
       job({ found_at: "2026-10-25 02:00:00" });
       job({ found_at: "2026-10-20 12:00:00", status: "submitted", score: 90, submitted_at: "2026-10-25T03:30:00.000Z" });
       job({ found_at: "2026-10-20 12:00:00", status: "submitted", score: 90, submitted_at: "2026-10-23T18:00:00.000Z" });
-      // Before the window: in neither series.
       job({ found_at: "2026-09-01 12:00:00", status: "submitted", score: 90, submitted_at: "2026-09-02T12:00:00.000Z" });
       const s = stats(NOW);
       assert.equal(s.found[day(s, "2026-10-25")], 1);
@@ -77,7 +73,6 @@ describe("stats", () => {
       db.query("UPDATE jobs SET status = 'interview' WHERE id = ?").run(a);
       db.query("UPDATE jobs SET status = 'rejected_by_company' WHERE id = ?").run(b);
       db.query("UPDATE status_changes SET at = '2026-10-24 15:00:00'").run();
-      // The same application moving on again that day is still one answer.
       db.query("INSERT INTO status_changes (job_id, from_status, to_status, at) VALUES (?, 'interview', 'offer', '2026-10-24 16:00:00')").run(a);
       const s = stats(NOW);
       assert.equal(s.responses[day(s, "2026-10-24")], 2);
@@ -88,9 +83,9 @@ describe("stats", () => {
 
   it("follows the postings found in the window through each stage, never widening", () => {
     scenario(`
-      job({ status: "skipped" }); // screened out on its title
-      job({ status: "skipped", score: 30 }); // assessed, below the bar
-      job({ status: "triaged", score: 70 }); // re-queued for assessment: not recommended yet
+      job({ status: "skipped" });
+      job({ status: "skipped", score: 30 });
+      job({ status: "triaged", score: 70 });
       job({ status: "awaiting_approval", score: 75 });
       job({ status: "held", score: 85 });
       job({ status: "rejected", score: 66 });
@@ -98,9 +93,8 @@ describe("stats", () => {
       job({ status: "submitted", score: 92, approved_by: "user", submitted_at: "2026-10-25T14:00:00.000Z" });
       job({ status: "interview", score: 95, approved_by: "auto", submitted_at: "2026-10-24T14:00:00.000Z" });
       job({ status: "rejected_by_company", score: 80, submitted_at: "2026-10-22T14:00:00.000Z" });
-      // An outcome recorded by hand on a job never sent counts as no answer to an application.
       job({ status: "offer", score: 88 });
-      job({ status: "awaiting_approval", score: 99, found_at: "2026-08-01 12:00:00" }); // found before the window
+      job({ status: "awaiting_approval", score: 99, found_at: "2026-08-01 12:00:00" });
       const s = stats(NOW);
       assert.deepEqual(s.funnel, { found: 11, assessed: 10, recommended: 8, approved: 4, applied: 3, responded: 2 });
     `);
@@ -112,7 +106,7 @@ describe("stats", () => {
       notifyJobChange(job());
       assert.equal(kept(NOW + 5_000).funnel.found, 0);
       assert.equal(kept(NOW + 25_000).funnel.found, 1);
-      job(); // written without telling anyone: nothing to recount for
+      job();
       assert.equal(kept(NOW + 120_000).funnel.found, 1);
     `);
   });
@@ -124,7 +118,6 @@ describe("stats", () => {
       const c = job({ status: "awaiting_approval", score: 90 });
       db.query("UPDATE jobs SET status = 'approved', approved_by = 'auto' WHERE id IN (?, ?)").run(a, b);
       db.query("UPDATE jobs SET status = 'approved', approved_by = 'user' WHERE id = ?").run(c);
-      // A retry approves the same job again.
       db.query("UPDATE jobs SET status = 'failed' WHERE id = ?").run(a);
       db.query("UPDATE jobs SET status = 'approved' WHERE id = ?").run(a);
       db.query("UPDATE status_changes SET at = '2026-10-25 12:00:00'").run();

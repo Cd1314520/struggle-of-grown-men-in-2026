@@ -14,7 +14,6 @@ export const Textarea = forwardRef<HTMLTextAreaElement, ComponentProps<"textarea
   return <textarea ref={ref} className={cn(field, "min-h-20 resize-y px-3 py-2 leading-relaxed touch:text-base", className)} {...props} />;
 });
 
-// A search box with its shortcut shown, and a button to clear it.
 export const SearchInput = forwardRef<
   HTMLInputElement,
   Omit<ComponentProps<"input">, "onChange" | "value"> & { value: string; onValueChange: (v: string) => void; shortcut?: string }
@@ -60,7 +59,6 @@ export function Label({ className, ...props }: ComponentProps<"label">) {
   return <label className={cn("text-sm font-medium text-fg", className)} {...props} />;
 }
 
-// A labelled control with an optional hint underneath.
 export function Field({ label, hint, children, className }: { label: string; hint?: string; children: React.ReactNode; className?: string }) {
   return (
     <label className={cn("flex flex-col gap-1.5", className)}>

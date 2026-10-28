@@ -1,5 +1,3 @@
-// What a new install still needs before the app can do its work, step by step, as the Setup page shows
-// it. Every check reads the machine or the files as they are now; nothing here is stored.
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { loadCompanies } from "./ats";
@@ -21,21 +19,19 @@ export interface SetupCheck {
 }
 export interface SetupStep {
   id: SetupStepId;
-  done: boolean; // every required check passes
+  done: boolean;
   required: boolean;
   checks: SetupCheck[];
 }
 export interface SetupResult {
   steps: SetupStep[];
-  remaining: number; // required steps not done
+  remaining: number;
   redirectUri: string;
-  localConfig: string; // where the machine's own settings are written
+  localConfig: string;
 }
 
-// Whether any stage's model runs on harness `h`.
 const onHarness = (h: HarnessId) => MODEL_STAGES.some(stage => harnessOf(config.models[stage] ?? null) === h);
 
-// The programs the app starts, as the service's PATH finds them.
 const PROGRAMS: { name: string; purpose: string; required: () => boolean }[] = [
   { name: "omp", purpose: "Runs the agents on omp's models", required: () => onHarness("omp") },
   { name: "claude", purpose: "Runs the agents on Claude Code's models (claude-code/…)", required: () => onHarness("claude-code") },
@@ -67,9 +63,6 @@ function tools() {
   );
 }
 
-// A stage's model is known when its harness lists it under that exact name. omp also matches names
-// loosely ("opus"), and Claude Code takes any full model name, so an unlisted name is a warning, not a
-// failure.
 function models(catalog: ModelCatalog | null) {
   if (!catalog) return step("models", [check("catalog", "Model provider", false, "Checking what omp and Claude Code can reach…", false)]);
   const known = new Set(catalog.models.flatMap(m => [m.selector, m.selector.slice(m.provider.length + 1)]));
@@ -134,7 +127,6 @@ function resume() {
   ]);
 }
 
-// companies.yml runs to thousands of lines and the summary asks on every change: counted once per version of the file.
 let boards: { stamp: string; count: number } | null = null;
 function boardCount() {
   const file = statSync(join(PROFILE, "companies.yml"), { throwIfNoEntry: false });
@@ -143,9 +135,7 @@ function boardCount() {
     let count = 0;
     try {
       count = loadCompanies().length;
-    } catch {
-      // an unreadable file shows as no boards
-    }
+    } catch {}
     boards = { stamp, count };
   }
   return boards.count;
@@ -179,7 +169,6 @@ function scan() {
   return step("scan", [check("scan", "First scan", !!last, last ? `Last scan ${last}` : "Not run yet")], false);
 }
 
-// `catalog` null: the model list has not been read yet (the summary never waits for it).
 export function setupStatus(catalog: ModelCatalog | null): SetupResult {
   const steps = [tools(), models(catalog), machine(), resume(), profile(), mail(), scan()];
   return {

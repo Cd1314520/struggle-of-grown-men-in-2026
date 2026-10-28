@@ -18,8 +18,6 @@ const judged = (fields: Partial<PracticeAssessment>): PracticeAssessment => ({
   against: "k",
   ...fields,
 });
-// The notes as their writers word them: rubric.ts holds a job with "not a practice job: <refusal>;
-// real score …", the fill guard with "needs your review: auto-approved, but not a practice job: …".
 const refusal = (fields: Partial<PracticeAssessment>) => practiceRefusal(judged(fields), true) ?? "";
 const held = (fields: Partial<PracticeAssessment>) => `not a practice job: ${refusal(fields)}; real score 88 (threshold 65)`;
 
@@ -31,11 +29,9 @@ describe("why a job was set aside", () => {
         detail: "Held back on the title, company and place alone, before a full assessment",
       });
     expect(setAsideReason(held({}))).toEqual({ label: "Target employer", detail: "Smarsh sells an established compliance platform (SaaS) to banks." });
-    // Without the full assessment: the judgment remembered from another job at the employer (prep.ts).
     expect(
       setAsideReason("not a practice job: a target employer, as judged on job #12 (Payments platform); held without a full assessment until it is released"),
     ).toEqual({ label: "Target employer", detail: "Payments platform" });
-    // Notes from before targets were described in words.
     expect(setAsideReason("not a practice job: a tech company at scale, kept for the real search (Smarsh SaaS); real score 88 (threshold 65)")).toEqual({
       label: "Tech company at scale",
       detail: "Smarsh SaaS",
@@ -106,7 +102,6 @@ describe("the near filter", () => {
   });
 });
 
-// The lists are built in a fresh process with throwaway state: importing them opens the database.
 const prelude = `
 import assert from "node:assert/strict";
 import { db, updateJob } from ${JSON.stringify(join(import.meta.dir, "../src/db.ts"))};
@@ -175,9 +170,7 @@ describe("job lists", () => {
         return [r.offset, r.focusIndex, r.focusGroup];
       };
       assert.deepEqual(where({ focus: id, limit: 50 }), [100, 117, "other"]);
-      // Not in the group shown: the page asked for, and the group to switch to.
       assert.deepEqual(where({ group: "other", focus: order[0], offset: 50 }), [50, null, "strong"]);
-      // Searched out, or not in the view at all.
       assert.deepEqual(where({ q: "nothing like it", focus: id }), [0, null, "other"]);
       assert.deepEqual(where({ focus: 999 }), [0, null, null]);
       assert.deepEqual(where({}), [0, null, null]);

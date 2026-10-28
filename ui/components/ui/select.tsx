@@ -8,9 +8,6 @@ export interface Option<T extends string = string> {
   label: ReactNode;
 }
 
-// A compact select. `prefix` labels the trigger: "Sort: Newest". `collapse`: in a Workspace bar narrower
-// than 80rem (a phone, a list column, a page in a window under ~1520px), the
-// trigger keeps only an icon, and says the rest to screen readers.
 export function Select<T extends string>({
   value,
   onValueChange,

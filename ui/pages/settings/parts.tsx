@@ -1,15 +1,10 @@
-// The shape of the Settings page: one section per subsystem on the sheet, divided by full-bleed rules, each a
-// list of rows with the label and what it means on the left and the value or control on the right.
 import { FileCog } from "lucide-react";
 import type { ReactNode } from "react";
 import { WorkspaceSection } from "../../components/ui";
 import { cn } from "../../lib/cn";
 
-// A section's head (its first child) inside the 56rem reading measure, its rule still full-bleed.
 export const MEASURED_HEAD = "[&>div:first-child]:max-w-[56rem]";
 
-// A section of the page: a titled region the nav scrolls to, its notices across the sheet, its rows inside
-// the reading measure, and a last line that says where its changes are saved.
 export function SettingsPanel({
   id,
   title,
@@ -30,9 +25,7 @@ export function SettingsPanel({
   children: ReactNode;
 }) {
   return (
-    // The id sits on a wrapper: the nav scrolls to it, clear of the bar (and on a phone, the nav strip too).
     <div id={id} role="region" aria-label={title} className="scroll-mt-28 lg:scroll-mt-12">
-      {/* Its head keeps to the rows' measure, so its action ends where their values do. */}
       <WorkspaceSection flush title={title} description={description} actions={actions} className={MEASURED_HEAD} {...(tone && { tone })}>
         {notice && <div className="border-y border-border">{notice}</div>}
         <div className="flex max-w-[56rem] flex-col divide-y divide-border px-(--list-x) pb-2 [&>:first-child]:pt-1">{children}</div>
@@ -46,12 +39,10 @@ export function SettingsPanel({
   );
 }
 
-// A group of rows inside a section ("The pipeline", "Gmail"): a small muted label, as a heading.
 export function SettingsGroup({ title }: { title: string }) {
   return <h3 className="pt-6 pb-1.5 text-xs font-medium text-fg-muted">{title}</h3>;
 }
 
-// The value sits beside the label at every width; `stack` puts a wide control under it on a phone.
 export function SettingRow({
   label,
   description,
@@ -63,8 +54,8 @@ export function SettingRow({
   label: string;
   description?: ReactNode;
   children?: ReactNode;
-  stack?: boolean; // the control goes under the label on a phone
-  block?: boolean; // and at every width, across the row
+  stack?: boolean;
+  block?: boolean;
   className?: string;
 }) {
   if (block)
@@ -94,10 +85,8 @@ export function SettingRow({
   );
 }
 
-// A fold in a section: the policy behind its values.
 export const SettingFold = ({ children }: { children: ReactNode }) => <div className="py-3">{children}</div>;
 
-// Said once per section, on its last line: where a change made here goes.
 export const SavedLocally = () => (
   <span className="inline-flex items-start gap-1.5 text-xs text-fg-muted">
     <FileCog className="mt-0.5 size-3.5 shrink-0 text-fg-subtle" />

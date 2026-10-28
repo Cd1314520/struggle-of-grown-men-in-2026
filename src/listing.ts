@@ -1,5 +1,3 @@
-// The job lists the UI pages through: one view at a time, searched, filtered, grouped and sorted here,
-// so a section of thousands of jobs arrives one page at a time with true totals for every group.
 import type { ListedJob } from "./api-types";
 import { config, describing } from "./config";
 import { countByCompany, lastMovedFrom, listedJobs, openedAt } from "./db";
@@ -23,15 +21,13 @@ const VIEW_STATUSES: Record<ListView, readonly Status[]> = {
   rejected: ["rejected"],
 };
 
-// A row as a list shows it: the job, which group of its view it falls in, the gate it waits on, how
-// many applications have already gone to the same employer, and why it was set aside.
 export interface ListRow extends ListedJob {
   group: string;
   gate: GateKind | null;
   appliedThere: number;
-  companyCount: number; // jobs at the same employer in this view, this one included, before search, filters and group
-  reason: Reason | null; // why it was held or rejected (held and rejected views only)
-  rubric: "practice" | "real"; // the one its score is on
+  companyCount: number;
+  reason: Reason | null;
+  rubric: "practice" | "real";
 }
 export interface ListGroup {
   key: string;
@@ -41,14 +37,14 @@ export interface ListGroup {
 export interface ListResult {
   view: ListView;
   rows: ListRow[];
-  total: number; // rows matching the search, filters and group, before paging
+  total: number;
   offset: number;
   limit: number;
-  groups: ListGroup[]; // every group of the view, counted after the search and filters
-  filters: ListGroup[]; // quick filters, counted after the search and group
-  all: number; // jobs in the view, with no search, filter or group
-  focusIndex: number | null; // the `focus` job's index among the `total` rows, when they hold it; `rows` is then its page
-  focusGroup: string | null; // the `focus` job's group, when it is in the view at all
+  groups: ListGroup[];
+  filters: ListGroup[];
+  all: number;
+  focusIndex: number | null;
+  focusGroup: string | null;
 }
 export interface ListQuery {
   view: ListView;
@@ -58,7 +54,7 @@ export interface ListQuery {
   sort?: string | null;
   offset?: number;
   limit?: number;
-  focus?: number | null; // a job to page to, in place of `offset`
+  focus?: number | null;
 }
 
 const HOUR = 3600_000;
@@ -112,7 +108,6 @@ const SPECS: Record<ListView, Spec> = {
               ? "applying"
               : "assessing",
     sorts: {
-      // Stuck: longest waiting first. Applying: best first. Assessing: newest posting first.
       default: (a, b) =>
         (QUEUED.includes(a.status) && QUEUED.includes(b.status)) || (UNASSESSED.includes(a.status) && UNASSESSED.includes(b.status))
           ? byNewest(a, b)
@@ -145,7 +140,6 @@ const SPECS: Record<ListView, Spec> = {
                 : "no_reply",
     sorts: {
       default: (a, b) => {
-        // Your move and upcoming: soonest first. Everything else: most recent first.
         if (a.next && b.next && a.next.whose !== "them" && b.next.whose !== "them") return stamp(a.next.at) - stamp(b.next.at);
         return (b.next ? stamp(b.next.at) : sentAt(b)) - (a.next ? stamp(a.next.at) : sentAt(a));
       },
@@ -169,7 +163,6 @@ const SPECS: Record<ListView, Spec> = {
   },
 };
 
-// Quick filters: [key, label, test]. They narrow every group of a view at once.
 type Filter = readonly [key: string, label: string, test: (j: ListRow) => boolean];
 function filtersOf(view: ListView): Filter[] {
   const home = homeOf(config.boards?.location);
@@ -184,7 +177,6 @@ function filtersOf(view: ListView): Filter[] {
   return out;
 }
 
-// Every row of a view, with its group worked out.
 function viewRows(view: ListView): ListRow[] {
   const jobs = listedJobs(VIEW_STATUSES[view]);
   const gates = openGateKinds(),
@@ -192,7 +184,6 @@ function viewRows(view: ListView): ListRow[] {
     next: Map<number, NextStep> = view === "applications" ? nextSteps() : new Map<number, NextStep>();
   const here = new Map<string, number>();
   for (const j of jobs) here.set(j.company, (here.get(j.company) ?? 0) + 1);
-  // A job rejected without a note is explained by where it was stopped.
   const from = view === "held" || view === "rejected" ? lastMovedFrom(jobs.filter(j => !j.note).map(j => j.id)) : null;
   const spec = SPECS[view];
   return jobs.map(({ practice_assessment, ...j }) => {
@@ -228,7 +219,6 @@ export function listJobs(query: ListQuery): ListResult {
   const group = spec.groups.some(([k]) => k === query.group) ? query.group : null;
   const inGroup = group ? filtered.filter(j => j.group === group) : filtered;
   const sort = spec.sorts[query.sort ?? ""] ?? Object.values(spec.sorts)[0] ?? byNewest;
-  // Without a group the rows keep their groups' order, so a page reads top to bottom like the group tabs.
   const order = new Map(spec.groups.map(([k], i) => [k, i]));
   const sorted = inGroup.sort((a, b) => (group || query.sort ? 0 : (order.get(a.group) ?? 0) - (order.get(b.group) ?? 0)) || sort(a, b));
   const inGroupOf = (rows: ListRow[]) => (group ? rows.filter(j => j.group === group) : rows);

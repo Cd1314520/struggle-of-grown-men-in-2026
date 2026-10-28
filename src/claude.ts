@@ -1,10 +1,3 @@
-// Claude Code as a worker harness: `claude -p` with stream-json output, signed in as this machine's own
-// Claude Code (whatever `claude auth status` shows). One process per unit of work, as with omp.
-//
-// Host tools reach it as an MCP server ("host") that the app serves on a private localhost port for the
-// worker's lifetime, so the agent sees them as `mcp__host__<name>`. A browser worker also gets
-// Playwright's MCP server ("browser") attached over CDP to the same pacing proxy omp would use. Nothing
-// from the owner's own Claude Code setup is loaded: no CLAUDE.md, settings, hooks, plugins or MCP servers.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -14,13 +7,9 @@ import { errorMessage } from "./errors";
 import type { CatalogModel } from "./models";
 import { CLAUDE_PREFIX, durationMs, type Builtin, type HostTool, type ToolArgs, type WorkerHandle, type WorkerOptions, type WorkerResult } from "./worker";
 
-// Overridable so a test can stand in a fake.
 const claude = () => process.env["AUTO_APPLY_CLAUDE"] ?? "claude";
-// Pinned: its tool names and options are what prompts/browser-claude.md describes.
 export const PLAYWRIGHT_MCP = ["npx", "-y", "@playwright/mcp@0.0.83"];
 
-// omp's built-in tools as Claude Code's. `eval` has no counterpart: the fill worker gets a `prefill`
-// host tool in its place (src/fill.ts).
 const BUILTINS: Record<Builtin, string[]> = {
   read: ["Read", "Glob"],
   write: ["Write"],
@@ -38,7 +27,6 @@ interface Rpc {
   params?: { protocolVersion?: unknown; name?: unknown; arguments?: unknown };
 }
 
-// A minimal MCP server over streamable HTTP: plain JSON replies, no event stream, no sessions.
 function serveHostTools(tools: Record<string, HostTool>, log: (kind: string, message: string) => void) {
   const token = randomUUID();
   const call = async (name: string, args: ToolArgs) => {
@@ -52,7 +40,7 @@ function serveHostTools(tools: Record<string, HostTool>, log: (kind: string, mes
     }
   };
   const answer = async (rpc: Rpc) => {
-    if (rpc.id === undefined || rpc.id === null) return null; // a notification
+    if (rpc.id === undefined || rpc.id === null) return null;
     const reply = (result: unknown) => ({ jsonrpc: "2.0", id: rpc.id, result });
     switch (rpc.method) {
       case "initialize":
@@ -78,7 +66,7 @@ function serveHostTools(tools: Record<string, HostTool>, log: (kind: string, mes
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    idleTimeout: 0, // a tool call may wait on a person
+    idleTimeout: 0,
     async fetch(req) {
       if (req.headers.get("authorization") !== `Bearer ${token}`) return new Response("unauthorized", { status: 401 });
       if (req.method !== "POST") return new Response(null, { status: 405 });
@@ -111,18 +99,16 @@ const browserServer = (cdpPort: number) => {
       "--cdp-endpoint",
       `http://127.0.0.1:${cdpPort}`,
       "--caps",
-      "vision", // clicks by coordinates, for CAPTCHAs
-      "--no-webmcp", // it would add navigator.modelContext, which bot checks look for
+      "vision",
+      "--no-webmcp",
       "--output-dir",
       join(DATA, "screenshots"),
-      // Input is paced like a person's by the proxy, so a long answer takes a while to type.
       "--timeout-action",
       "60000",
     ],
   };
 };
 
-// The subset of Claude Code's stream-json events this client reads.
 interface Block {
   type?: string;
   text?: string;
@@ -140,7 +126,6 @@ interface Event {
   rate_limit_info?: { status?: string; rateLimitType?: string; resetsAt?: number };
 }
 
-// What a built-in or browser tool call is doing, for the activity log. Never the text it types.
 export function stepOf(name: string, input: Record<string, unknown> = {}): string {
   const s = (key: string) => (typeof input[key] === "string" ? input[key] : "");
   const what = s("description") || s("element") || s("url") || s("query") || s("file_path") || s("pattern") || s("command");
@@ -185,24 +170,21 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
     sessionId,
   ];
   if (model && model !== "default") args.push("--model", model);
-  // Closing the page would lose the application's tab, a form filled all at once gets flagged as a
-  // bot, and running code in Playwright's own process is outside anything a worker needs.
   if (opts.browser) args.push("--disallowedTools", ["browser_close", "browser_fill_form", "browser_run_code_unsafe"].map(t => `mcp__browser__${t}`).join(","));
 
   const env: Record<string, string | undefined> = {
     ...process.env,
     ...opts.env,
-    MCP_TIMEOUT: "120000", // npx may fetch Playwright's server on its first run
-    MCP_TOOL_TIMEOUT: String(48 * 3_600_000), // host tools may wait on a person
+    MCP_TIMEOUT: "120000",
+    MCP_TOOL_TIMEOUT: String(48 * 3_600_000),
   };
-  delete env["CLAUDECODE"]; // set when the app itself was started from a Claude Code session
+  delete env["CLAUDECODE"];
   const proc = Bun.spawn(args, { cwd: opts.cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
   active.add(proc);
   void proc.stdin.write(opts.prompt);
   void proc.stdin.end();
 
   let lastText = "";
-  // Assigned from callbacks, which control-flow narrowing cannot see.
   let result = null as WorkerResult | null;
   let abortRequested = false as boolean;
   let limited = null as string | null;
@@ -226,7 +208,6 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
         if (e.subtype !== "init") break;
         for (const s of e.mcp_servers ?? []) {
           if (s.status !== "failed" && s.status !== "needs-auth") continue;
-          // Without its host tools a worker can report nothing; without its browser, a fill can do nothing.
           result ??= { status: "error", error: `the ${s.name ?? "?"} MCP server did not start (${s.status})` };
           stop();
         }
@@ -305,8 +286,6 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
   };
 }
 
-// The models Claude Code offers here: its aliases, which follow the newest of each family, when the
-// `claude` on the PATH is signed in. It has no listing of its own.
 const ALIASES: { alias: string; name: string }[] = [
   { alias: "default", name: "Claude Code's default" },
   { alias: "fable", name: "Claude Fable (latest)" },

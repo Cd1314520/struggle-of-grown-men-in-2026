@@ -1,7 +1,4 @@
 #!/usr/bin/env bun
-// Upgrades a database to this code's schema version, or reports where it stands. The app does the
-// same on every start; this is for a database the app is not running against, such as a restored
-// backup the journal scripts are about to read.
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -68,7 +65,6 @@ if (import.meta.main) {
       process.exit(1);
     }
   }
-  // Read the configured data directory only when no path was given: config has side effects.
   dbPath ??= join((await import("../src/config")).DATA, "app.db");
   try {
     runMigrate({ dbPath, status });

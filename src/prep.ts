@@ -1,4 +1,3 @@
-// Prep: score one job against the rubric and, when it clears, tailor the resume for it.
 import { existsSync } from "node:fs";
 import { autoApply, autoApproval, employerCapNote } from "./auto";
 import { config, describing, jobDir, readProfile } from "./config";
@@ -16,25 +15,20 @@ import { to } from "./status";
 import { render } from "./worker-tools";
 
 export async function prep(job: Job, run: RunWorker) {
-  const feedback = kvGet(`feedback.${job.id}`); // set when the user asked for this job explicitly
-  // The listing that would be applied through, not the other offices the same role is listed for.
+  const feedback = kvGet(`feedback.${job.id}`);
   const location = appliedLocation(job);
   if (!feedback && placeOf(location) === "abroad") {
     updateJob(job.id, to.skipped("the listing is for a position outside the United States"));
     return;
   }
-  // Auto apply could not take it whatever the assessment said: not worth one.
   const capped = feedback ? null : employerCapped(job);
   if (capped) {
     uncountOne("prep");
     updateJob(job.id, to.skipped(capped));
     return;
   }
-  // An employer judged before settles what the full assessment would only judge again.
   const settled = feedback ? null : settledByEmployer(job);
   if (settled) {
-    // The real rubric decides whether a job held for the real search is worth keeping. Its plain
-    // requirements are left to the cheap screen; the rest wait until the job is released.
     if (job.description) {
       const screened = await screen(job, location, run, "frontier");
       if (screened !== "pass") {
@@ -62,11 +56,8 @@ export async function prep(job: Job, run: RunWorker) {
   stageResume(dir);
   const maxPages = stockPages();
   updateJob(job.id, to.prepping());
-  // Both are set from tool callbacks.
   let verdict = null as Verdict | null;
   let reported = false as boolean;
-  // The user can reject a job, or send it back, while its worker is still running. From then on the
-  // worker's reports are for a job that is no longer its own.
   const WITHDRAWN = "ERROR: this job was taken out of prep while you were working; nothing was recorded. Stop.";
   const stillPrepping = () => getJob(job.id)?.status === "prepping";
   const { done } = run({
@@ -140,8 +131,6 @@ export async function prep(job: Job, run: RunWorker) {
           if (!practice || typeof practice !== "object" || Array.isArray(practice)) {
             return `ERROR: the 'practice' object is required, with ${describing() ? "target, " : ""}employerEvidence, agentNative and agentNativeEvidence. Call submit_checklist again with it.`;
           }
-          // Whether the employer is on one of the candidate's lists, and the description it was judged
-          // against, are the host's to say, not the worker's.
           const { target } = practice as Record<string, unknown>;
           practice = {
             ...practice,
@@ -160,7 +149,6 @@ export async function prep(job: Job, run: RunWorker) {
             checklist: JSON.stringify(result.items),
             practice_assessment: result.practice ? JSON.stringify(result.practice) : null,
           };
-          // A job the user asked for by hand is tailored whatever the checklist says.
           if (result.decision === "apply" || feedback) {
             updateJob(job.id, fields);
             return `Checklist recorded (${result.reason}). CONTINUE: tailor the resume, then call finish_prep.`;
@@ -224,13 +212,11 @@ export async function prep(job: Job, run: RunWorker) {
   const res = await done;
   if (reported || !stillPrepping()) return;
   if (isCapacityError(res.error)) {
-    // The provider stopped it, not the job: back in the queue, and the day's count given back.
     uncountOne("prep");
     updateJob(job.id, to.triaged("assessing again: the model provider was at capacity"));
   } else updateJob(job.id, to.failed(`prep did not finish: ${res.error ?? "no report"}`));
 }
 
-// Why auto apply would never take this job: its employer already has autoApply.perEmployer applications.
 function employerCapped(job: Job): string | null {
   const rules = autoApply();
   if (!rules.enabled) return null;
@@ -238,10 +224,6 @@ function employerCapped(job: Job): string | null {
   return others >= rules.perEmployer ? employerCapNote(others) : null;
 }
 
-// What the employer alone decides about a job, before a full assessment is spent on it: while target
-// employers are held back, a job at one is held without the practice assessment. The lists in
-// profile/employers.yml outrank an earlier judgment, and a practice-listed employer is left to the full
-// assessment.
 function settledByEmployer(job: Job): { reason: string; practice: PracticeAssessment | null } | null {
   if (!config.targets.holdBack) return null;
   const listed = employerListing(job.company);
@@ -256,17 +238,13 @@ function settledByEmployer(job: Job): { reason: string; practice: PracticeAssess
   };
 }
 
-// A cheap model reads the posting for the requirements it settles on its own, and a job that plainly
-// fails them is skipped without the full assessment. Anything else, including a screen that does not
-// finish, goes on to prep: the screen can only rule a job out.
-// `listed` is the list the employer counts as being on, which decides the rubrics asked.
 async function screen(
   job: Job,
   location: string | null | undefined,
   run: RunWorker,
   listed = employerListing(job.company),
 ): Promise<"pass" | "stop" | "capacity"> {
-  let out = null as string | null; // set from the tool callback
+  let out = null as string | null;
   const { done } = run({
     name: "screen",
     builtins: [],
@@ -303,7 +281,6 @@ async function screen(
     },
   });
   const res = await done;
-  // Taken out of prep while it ran: whatever the user did with it stands.
   if (getJob(job.id)?.status !== "prepping") return "stop";
   if (out) {
     updateJob(job.id, to.skipped(out));

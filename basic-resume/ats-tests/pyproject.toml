@@ -12,6 +12,4 @@ dependencies = [
 ]
 
 [tool.uv]
-# Suite is run as `uv run python -m src` from this directory — no need to
-# build it as an installable wheel.
 package = false

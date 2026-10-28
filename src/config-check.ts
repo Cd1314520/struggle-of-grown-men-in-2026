@@ -1,9 +1,3 @@
-// What config.yml must look like. `configProblems` reads the parsed file and says everything that is
-// wrong with it at once, by path, so a mistyped key or a number written as text stops the app at
-// start instead of surfacing later as a schedule that never fires or a cap that never binds.
-//
-// This module must not import anything that reads configuration.
-
 type Check = (value: unknown, path: string, problems: string[]) => void;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -47,8 +41,6 @@ const pair =
         inner(item, `${path}[${index}]`, problems);
       });
   };
-// An object with exactly these keys. A key not listed is a mistake unless `others` says what any
-// further key may hold.
 const shape =
   (required: Record<string, Check>, optional: Record<string, Check> = {}, others?: Check): Check =>
   (value, path, problems) => {
@@ -73,7 +65,6 @@ const CONFIG = shape(
     port,
     approval: oneOf("auto", "gated"),
     targets: shape({ holdBack: bool }, { describe: orNull(words) }),
-    // import was added later: a config.yml from before it still loads, and the resume import uses omp's default.
     models: shape({ triage: model, discover: model, locate: model, screen: model, prep: model, fill: model, track: model, recheck: model }, { import: model }),
     schedule: shape({ scanMinutes: amount(), discoverMinutes: amount(), trackMinutes: amount() }),
     concurrency: shape({ prep: count() }, { fill: count(1) }),
@@ -88,7 +79,6 @@ const CONFIG = shape(
     mailbox: orNull(matching(/^\S+@\S+$/, "an email address")),
     autoApply: shape({}, { minScore: amount(), allowConcerns: bool, perDay: count(), perEmployer: count() }),
     questionDigest: shape({}, { enabled: bool, time: matching(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:mm in 24-hour local time"), timeZone: text }),
-    // Each feed and board takes its own extra parameters.
     feeds: shape({}, {}, shape({ minutes: amount() }, {}, anything)),
     boards: shape(
       { location: text, distance: amount(), queries: listOf(text) },
@@ -98,7 +88,6 @@ const CONFIG = shape(
   },
 );
 
-// Everything wrong with a parsed config.yml; empty when it can be used.
 export function configProblems(raw: unknown): string[] {
   const problems: string[] = [];
   CONFIG(raw, "", problems);
@@ -110,7 +99,6 @@ export function configProblems(raw: unknown): string[] {
     const digest = raw["questionDigest"];
     if (isRecord(digest) && typeof digest["timeZone"] === "string" && digest["timeZone"].trim()) {
       try {
-        // Intl knows the IANA zones; a digest must never be scheduled in the host's zone by accident.
         new Intl.DateTimeFormat("en-US", { timeZone: digest["timeZone"] });
       } catch {
         problems.push(`questionDigest.timeZone: not an IANA time zone: ${JSON.stringify(digest["timeZone"])}`);

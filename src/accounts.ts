@@ -1,9 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { db } from "./db";
 
-/**
- * Known multi-tenant SaaS hosts where tenant isolation requires the path prefix.
- */
 const PATH_TENANT_HOSTS: Record<string, true> = {
   "boards.greenhouse.io": true,
   "job-boards.greenhouse.io": true,
@@ -12,26 +9,17 @@ const PATH_TENANT_HOSTS: Record<string, true> = {
   "apply.workable.com": true,
   "jobs.ashbyhq.com": true,
   "jobs.jobvite.com": true,
-  // UKG Pro Recruiting: /<TENANT>/JobBoard/…; each employer keeps its own candidate accounts
   "recruiting.ultipro.com": true,
   "recruiting2.ultipro.com": true,
   "www.jobapscloud.com": true,
 };
 
-/**
- * Multi-tenant hosts that name the tenant in a query parameter instead of the path.
- */
 const QUERY_TENANT_HOSTS: [RegExp, string][] = [
-  [/^career\d*\.(successfactors|sapsf)\.(com|eu|cn)$/, "company"], // SAP SuccessFactors: /careers?company=<id>
+  [/^career\d*\.(successfactors|sapsf)\.(com|eu|cn)$/, "company"],
   [/^sjobs\.brassring\.com$/, "partnerid"],
   [/^www\d*\.jobdiva\.com$/, "a"],
 ];
 
-/**
- * Conservatively normalizes a URL or domain string into an isolated tenant key.
- * Enforces strict host/tenant separation without cross-tenant aliasing.
- * Throws on non-http schemes, userinfo, or missing tenant indicators without leaking inputs.
- */
 function normalizeTenantDomain(urlOrDomain: string): string {
   if (typeof urlOrDomain !== "string") {
     throw new Error("Domain must be a non-empty string");
@@ -52,12 +40,10 @@ function normalizeTenantDomain(urlOrDomain: string): string {
     throw new Error("Invalid domain or URL format");
   }
 
-  // Reject non-http protocols (e.g. javascript:, ftp:, data:)
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("Only HTTP and HTTPS protocols are supported");
   }
 
-  // Reject userinfo to prevent secret leakage or credential abuse
   if (url.username || url.password) {
     throw new Error("URLs with user credentials are not allowed");
   }
@@ -69,7 +55,6 @@ function normalizeTenantDomain(urlOrDomain: string): string {
 
   const portSuffix = url.port && url.port !== "80" && url.port !== "443" ? `:${url.port}` : "";
 
-  // Multi-tenant hosts where path prefix isolates tenants
   if (PATH_TENANT_HOSTS[hostname]) {
     const segments = url.pathname.split("/").filter(Boolean);
     if (!segments.length) {
@@ -89,7 +74,6 @@ function normalizeTenantDomain(urlOrDomain: string): string {
     return `${hostname}${portSuffix}?${param}=${tenant}`;
   }
 
-  // Workday's other careers host: <wdN>.myworkdaysite.com/[<locale>/]recruiting/<tenant>/<site>
   if (hostname.endsWith(".myworkdaysite.com")) {
     const segments = url.pathname.split("/").filter(Boolean);
     const at = segments.findIndex(s => s.toLowerCase() === "recruiting");
@@ -98,8 +82,6 @@ function normalizeTenantDomain(urlOrDomain: string): string {
     return `${hostname}${portSuffix}/${decodeURIComponent(tenant).toLowerCase()}`;
   }
 
-  // Workday: <tenant>.<wdN>.myworkdayjobs.com has tenant in subdomain.
-  // Reject tenantless Workday hosts (e.g. bare myworkdayjobs.com or wd5.myworkdayjobs.com)
   if (hostname.endsWith(".myworkdayjobs.com") || hostname === "myworkdayjobs.com") {
     const parts = hostname.split(".");
     if (parts.length < 4) {
@@ -108,18 +90,9 @@ function normalizeTenantDomain(urlOrDomain: string): string {
     return `${hostname}${portSuffix}`;
   }
 
-  // Standard employer domain: exact hostname + non-standard port
   return `${hostname}${portSuffix}`;
 }
 
-/**
- * Resolves account credentials for an ATS tenant.
- * Sole exported interface for account recovery.
- *
- * - Stored credentials found: returns JSON { email, password, existing: true }.
- * - Missing and allowCreate=false: returns JSON { existing: false, error: "no_account_found", message: "..." }.
- * - Missing and allowCreate=true: generates a strong password, persists it, and returns JSON { email, password, existing: false }.
- */
 export function resolveAccount(domain: string, mailbox: string, allowCreate: boolean): string {
   let key: string;
   try {
@@ -133,7 +106,6 @@ export function resolveAccount(domain: string, mailbox: string, allowCreate: boo
     });
   }
 
-  // 1. Look up existing stored credentials
   const existingRow = db.query<{ email: string; password: string }, [string]>("SELECT email, password FROM accounts WHERE domain = ?").get(key);
 
   if (existingRow) {
@@ -144,7 +116,6 @@ export function resolveAccount(domain: string, mailbox: string, allowCreate: boo
     });
   }
 
-  // 2. Not found, and creation is not allowed (lookup-only or ambiguous submission safety)
   if (!allowCreate) {
     return JSON.stringify({
       existing: false,
@@ -153,7 +124,6 @@ export function resolveAccount(domain: string, mailbox: string, allowCreate: boo
     });
   }
 
-  // 3. Creation allowed: validate mailbox
   const cleanMailbox = typeof mailbox === "string" ? mailbox.trim() : "";
   if (!cleanMailbox) {
     return JSON.stringify({
@@ -163,7 +133,6 @@ export function resolveAccount(domain: string, mailbox: string, allowCreate: boo
     });
   }
 
-  // 4. Generate a compliant 14-character password and persist. Some portals (SAP SuccessFactors) refuse longer ones.
   const password = `${randomBytes(7).toString("base64url")}aA1!`;
   db.query("INSERT INTO accounts (domain, email, password) VALUES (?, ?, ?)").run(key, cleanMailbox, password);
   return JSON.stringify({ email: cleanMailbox, password, existing: false });

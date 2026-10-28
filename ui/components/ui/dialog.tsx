@@ -7,14 +7,11 @@ import { Button } from "./button";
 export const Dialog = D.Root;
 
 type AutoFocus = ((e: Event) => void) | undefined;
-// Dialogs here open from state (a shortcut, a menu item, a button elsewhere), not a Radix trigger, so
-// Radix has nowhere to put focus back on close: remember what had it on open and return there.
 export function useReturnFocus(onOpen?: AutoFocus, onClose?: AutoFocus) {
   const from = useRef<HTMLElement | null>(null);
   return {
     onOpenAutoFocus: (e: Event) => {
       const el = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      // A menu item goes away with its menu: its trigger takes focus back instead.
       const menu = el?.closest("[role=menu]")?.getAttribute("aria-labelledby");
       from.current = menu ? document.getElementById(menu) : el;
       onOpen?.(e);
@@ -28,8 +25,6 @@ export function useReturnFocus(onOpen?: AutoFocus, onClose?: AutoFocus) {
   };
 }
 
-// A dialog: title and description, the content, then the buttons in a band along the foot (Cancel as
-// `secondary`, then the one primary action). ConfirmDialog is built on it, so every dialog reads alike.
 export function DialogContent({
   title,
   description,
@@ -55,7 +50,6 @@ export function DialogContent({
         <div className={cn("flex items-start gap-4 px-5 pt-5", children ? "pb-4" : "pb-5")}>
           <div className="min-w-0 flex-1">
             <D.Title className="text-lg font-semibold text-fg">{title}</D.Title>
-            {/* A div, so a description can hold paragraphs of its own. */}
             <D.Description asChild className={cn(!description && "sr-only", "mt-1 text-sm text-fg-muted")}>
               <div>{description ?? title}</div>
             </D.Description>
@@ -74,7 +68,6 @@ export function DialogContent({
   );
 }
 
-// A panel that slides in from the side (or up from the bottom on a phone): the open job on small screens, the mobile menu.
 export function Sheet({
   open,
   onOpenChange,
@@ -112,7 +105,6 @@ export function Sheet({
   );
 }
 
-// Confirmation before something that cannot be undone. Resolves through the buttons it renders.
 export function ConfirmDialog({
   open,
   onOpenChange,
@@ -141,8 +133,6 @@ export function ConfirmDialog({
         title={title}
         description={description}
         className="max-w-md"
-        // Focus lands on the confirm button, or on Cancel when confirming destroys something, so a stray
-        // Enter is harmless. Set here rather than with autoFocus, which would move it before the opener is recorded.
         onOpenAutoFocus={e => {
           e.preventDefault();
           (danger ? cancelButton : confirmButton).current?.focus();

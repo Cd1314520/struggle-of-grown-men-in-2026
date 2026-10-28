@@ -29,28 +29,23 @@ function scenario(body: string) {
 describe("account resolution behavioral semantics", () => {
   it("rejects unsafe URLs, non-http schemes, userinfo, and tenantless Workday domains without echoing secrets", () => {
     scenario(`
-    // URL with embedded credentials must be rejected without echoing secrets
     const userinfoRes = JSON.parse(await resolveAccount("https://user:supersecret@careers.rei.com/login", "app@example.com", false));
     assert.equal(userinfoRes.existing, false);
     assert.equal(userinfoRes.error, "invalid_domain");
     assert.ok(!JSON.stringify(userinfoRes).includes("supersecret"));
 
-    // Non-http schemes rejected
     const ftpRes = JSON.parse(await resolveAccount("ftp://careers.rei.com", "app@example.com", false));
     assert.equal(ftpRes.existing, false);
     assert.equal(ftpRes.error, "invalid_domain");
 
-    // Tenantless Workday domain rejected (not assuming arbitrary path routing)
     const bareWd = JSON.parse(await resolveAccount("https://wd5.myworkdayjobs.com", "app@example.com", false));
     assert.equal(bareWd.existing, false);
     assert.equal(bareWd.error, "invalid_domain");
 
-    // Multi-tenant SaaS without tenant slug rejected
     const bareGh = JSON.parse(await resolveAccount("https://boards.greenhouse.io", "app@example.com", false));
     assert.equal(bareGh.existing, false);
     assert.equal(bareGh.error, "invalid_domain");
 
-    // Empty or blank input rejected
     const emptyRes = JSON.parse(await resolveAccount("   ", "app@example.com", false));
     assert.equal(emptyRes.existing, false);
     assert.equal(emptyRes.error, "invalid_domain");
@@ -59,14 +54,12 @@ describe("account resolution behavioral semantics", () => {
 
   it("safely looks up stored credentials without leaking secrets or creating unpermitted accounts", () => {
     scenario(`
-    // Lookup-only when account does not exist
     const raw = await resolveAccount("https://acrisure.wd5.myworkdayjobs.com/en-US/careers", "app@example.com", false);
     const parsed = JSON.parse(raw);
     assert.equal(parsed.existing, false);
     assert.equal(parsed.error, "no_account_found");
     assert.equal(parsed.password, undefined);
 
-    // Verify DB accounts table remains empty
     const count = db.query("SELECT COUNT(*) AS c FROM accounts").get();
     assert.equal(count.c, 0);
   `);
@@ -74,18 +67,15 @@ describe("account resolution behavioral semantics", () => {
 
   it("creates and persists credentials only when allowCreate is true and mailbox is provided", () => {
     scenario(`
-    // Missing mailbox returns error without inserting
     const noMailbox = JSON.parse(await resolveAccount("acrisure.wd5.myworkdayjobs.com", "", true));
     assert.equal(noMailbox.existing, false);
     assert.equal(noMailbox.error, "no_mailbox");
 
-    // Valid creation generates credentials and inserts into DB
     const created = JSON.parse(await resolveAccount("acrisure.wd5.myworkdayjobs.com", "app@example.com", true));
     assert.equal(created.existing, false);
     assert.equal(created.email, "app@example.com");
     assert.ok(typeof created.password === "string" && created.password.length === 14);
 
-    // Verify stored in DB under normalized key
     const row = db.query("SELECT email, password FROM accounts WHERE domain = ?").get("acrisure.wd5.myworkdayjobs.com");
     assert.ok(row !== null);
     assert.equal(row.email, "app@example.com");
@@ -95,24 +85,20 @@ describe("account resolution behavioral semantics", () => {
 
   it("reuses existing stored credentials and refuses to overwrite known accounts even when allowCreate is true", () => {
     scenario(`
-    // Create initial account
     const initial = JSON.parse(await resolveAccount("careers.rei.com", "app@example.com", true));
     assert.equal(initial.existing, false);
     const password = initial.password;
 
-    // Lookup with allowCreate=false reuses stored credentials
     const lookup = JSON.parse(await resolveAccount("https://careers.rei.com/jobs/123", "other@example.com", false));
     assert.equal(lookup.existing, true);
     assert.equal(lookup.email, "app@example.com");
     assert.equal(lookup.password, password);
 
-    // Call with allowCreate=true STILL reuses stored credentials and does not overwrite
     const createAttempt = JSON.parse(await resolveAccount("careers.rei.com", "other2@example.com", true));
     assert.equal(createAttempt.existing, true);
     assert.equal(createAttempt.email, "app@example.com");
     assert.equal(createAttempt.password, password);
 
-    // DB record remains unchanged
     const row = db.query("SELECT email, password FROM accounts WHERE domain = ?").get("careers.rei.com");
     assert.equal(row.password, password);
   `);
@@ -120,26 +106,21 @@ describe("account resolution behavioral semantics", () => {
 
   it("strictly isolates credentials across different tenants on multi-tenant SaaS and Workday platforms", () => {
     scenario(`
-    // Create account for Acrisure Workday tenant
     const acrisure = JSON.parse(await resolveAccount("https://acrisure.wd5.myworkdayjobs.com/en-US/careers/job/1", "app@example.com", true));
     assert.equal(acrisure.existing, false);
 
-    // Amerisure Workday lookup returns no_account_found (no cross-tenant leakage)
     const amerisure = JSON.parse(await resolveAccount("amerisure.wd5.myworkdayjobs.com", "app@example.com", false));
     assert.equal(amerisure.existing, false);
     assert.equal(amerisure.error, "no_account_found");
 
-    // Greenhouse Airbnb tenant account
     const airbnb = JSON.parse(await resolveAccount("https://boards.greenhouse.io/airbnb/jobs/100", "app@example.com", true));
     assert.equal(airbnb.existing, false);
 
-    // Greenhouse Stripe tenant lookup returns no_account_found
     const stripe = JSON.parse(await resolveAccount("https://boards.greenhouse.io/stripe/jobs/200", "app@example.com", false));
     assert.equal(stripe.existing, false);
     assert.equal(stripe.error, "no_account_found");
     assert.equal(stripe.password, undefined);
 
-    // Airbnb lookup finds original account
     const airbnbLookup = JSON.parse(await resolveAccount("https://boards.greenhouse.io/airbnb/jobs/101", "app@example.com", false));
     assert.equal(airbnbLookup.existing, true);
     assert.equal(airbnbLookup.password, airbnb.password);
@@ -153,25 +134,21 @@ describe("tenants named in the path or query of shared ATS hosts", () => {
     const create = (d) => JSON.parse(resolveAccount(d, "app@example.com", true));
     const look = (d) => JSON.parse(resolveAccount(d, "app@example.com", false));
 
-    // UKG: the tenant is the first path segment, whatever the case or page
     const miso = create("https://recruiting.ultipro.com/MID1029MISO/JobBoard/362b/OpportunityDetail?opportunityId=ef6b");
     assert.equal(look("recruiting.ultipro.com/mid1029miso").password, miso.password);
     assert.equal(look("https://recruiting.ultipro.com/HOM1007HSUC/JobBoard/0436").error, "no_account_found");
     assert.equal(look("recruiting2.ultipro.com/MID1029MISO").error, "no_account_found");
 
-    // SuccessFactors: the tenant is ?company=, on any careers route
     const wipro = create("https://career55.sapsf.eu/careers?company=wiprolimitP2");
     assert.equal(look("https://career55.sapsf.eu/career?company=WIPROLIMITP2&career_job_req_id=1").password, wipro.password);
     assert.equal(look("https://career55.sapsf.eu/career?company=HCLPRD").error, "no_account_found");
     assert.equal(look("https://career4.successfactors.com/careers").error, "invalid_domain");
 
-    // Workday's myworkdaysite host: /recruiting/<tenant>/<site>
     const magna = create("https://wd3.myworkdaysite.com/recruiting/magna/Magna");
     assert.equal(look("wd3.myworkdaysite.com/en-US/recruiting/Magna/Careers/job/1").password, magna.password);
     assert.equal(look("wd3.myworkdaysite.com/recruiting/other/Site").error, "no_account_found");
     assert.equal(look("wd3.myworkdaysite.com/").error, "invalid_domain");
 
-    // BrassRing (?partnerid=) and JobDiva (?a=)
     const brass = create("https://sjobs.brassring.com/TGnewUI/Search/home/HomeWithPreLoad?partnerid=368&siteid=5205");
     assert.equal(look("sjobs.brassring.com/TGNewUI/?partnerid=368&siteid=1").password, brass.password);
     assert.equal(look("sjobs.brassring.com/TGNewUI/?partnerid=25771").error, "no_account_found");

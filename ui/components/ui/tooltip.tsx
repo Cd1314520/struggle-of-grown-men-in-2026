@@ -8,7 +8,6 @@ export const TooltipProvider = ({ children }: { children: ReactNode }) => (
   </T.Provider>
 );
 
-// Wraps one focusable element. Keep the text short; it is a hint, never the only place something is said.
 export function Tooltip({
   content,
   shortcut,

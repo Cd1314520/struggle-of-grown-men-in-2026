@@ -6,7 +6,6 @@ import YAML from "yaml";
 import { config } from "../src/config";
 import { setSetting, settingsState } from "../src/settings";
 
-// Each test writes a throwaway config.local.yml and puts the running config back as it was.
 function withLocal(text: string, test: (file: string) => void) {
   const dir = mkdtempSync(join(tmpdir(), "auto-apply-settings-"));
   const file = join(dir, "config.local.yml");
@@ -29,7 +28,7 @@ describe("settings changed in the app", () => {
       expect(text).toContain("mailbox: me@example.com # the inbox");
       expect(YAML.parse(text)).toEqual({ mailbox: "me@example.com", schedule: { scanMinutes: 45 }, boards: { queries: ["data engineer", "ml engineer"] } });
       expect(config.schedule.scanMinutes).toBe(45);
-      expect(config.schedule.trackMinutes).toBe(120); // the rest of the section is config.yml's
+      expect(config.schedule.trackMinutes).toBe(120);
       expect(config.boards?.queries).toEqual(["data engineer", "ml engineer"]);
       expect(settingsState(file).local).toEqual(YAML.parse(text));
     });

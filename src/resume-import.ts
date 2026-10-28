@@ -1,6 +1,3 @@
-// Resume import: whatever files the owner has (an old resume in any format, a LinkedIn export, a list of
-// projects) become the stock resume's content file, written by an agent on the project's own template, and
-// the resume notes tailoring draws on. Nothing replaces the stock resume until the owner accepts the draft.
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { config, DATA, PROFILE, readProfile, RESUME_DIR, STOCK_MAIN } from "./config";
@@ -12,25 +9,25 @@ import { readPrompt } from "./worker-tools";
 import { fillTemplate } from "./template";
 
 const DIR = join(DATA, "resume-import");
-const WORK = join(DIR, "work"); // the agent's working directory: the template, the uploads under sources/, and its draft
+const WORK = join(DIR, "work");
 const STATE = join(DIR, "state.json");
-const HISTORY = join(DIR, "history"); // each stock resume and notes file an accepted import replaced
+const HISTORY = join(DIR, "history");
 
 export const MAX_FILES = 8;
-export const MAX_BYTES = 20 * 1024 * 1024; // all files together
+export const MAX_BYTES = 20 * 1024 * 1024;
 
 export interface ImportState {
   status: "idle" | "running" | "ready" | "failed";
   files: string[];
-  note: string; // what the owner asked for along with the files
-  feedback: string[]; // each change asked for since, oldest first
+  note: string;
+  feedback: string[];
   startedAt: string | null;
   finishedAt: string | null;
-  sinceEvent: number; // the run's steps are the import worker's events after this id
+  sinceEvent: number;
   summary: string | null;
   warnings: string | null;
   pages: number | null;
-  notesChanged: boolean; // the draft adds to resume-notes.md
+  notesChanged: boolean;
   error: string | null;
 }
 const IDLE: ImportState = {
@@ -59,14 +56,12 @@ function save(state: ImportState) {
   mkdirSync(DIR, { recursive: true });
   writeFileSync(STATE, JSON.stringify(state, null, 1));
 }
-// The import worker's latest steps, for the page to show while it works.
 export const importSteps = (s = importState()) =>
   s.status === "running" ? workerEvents("import", s.sinceEvent).map(e => ({ message: e.message, at: e.at })) : [];
 
 export const draftPdf = () => join(WORK, PDF_NAME);
 const draftNotes = () => join(WORK, "resume-notes.md");
 
-// A name that stays inside sources/ and reads as the owner's file did.
 const safeName = (name: string, taken: Set<string>) => {
   const clean =
     basename(name)
@@ -78,7 +73,6 @@ const safeName = (name: string, taken: Set<string>) => {
   return candidate;
 };
 
-// Text the agent can read without tools of its own: PDFs through pdftotext, Word files from their XML.
 function extractText(file: string) {
   try {
     if (/\.pdf$/i.test(file)) {
@@ -96,15 +90,11 @@ function extractText(file: string) {
         .replace(/&apos;/g, "'");
       if (text.trim()) writeFileSync(`${file}.txt`, text);
     }
-  } catch {
-    // no converter on this machine: the agent reads the file itself
-  }
+  } catch {}
 }
 
-// The template files as the agent must leave them: every .typ in the resume project but the content file.
 const templateFiles = () => readdirSync(RESUME_DIR).filter(f => f.endsWith(".typ") && f !== MAIN);
 
-// Takes the uploaded files and readies a run. The caller starts the worker (Scheduler.importResume).
 export async function beginImport(files: readonly (Blob & { name: string })[], note: string): Promise<string | null> {
   if (importState().status === "running") return "an import is already running";
   if (!files.length) return "choose at least one file";
@@ -128,7 +118,6 @@ export async function beginImport(files: readonly (Blob & { name: string })[], n
   return null;
 }
 
-// Another pass over the same files and the draft, with what the owner wants changed.
 export function reviseImport(feedback: string): string | null {
   const s = importState();
   if (s.status !== "ready" && s.status !== "failed") return "there is no draft to change";
@@ -153,19 +142,17 @@ function compileDraft(): Compiled {
   }
 }
 
-// What the caller holds of a run: its worker, once started, and whether the owner cancelled it.
 export interface ImportRun {
   handle: WorkerHandle | null;
   cancelled: boolean;
 }
 
-// Runs the import worker over the readied files.
 export async function runImport(run: RunWorker, control: ImportRun = { handle: null, cancelled: false }, compile: () => Compiled = compileDraft) {
   const s = importState();
   if (s.status !== "running") return;
   const draftExists = existsSync(join(WORK, MAIN));
   const revising = s.feedback.length > 0 && draftExists;
-  let finished = false as boolean; // set from the tool callback
+  let finished = false as boolean;
   const handle = run({
     name: "import",
     builtins: ["read", "write", "edit", "bash"],
@@ -223,7 +210,6 @@ export async function runImport(run: RunWorker, control: ImportRun = { handle: n
   const result = await handle.done;
   if (finished) return;
   const cancelled = control.cancelled;
-  // A first run cancelled leaves nothing worth keeping; a revision cancelled may have half changed the draft.
   if (cancelled && !revising) clearImport();
   else
     save({
@@ -237,13 +223,11 @@ export async function runImport(run: RunWorker, control: ImportRun = { handle: n
   logEvent(cancelled ? "system" : "error", cancelled ? "Resume import cancelled" : `Resume import failed: ${result.error ?? "no draft"}`);
 }
 
-// A run the process was killed in the middle of: it will never report.
 export function interruptedImport() {
   const s = importState();
   if (s.status === "running") save({ ...s, status: "failed", error: "interrupted when the app restarted; try again", finishedAt: new Date().toISOString() });
 }
 
-// Makes the draft the stock resume, and its notes the resume notes when `notes`. What they replace is kept.
 export function acceptImport(notes: boolean): string | null {
   const s = importState();
   if (s.status !== "ready") return "there is no draft to use";

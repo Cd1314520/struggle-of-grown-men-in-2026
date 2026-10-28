@@ -1,6 +1,3 @@
-// What the owner does to an open job, and what each says when it worked. Every write refetches what is
-// on screen afterwards, failed or not: a refusal usually means the job moved on (a gate closed, a worker
-// finished), and the page should show where it is now.
 import { useState } from "react";
 import { toast } from "sonner";
 import type { JobDetail } from "../../../src/api-types";
@@ -35,7 +32,6 @@ const STEP_DONE: Record<string, string> = {
   remove: "Step removed",
 };
 
-// The fields of a step as the form holds them.
 export interface StepFields {
   kind: string;
   title: string;
@@ -45,7 +41,6 @@ export interface StepFields {
 }
 
 export function useJobActions(job: JobDetail, onActed?: (action: string) => void) {
-  // The action running now, so its button spins and the others wait.
   const [busy, setBusy] = useState<string | null>(null);
   const run = async (key: string, write: () => Promise<unknown>, done: string) => {
     if (busy) return false;
@@ -55,7 +50,6 @@ export function useJobActions(job: JobDetail, onActed?: (action: string) => void
       toast.success(done);
       return true;
     } catch {
-      // The request already showed the server's refusal.
       return false;
     } finally {
       setBusy(null);
@@ -68,12 +62,8 @@ export function useJobActions(job: JobDetail, onActed?: (action: string) => void
   return {
     busy,
     gateId,
-    // A decision on the job. Rejecting can be undone from the toast, unless the application may already
-    // have gone out: then retrying it could send it twice.
     act: async (action: string, text = "") => {
       if (busy) return false;
-      // Where this job was open, so Undo can bring it back after the list has moved on. Only a job rejected
-      // from review returns to the same list: retrying anything else sends it to review or assessment.
       const from = job.status === "awaiting_approval" ? location.hash : null;
       setBusy(action);
       try {
@@ -98,7 +88,7 @@ export function useJobActions(job: JobDetail, onActed?: (action: string) => void
                     toast.success("Back in the queue");
                     if (from) navigate(from, { replace: true });
                   },
-                  () => undefined, // the request already showed why it was refused
+                  () => undefined,
                 )
                 .finally(() => void refreshAll());
             },
@@ -129,7 +119,6 @@ export function useJobActions(job: JobDetail, onActed?: (action: string) => void
 }
 export type JobActions = ReturnType<typeof useJobActions>;
 
-// Typed text that should survive switching to another job and back: an answer, a cover letter.
 const drafts = new Map<string, string>();
 export function useDraft(key: string) {
   const [value, setValue] = useState(() => drafts.get(key) ?? "");

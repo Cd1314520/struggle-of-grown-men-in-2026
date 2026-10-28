@@ -4,9 +4,6 @@ import { cn } from "../../lib/cn";
 const LINES = { 1: "line-clamp-1", 2: "line-clamp-2", 3: "line-clamp-3", 4: "line-clamp-4", 5: "line-clamp-5" };
 const TOUCH = { 1: "touch:line-clamp-1", 2: "touch:line-clamp-2", 3: "touch:line-clamp-3", 4: "touch:line-clamp-4", 5: "touch:line-clamp-5" };
 
-// Long agent text, a few lines at a time ("touchLines" on a phone, where a line holds less). "Show more"
-// appears only when something was cut off. Not inside a link row: there the snippet clamps, and the
-// whole text is one tap away.
 export function Clamp({
   lines = 2,
   touchLines,

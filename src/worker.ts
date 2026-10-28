@@ -1,21 +1,14 @@
-// Agent workers, whichever harness runs them: one process per unit of work, given a prompt and the
-// app's "host tools". The agent calls back into those tools; that is the only channel through which a
-// worker changes application state. The stage's model picks the harness: `claude-code/<model>` runs
-// on Claude Code (src/claude.ts), anything else on omp (src/omp.ts).
 import { killClaudeWorkers, runClaude } from "./claude";
 import { killOmpWorkers, runOmp } from "./omp";
 
-// Whatever the agent sent: nothing about it is trusted until read through `arg`.
 export type ToolArgs = Record<string, unknown>;
 
 export interface HostTool {
   description: string;
   parameters: Record<string, unknown>;
-  // Return value is shown to the agent. May stay pending for a long time (human gates).
   handler: (args: ToolArgs) => Promise<string> | string;
 }
 
-// Typed reads of tool arguments. A wrong type throws, which the agent sees as an ERROR reply.
 export const arg = {
   str(args: ToolArgs, key: string): string {
     const value = args[key];
@@ -58,21 +51,19 @@ export interface WorkerResult {
 }
 export const isStatus = (value: unknown): value is WorkerStatus => value === "completed" || value === "aborted" || value === "error";
 
-// The built-in abilities a worker may be given, by omp's names; each harness maps them to its own tools.
-// `eval` is omp's JavaScript session, which Claude Code has no equivalent of.
 export type Builtin = "read" | "write" | "edit" | "bash" | "eval" | "web_search";
 
 export interface WorkerOptions {
-  name: string; // e.g. "prep", "fill"
+  name: string;
   prompt: string;
   cwd: string;
   tools: Record<string, HostTool>;
   model?: string | null;
   browser?: boolean;
-  cdpPort?: number; // which browser to attach to (its pacing proxy); default: the first
-  builtins: Builtin[]; // built-in tools this worker may use (host tools are always available)
+  cdpPort?: number;
+  builtins: Builtin[];
   jobId?: number;
-  maxTime?: string; // how long it may run, e.g. "20m"
+  maxTime?: string;
   env?: Record<string, string>;
 }
 
@@ -83,7 +74,6 @@ export interface WorkerHandle {
 
 export type HarnessId = "omp" | "claude-code";
 export const CLAUDE_PREFIX = "claude-code/";
-// null is omp's default model.
 export const harnessOf = (model: string | null | undefined): HarnessId => (model?.startsWith(CLAUDE_PREFIX) ? "claude-code" : "omp");
 
 export function runWorker(opts: WorkerOptions): WorkerHandle {
@@ -95,7 +85,6 @@ export const killAllWorkers = () => {
   killClaudeWorkers();
 };
 
-// "20m", "24h", "90s" in milliseconds.
 export function durationMs(text: string): number {
   const m = /^(\d+(?:\.\d+)?)\s*(ms|s|m|h)?$/.exec(text.trim());
   if (!m) throw new Error(`not a duration: ${text}`);

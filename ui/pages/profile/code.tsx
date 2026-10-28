@@ -1,4 +1,3 @@
-// A read-only view of a YAML or Typst file: line numbers, with comments and YAML keys set apart.
 import { Fragment, type ReactNode } from "react";
 
 function yamlLine(line: string): ReactNode {
@@ -23,7 +22,7 @@ function yamlLine(line: string): ReactNode {
 
 function typstLine(line: string): ReactNode {
   const at = line.indexOf("//");
-  if (at < 0 || line.slice(0, at).includes(":/")) return line; // "https://" is not a comment
+  if (at < 0 || line.slice(0, at).includes(":/")) return line;
   return (
     <>
       {line.slice(0, at)}
@@ -39,7 +38,6 @@ export function CodeView({ text, file }: { text: string; file: string }) {
     <div className="py-3 font-mono text-sm">
       <div className="grid grid-cols-[auto_minmax(0,1fr)]">
         {lines.map((line, i) => {
-          // A wrapped line hangs under its own key rather than at the margin.
           const indent = /^ */.exec(line)?.[0].length ?? 0;
           return (
             <Fragment key={i}>

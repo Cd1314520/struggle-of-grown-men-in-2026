@@ -1,8 +1,5 @@
-// Databases as older code left them, from before the schema carried a version. Frozen history:
-// these are inputs to the migration tests and must not follow later schema changes.
 import { Database } from "bun:sqlite";
 
-// The first version of the app: four tables, and none of the columns jobs gained later.
 export const FIRST_VERSION_SCHEMA = `
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY,
@@ -45,8 +42,6 @@ CREATE TABLE IF NOT EXISTS accounts (
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `;
 
-// A real intermediate stage (the shape of a backup taken before company keys existed): some of the
-// later jobs columns, job_sources, and nothing of gates or the digest.
 export const BEFORE_COMPANY_KEYS_SCHEMA = `${FIRST_VERSION_SCHEMA}
 ALTER TABLE jobs ADD COLUMN resume_sha TEXT;
 ALTER TABLE jobs ADD COLUMN resume_frozen_at TEXT;

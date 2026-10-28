@@ -1,8 +1,4 @@
 #!/usr/bin/env bun
-// Watches the boards of postings already in the database: employers found through LinkedIn, Indeed,
-// the locate agent or discovery before their kind of board could be read. Lists them by default;
-// with --apply, adds to profile/companies.yml each board that answers with open postings. Reads the
-// database only. Run it with the app's own code: the app must know a kind of board to scan it.
 import { join } from "node:path";
 import { addCompany, boardOf, fetchCompany, loadCompanies, type Company } from "../src/ats";
 import { DATA } from "../src/config";
@@ -11,7 +7,6 @@ import { openDatabase } from "../src/schema";
 
 const key = (c: Company) => `${c.ats}/${c.slug.toLowerCase()}`;
 
-// Boards seen in the database and not watched yet, each named after the employer it was seen for most.
 export function knownBoards(dbPath: string, watched: Company[] = loadCompanies()): Company[] {
   const db = openDatabase(dbPath, "readonly");
   let rows: { url: string; company: string }[];

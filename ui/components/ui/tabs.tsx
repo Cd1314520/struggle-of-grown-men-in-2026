@@ -2,9 +2,6 @@ import { Tabs as T } from "radix-ui";
 import { useCallback, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
 import { cn } from "../../lib/cn";
 
-// Tabs: switching between different views (a job's Overview, Fit, Resume…; Archive's Held and Rejected).
-// Linear's view switchers: small pills, the selected one filled and hairlined. A page's tabs sit in its
-// Workspace bar (`tabs`, `variant="bar"`); a job's in a strip with a rule under it.
 export const Tabs = T.Root;
 export const TabsContent = T.Content;
 export function TabsList({ className, variant, ...props }: ComponentProps<typeof T.List> & { variant?: "bar" }) {
@@ -15,8 +12,6 @@ export function TabsList({ className, variant, ...props }: ComponentProps<typeof
     />
   );
 }
-// The list scrolls sideways and would clip an outline: keyboard focus shows as an inset ring.
-// A view switcher's pill, shared by tabs and segments.
 const PILL =
   "inline-flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md border border-transparent px-2.5 text-sm font-medium whitespace-nowrap text-fg-muted transition-colors outline-none hover:bg-subtle hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-inset touch:h-9 touch:min-w-9";
 
@@ -36,8 +31,6 @@ export function TabsTrigger({ className, count, children, ...props }: ComponentP
   );
 }
 
-// A row that scrolls sideways when it is too long for its space: the clipped side fades, so the last
-// segment reads as "more this way" rather than cut off.
 const FADE = "24px";
 export function useEdgeFade(ref: RefObject<HTMLDivElement | null>) {
   const [edges, setEdges] = useState("");
@@ -59,7 +52,6 @@ export function useEdgeFade(ref: RefObject<HTMLDivElement | null>) {
       el.removeEventListener("scroll", measure);
     };
   }, [ref, measure]);
-  // Counts arrive after the first paint and widen the row without resizing the box.
   useLayoutEffect(measure);
   const mask = edges
     ? `linear-gradient(to right, ${edges.includes("s") ? `transparent, black ${FADE}` : "black"}, ${edges.includes("e") ? `black calc(100% - ${FADE}), transparent` : "black"})`
@@ -67,14 +59,12 @@ export function useEdgeFade(ref: RefObject<HTMLDivElement | null>) {
   return mask ? { maskImage: mask } : undefined;
 }
 
-// A row of segments: narrowing one list to a group (Your move, Upcoming…), in its Workspace bar. Each
-// shows its count; a warning or danger count is tinted while it is above zero.
 export interface Segment<T extends string> {
   value: T;
   label: ReactNode;
   count?: number | undefined;
   tone?: "neutral" | "accent" | "warning" | "danger" | undefined;
-  data?: Record<`data-${string}`, string> | undefined; // on the segment's button: Pipeline's data-stage
+  data?: Record<`data-${string}`, string> | undefined;
 }
 export function Segments<T extends string>({
   value,

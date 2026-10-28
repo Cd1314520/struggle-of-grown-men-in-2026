@@ -1,4 +1,3 @@
-// The Posting tab: the description in reading type, and every place the job is listed.
 import { ExternalLink } from "lucide-react";
 import { useState } from "react";
 import type { JobDetail } from "../../../src/api-types";

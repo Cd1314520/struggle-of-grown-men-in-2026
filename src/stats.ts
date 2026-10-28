@@ -1,43 +1,33 @@
-// Numbers for the Overview: how the pipeline is doing over time. Read-only aggregates over jobs and
-// status_changes. Rows are counted by UTC hour in SQL and put on local days here, which keeps
-// daylight saving right and is far cheaper than SQLite's 'localtime' on every row.
 import { db, onChange } from "./db";
 import type { Status } from "./status";
 
 export const STATS_DAYS = 30;
-// The employer answered: a next step, an offer, or a no.
 const RESPONDED: readonly Status[] = ["interview", "offer", "rejected_by_company"];
-// Not past the assessment yet, or turned down by it.
 const NOT_RECOMMENDED: readonly Status[] = ["found", "locating", "triaged", "prepping", "skipped"];
 
 export interface Funnel {
-  found: number; // postings found in the window
-  assessed: number; // of those, scored by the assessment
-  recommended: number; // ...and passed it: sent for review, held, or decided on since
-  approved: number; // ...and approved, by the owner or by auto apply
-  applied: number; // ...and sent
-  responded: number; // ...and answered by the employer
+  found: number;
+  assessed: number;
+  recommended: number;
+  approved: number;
+  applied: number;
+  responded: number;
 }
 export interface Stats {
-  days: string[]; // the last STATS_DAYS local days as YYYY-MM-DD, oldest first; each series lines up with it
-  found: number[]; // postings found
-  applied: number[]; // applications sent
-  responses: number[]; // applications the employer answered, each counted once a day
-  funnel: Funnel; // the postings found in the window, by how far they got
-  response: { sent: number; heard: number }; // applications sent in the window, and how many were answered
-  approvals: { auto: number; user: number }; // jobs approved in the window, by who gave gate 1
+  days: string[];
+  found: number[];
+  applied: number[];
+  responses: number[];
+  funnel: Funnel;
+  response: { sent: number; heard: number };
+  approvals: { auto: number; user: number };
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const localDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-// SQLite's own "YYYY-MM-DD HH:MM:SS" in UTC, as found_at and status_changes.at are written.
 const sqliteTime = (ms: number) => new Date(ms).toISOString().slice(0, 19).replace("T", " ");
-// "YYYY-MM-DD HH", a UTC hour, to the local day it falls on.
 const dayOf = (hour: string) => localDay(new Date(`${hour.slice(0, 10)}T${hour.slice(11, 13)}:00:00Z`));
 
-// One group per (hour found, hour sent): every posting found in the window and every application ever
-// sent, in a single pass over jobs. The stage columns are each a subset of the one before, so the
-// funnel never widens.
 interface JobGroup {
   found_hour: string;
   sent_hour: string | null;
@@ -46,8 +36,8 @@ interface JobGroup {
   recommended: number;
   approved: number;
   applied: number;
-  heard: number; // through every stage, and answered
-  answered: number; // answered, whatever the stages say
+  heard: number;
+  answered: number;
 }
 
 export function computeStats(now = Date.now()): Stats {
@@ -98,7 +88,6 @@ export function computeStats(now = Date.now()): Stats {
       funnel.applied += g.applied;
       funnel.responded += g.heard;
     }
-    // Any sent job counts as sent, whatever the assessment columns say about it.
     const s = g.sent_hour === null ? undefined : index.get(dayOf(g.sent_hour));
     if (s !== undefined) {
       applied[s] = (applied[s] ?? 0) + g.n;
@@ -107,7 +96,6 @@ export function computeStats(now = Date.now()): Stats {
     }
   }
 
-  // An application moving on twice in a day (an interview, then an offer) is one answer that day.
   const answers = db
     .query<{ hour: string; job_id: number }, [string, string]>(
       "SELECT DISTINCT substr(at, 1, 13) AS hour, job_id FROM status_changes WHERE at >= ? AND to_status IN (SELECT value FROM json_each(?))",
@@ -129,9 +117,6 @@ export function computeStats(now = Date.now()): Stats {
   return { days, found, applied, responses, funnel, response, approvals };
 }
 
-// The pass over jobs reads every posting's row, descriptions and all (~150ms on 80k), and the Overview
-// refetches on every change the server streams. So the numbers are kept until a job changes, and then
-// for at least FRESH_MS more: a day's chart can trail the event that moved it by that much.
 const FRESH_MS = 20_000;
 let kept: { stats: Stats; at: number; day: string } | null = null,
   changed = false;

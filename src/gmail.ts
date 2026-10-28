@@ -1,6 +1,3 @@
-// Gmail access for the dedicated application mailbox (OAuth, gmail.modify scope).
-// Client credentials: profile/gmail-client.json (the "Desktop app" or "Web" OAuth client
-// JSON downloaded from Google Cloud). Tokens live in the local DB.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, PROFILE, publicUrl } from "./config";
@@ -109,7 +106,6 @@ async function call(path: string, init?: RequestInit, token?: string): Promise<u
 }
 
 const header = (msg: { payload?: { headers?: { name: string; value: string }[] } }, name: string) => {
-  // RFC header names are case-insensitive; normalize both sides of the lookup.
   const normalizedName = name.toLowerCase();
   return msg.payload?.headers?.find(h => h.name.toLowerCase() === normalizedName)?.value ?? "";
 };
@@ -127,7 +123,6 @@ function bodyText(payload: Part | undefined): string {
   };
   walk(payload);
   if (plain.join("").trim()) return plain.join("\n");
-  // Keep link targets: verification mails often carry the code only in an href.
   return html
     .join("\n")
     .replace(/<style[\s\S]*?<\/style>/gi, "")
@@ -175,7 +170,6 @@ export async function markRead(id: string) {
   await call(`/messages/${encodeURIComponent(id)}/modify`, { method: "POST", body: JSON.stringify({ removeLabelIds: ["UNREAD"] }) });
 }
 
-// Digest-only sending: recipient is resolved from the OAuth identity, never from worker input.
 export class GmailSendError extends Error {
   constructor(
     message: string,
@@ -197,8 +191,6 @@ async function verifiedSelfIdentity(): Promise<{ recipient: string; token: strin
   const connected = mailboxAddress(status.address);
   const expected = config.mailbox ? mailboxAddress(config.mailbox) : connected;
   if (connected !== expected) throw new Error("Connected Gmail identity does not match the configured mailbox");
-  // Keep this credential snapshot through all subsequent requests. OAuth callbacks can replace
-  // the cache while profile verification is pending; rereading it would authorize another mailbox.
   const token = await accessToken();
   const profile = (await call("/profile", { signal: AbortSignal.timeout(30_000) }, token)) as { emailAddress?: unknown };
   if (typeof profile.emailAddress !== "string" || mailboxAddress(profile.emailAddress) !== expected)
@@ -253,7 +245,6 @@ export async function sendSelfMessage(message: { messageId: string; subject: str
       body: JSON.stringify({ raw }),
       signal: AbortSignal.timeout(30_000),
     });
-    // A definite rejection is safe to retry. A timeout/server error may follow acceptance.
     if (!res.ok) throw new GmailSendError(`Gmail send rejected (${res.status})`, res.status >= 500 || res.status === 408);
     const body = (await res.json()) as { id?: string };
     if (!body.id) throw new GmailSendError("Gmail send returned no message identifier", true);
@@ -268,8 +259,6 @@ export async function findSentSelfMessage(messageId: string, expectedMailbox: st
   const reference = digestDeliveryReference(messageId);
   const { recipient, token } = await verifiedSelfIdentity();
   if (recipient !== mailboxAddress(expectedMailbox)) throw new Error("Digest mailbox changed before reconciliation");
-  // Gmail may replace RFC Message-ID. Search the persisted body reference, then require the
-  // exact custom identity header; search indexing alone is never delivery proof.
   const q = `in:sent "${reference}"`;
   const list = (await call(
     `/messages?${new URLSearchParams({ q, maxResults: "100" }).toString()}`,

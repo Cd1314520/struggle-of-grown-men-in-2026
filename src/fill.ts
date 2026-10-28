@@ -1,4 +1,3 @@
-// Fill: one worker drives one browser through one application, from the frozen resume to a recorded outcome.
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
@@ -19,10 +18,8 @@ import { harnessOf } from "./worker";
 import { deadEnd } from "./screen";
 import { lowStakesRule, readPrompt, render, termsRule } from "./worker-tools";
 
-// The prefill script the worker imports into its JavaScript session.
 const PREFILL_MODULE = join(import.meta.dir, "prefill.ts");
 
-// What the worker is told about where this application stands.
 const VERIFY_BRIEF =
   "VERIFICATION-ONLY MODE. Final submission was authorized previously, but its outcome is ambiguous. Your ONLY task is to check whether this application was already submitted or is still an unsubmitted draft. Sign in with existing credentials and check the candidate portal/status or confirmation email. NEVER submit, authorize, or click final submit. A checkpoint or form does NOT prove non-submission; require explicit portal status or validation error. The site saying the attempt is still unfinished IS such evidence: a page still asking for the emailed verification code before the application is submitted, or the form returned with an error saying the CAPTCHA or human check failed. Record that with source 'portal' and status 'not_submitted', quoting the page; a normal fill then finishes the same draft. Call verify_status to record evidence, or need_manual if inconclusive.";
 const RESUME_BRIEF =
@@ -31,13 +28,8 @@ const FIRST_BRIEF = "First fill for this application. Open the exact posting and
 const SUBMIT_RULE =
   "- **Before final submit:** re-observe and verify all fields, take a full-page screenshot, then call `confirm_submit` with an exact summary and current navigation checkpoint. Click only if it returns APPROVED. An unused approval is valid only for the unchanged summary. Immediate post-click verification challenges (email codes or CAPTCHAs) continue this pending attempt; complete them, clicking final application submit again when the site requires it to finish. Call `need_manual` only when you cannot tell whether the application was sent.";
 
-// Parked applications whose pages stay open in one browser. Every open page costs memory for as long
-// as its question goes unanswered, so only the most recently parked keep theirs.
 export const PARKED_TABS = 8;
 
-// What becomes of the tabs that checkpoints on this browser point at, when `jobId` starts a fill there.
-// `keep` stay open. `closing` are given up: tab id -> the unfinished job that will resume without its
-// page (null for a job that is over). `others` belong to other applications and are off limits to this one.
 export function tabPlan(slot: number, jobId: number, limit = PARKED_TABS) {
   const keep = new Set<string>(),
     others = new Set<string>(),
@@ -48,7 +40,6 @@ export function tabPlan(slot: number, jobId: number, limit = PARKED_TABS) {
     if (checkpoint?.slot !== slot || !checkpoint.tabId) continue;
     const { tabId } = checkpoint;
     if (row.id !== jobId) others.add(tabId);
-    // A page that may show whether the final submit went through is evidence until the outcome is known.
     const evidence = !wasSent(row) && (isSubmitting(row.id) || getOpenGate(row.id)?.kind === "submission_ambiguous");
     if (row.id === jobId || evidence) keep.add(tabId);
     else if (isSettled(row)) closing.set(tabId, null);
@@ -59,7 +50,7 @@ export function tabPlan(slot: number, jobId: number, limit = PARKED_TABS) {
     if (i < limit) keep.add(p.tabId);
     else closing.set(p.tabId, p.jobId);
   }
-  for (const tabId of keep) closing.delete(tabId); // two checkpoints on one tab: keeping wins
+  for (const tabId of keep) closing.delete(tabId);
   return { keep, closing, others };
 }
 
@@ -81,7 +72,6 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
       return;
     }
   }
-  // Locating the employer's own posting can lead to a portal no application gets through.
   const portal = job.resume_sha ? null : deadEnd(job.url);
   if (portal) {
     session.active = false;
@@ -128,14 +118,11 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     savedAt: new Date().toISOString(),
   };
   recordCheckpoint(job.id, session.checkpoint);
-  // What the prefill script fills from (src/prefill.ts), written fresh so profile edits reach the next fill.
   const prefillFacts = join(dir, "prefill.json");
   writeFileSync(
     prefillFacts,
     JSON.stringify(buildFacts((YAML.parse(readProfile("personal.yml")) ?? {}) as Record<string, unknown>, mailbox, frozen.pdf), null, 1),
   );
-  // An omp worker drives omp's browser tool and runs the prefill script in its JavaScript session; a
-  // Claude Code one drives Playwright's MCP tools, and the app runs the prefill script for it.
   const onClaude = harnessOf(config.models.fill) === "claude-code";
   const ctx = { job, session, mailbox, isVerification, jobBrowser };
   const tools = fillTools(rt, ctx);
@@ -177,7 +164,6 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     tools,
   });
   const result = await session.handle.done;
-  // The provider stopped the worker, not the site: the next worker picks up the same draft.
   const capacity = isCapacityError(result.error);
   if (isVerification) {
     if (session.active && capacity && ownsFill(rt, session)) {

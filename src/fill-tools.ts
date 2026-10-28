@@ -1,5 +1,3 @@
-// The host tools a fill worker is given. Each one acts for the session it was built for and for
-// nothing else: once that session no longer owns the application, every tool refuses.
 import { resolveAccount } from "./accounts";
 import { CAUSE_GUIDE, recordBlocker, WORKER_CAUSES } from "./blockers";
 import { connectTab } from "./cdp-tab";
@@ -37,12 +35,10 @@ export interface FillContext {
   job: Job;
   session: FillSession;
   mailbox: string;
-  // A verification worker only finds out whether an authorized submit went through; it never submits.
   isVerification: boolean;
   jobBrowser: JobBrowser;
 }
 
-// Settles an ambiguous submit from what the verification worker observed, or parks it again.
 async function verifyStatus(rt: FillRuntime, ctx: FillContext, args: ToolArgs): Promise<string> {
   const { job, session, isVerification } = ctx;
   if (!isVerification) return "ERROR: verify_status is only available during verification mode.";
@@ -102,10 +98,8 @@ async function verifyStatus(rt: FillRuntime, ctx: FillContext, args: ToolArgs): 
   return "Recorded: Ambiguity resolved. Verified draft queued for normal fill with fresh confirm_submit required.";
 }
 
-// What a form may require that the candidate does not give, so the application is dropped instead of parked.
 const SKIPPED_FOR = { cover_letter: "a cover letter", references: "references" };
 
-// What stopped the application, so stops can be counted and looked at again by cause.
 const causeParam = { type: "string", enum: WORKER_CAUSES, description: CAUSE_GUIDE };
 
 export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, HostTool> {
@@ -294,8 +288,6 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
   return tools;
 }
 
-// The prefill script (src/prefill.ts), run by the app on the application's tab, for a harness that has
-// no JavaScript session to run it in itself (Claude Code). `factsPath` is what it fills from.
 export function prefillTool(rt: FillRuntime, ctx: FillContext, factsPath: string): HostTool {
   const looked = new Set<string>();
   return {

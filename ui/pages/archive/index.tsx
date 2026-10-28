@@ -1,5 +1,3 @@
-// Archive: the jobs set aside, held back or rejected, as a library to browse rather than a queue to clear.
-// Until a job opens the list is the page; open one and the same rows become the column beside it.
 import { Archive, Ellipsis, RotateCcw } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
@@ -32,7 +30,6 @@ import { thresholdOf } from "../job/model";
 
 type View = "held" | "rejected";
 
-// The first sort of each is the server's default, so it is left out of the URL.
 const SORTS: Record<View, readonly { value: string; label: string }[]> = {
   held: [
     { value: "score", label: "Best fit" },
@@ -64,12 +61,10 @@ export function ArchivePage() {
   const counts = summary?.counts ?? {};
   const held = counts["held"] ?? 0;
   const rows = record.rows;
-  // Score 80+ is the Strong match group under another name: the segments already offer it.
   const filters = (list?.filters ?? []).filter(f => !(view === "held" && f.key === "top"));
   const sorts = SORTS[view];
   const segmented = !!list && list.groups.length > 1 && list.total > 0;
   const [emptyTitle, emptyText] = EMPTY[view];
-  // A reason every row on the page shares is said once, over them, rather than down every row.
   const first = rows[0]?.reason?.label;
   const uniform = rows.length > 1 && !!first && rows.every(r => r.reason?.label === first);
   const tools = list?.all !== 0;
@@ -80,7 +75,6 @@ export function ArchivePage() {
       onValueChange={v => {
         navigate(`archive/${v}`);
       }}
-      // No box of its own, so the workspace fills the page or the column.
       className="contents"
     >
       <Workspace
@@ -139,7 +133,6 @@ export function ArchivePage() {
         }}
         notice={
           uniform && (
-            // Said once over the rows, which then give the place in its stead.
             <p className="flex min-h-10 items-center border-b border-border px-(--list-x) py-2 text-sm text-fg-muted">
               All {num(rows.length)}
               {list && list.total > rows.length && " on this page"}: {first}.
@@ -174,12 +167,10 @@ export function ArchivePage() {
   );
 }
 
-// Every held job back through triage, after a confirmation: each is assessed again, which costs model time.
 function ReleaseHeld({ count }: { count: number }) {
   const [confirming, setConfirming] = useState(false);
   return (
     <>
-      {/* A menu, not a button in the bar: the release costs model time, so it stays a step away. */}
       <Menu modal={false}>
         <MenuTrigger asChild>
           <Button variant="secondary" size="icon" aria-label="More actions">
@@ -210,7 +201,6 @@ function ReleaseHeld({ count }: { count: number }) {
               toast.success("Held jobs released");
               void refreshAll();
             },
-            // The request has already shown the server's refusal.
             () => undefined,
           );
         }}

@@ -1,7 +1,4 @@
 #!/bin/sh
-# On `git worktree add`, copy the gitignored files listed in .worktreeinclude from the main checkout,
-# so the new worktree can run the app and its checks. Files already there are left alone.
-# Git passes the previous HEAD as all zeros only when a new worktree is checked out.
 [ "$1" = "0000000000000000000000000000000000000000" ] || exit 0
 [ -f .worktreeinclude ] || exit 0
 main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')

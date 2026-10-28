@@ -10,7 +10,6 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // Disabled, the primary goes grey rather than a washed-out accent: it reads as not yet, not as faint.
         primary: "bg-accent text-accent-fg shadow-xs hover:bg-accent-hover disabled:bg-muted disabled:text-fg-subtle disabled:shadow-none disabled:opacity-100",
         secondary: "border border-border bg-surface text-fg shadow-xs hover:border-border-strong hover:bg-subtle active:bg-muted",
         ghost: "text-fg-muted hover:bg-subtle hover:text-fg active:bg-muted",
@@ -34,8 +33,8 @@ export type ButtonProps = ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean;
     loading?: boolean;
-    icon?: ReactNode; // before the label
-    shortcut?: string; // shown as a key hint at the end
+    icon?: ReactNode;
+    shortcut?: string;
   };
 
 export function Button({ className, variant, size, asChild, loading, icon, shortcut, children, disabled, ...props }: ButtonProps) {

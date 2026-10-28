@@ -1,4 +1,3 @@
-// Whether the machine is healthy: one row per subsystem with its state, and a way to its settings.
 import type { ReactNode } from "react";
 import type { Summary } from "../../../src/api-types";
 import type { DigestStatus } from "../../../src/digest";
@@ -14,7 +13,6 @@ interface Row {
   pulse?: boolean;
 }
 
-// The digest's delivery states as the owner would say them.
 const DIGEST: Record<string, readonly [string, Tone]> = {
   not_connected: ["No mailbox", "danger"],
   idle: ["Nothing to send", "success"],
@@ -25,7 +23,6 @@ const DIGEST: Record<string, readonly [string, Tone]> = {
   failed: ["Failed", "danger"],
 };
 
-// When the next digest goes out, on the digest's own clock: "today at 09:00", "tomorrow at 09:00".
 function nextDigest(d: DigestStatus) {
   const format = new Intl.DateTimeFormat("en-CA", {
     timeZone: d.timeZone,
@@ -92,8 +89,6 @@ export function Health({ summary }: { summary: Summary | undefined }) {
           <ListRow
             key={r.name}
             title={r.name}
-            // The detail is the fact worth reading ("Last ran 55m ago across 1,813 sources"): it wraps to a second
-            // line in the narrow rail rather than being cut.
             gist={<span data-detail>{r.detail}</span>}
             className="[&_div:has(>[data-detail])]:line-clamp-2 [&_div:has(>[data-detail])]:whitespace-normal"
             fact={<StatusLabel tone={r.state[1]} label={r.state[0]} pulse={r.pulse} />}

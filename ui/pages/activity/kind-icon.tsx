@@ -1,5 +1,3 @@
-// The icon tile that leads a feed row, by the kind of entry, here and on Overview: the same event looks the
-// same on both pages.
 import { Bot, Building2, CircleUserRound, Hand, ListChecks, Mail, Radar, RefreshCw, Search, TriangleAlert, Wrench, Zap, type LucideIcon } from "lucide-react";
 import { ListIcon } from "../../components/ui";
 import type { FeedRow } from "./feed";
@@ -14,7 +12,6 @@ const KIND_ICON: Record<string, LucideIcon> = {
   migration: Wrench,
 };
 const KIND_TONE: Record<string, "warning" | "danger" | "info"> = { gate: "warning", error: "danger", mail: "info" };
-// System entries by what they report, so a scan, a mail check and a recheck tell apart at a glance.
 const SYSTEM_ICON: [RegExp, LucideIcon][] = [
   [/^Checked mail/, Mail],
   [/^(Looked for|Found) the employer/, Search],

@@ -6,9 +6,6 @@ from ..backends.base import RawExtraction
 from ..util import DimensionResult, normalize
 
 
-# Canonical range: "May 2025 — Present", "Aug 2024 — Dec 2024".
-# We accept em-dash (U+2014), en-dash (U+2013), or " - " ASCII hyphen with
-# spaces, but a successful em-dash is the "ideal".
 MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?"
 DATE_TOKEN = rf"(?:{MONTH}\s+\d{{4}}|\d{{4}}|Present)"
 RANGE_RE = re.compile(
@@ -25,7 +22,6 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
     text = normalize(ext.text)
     findings: list[str] = []
 
-    # Collect every expected start_date / end_date pair from work + projects.
     expected_pairs: list[tuple[str, str]] = []
     for bucket in ("work", "projects"):
         for entry in truth.get(bucket, []):
@@ -44,7 +40,6 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
     for start, end in expected_pairs:
         found = False
         for s, _sep, e in ranges_in_text:
-            # Exact-token compare so "2024" doesn't falsely match "Aug 2024".
             if s.strip().lower() == start.strip().lower() and \
                e.strip().lower() == end.strip().lower():
                 found = True

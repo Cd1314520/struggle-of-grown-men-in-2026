@@ -1,13 +1,9 @@
-// Long-lived, real (headed) Chromes, each on its own virtual display with a persistent profile.
-// omp attaches to one over CDP, so logins, cookies and half-filled tabs outlive any worker.
-// Every function takes the browser's number (see browserSlot in config.ts); 0 is the original.
 import { mkdirSync } from "node:fs";
 import { connect } from "node:net";
 import { browserSlot, config } from "./config";
 import { logEvent } from "./db";
 import { startCdpProxy, type CdpProxy } from "./cdp-proxy";
 
-// The /json/list fields read here.
 interface CdpTab {
   id: string;
   type: string;
@@ -30,7 +26,6 @@ async function cdpAlive(slot: number) {
   }
 }
 
-// A leftover socket file does not mean an X server is listening; try to connect.
 const displayAlive = (display: string) =>
   new Promise<boolean>(resolve => {
     const sock = connect(`/tmp/.X11-unix/X${display.replace(":", "")}`);
@@ -59,11 +54,10 @@ const portOpen = (port: number) =>
     });
   });
 
-// noVNC view of the virtual display, for taking over a tab by hand. Localhost only.
 async function ensureVnc(slot: number) {
   const { display, vncPort } = browserSlot(slot);
   if (!vncPort || !(await displayAlive(display))) return;
-  const rfb = vncPort - 180; // 6080 -> 5900
+  const rfb = vncPort - 180;
   if (!(await portOpen(rfb)))
     detached(["x11vnc", "-display", display, "-localhost", "-rfbport", String(rfb), "-forever", "-shared", "-nopw", "-quiet"], process.env);
   if (!(await portOpen(vncPort))) detached(["websockify", "--web", "/usr/share/novnc", `127.0.0.1:${vncPort}`, `127.0.0.1:${rfb}`], process.env);
@@ -92,8 +86,6 @@ export async function ensureChrome(slot = 0) {
       "--disable-session-crashed-bubble",
       "--password-store=basic",
       "--lang=en-US",
-      // Vulkan reaches the machine's actual GPU through its render node (/dev/dri/renderD128),
-      // providing genuine hardware WebGL and WebGL2 acceleration under Xvfb without spoofing.
       "--use-gl=angle",
       "--use-angle=vulkan",
       "--enable-features=Vulkan",
@@ -134,8 +126,6 @@ export interface JobBrowser extends CdpProxy {
   reused: boolean;
 }
 
-// HTTP /json/new creates a target; activating an existing tab does not constrain
-// browser.open's adoption. Expose only this job's target through a private proxy.
 export async function prepareJobBrowser(slot: number, checkpointTabId: string | null, excludedTargets: ReadonlySet<string>): Promise<JobBrowser> {
   if (checkpointTabId && excludedTargets.has(checkpointTabId))
     throw new Error("Checkpoint tab is also assigned to another application; inspect the conflicting drafts before resuming");
@@ -161,18 +151,12 @@ export async function prepareJobBrowser(slot: number, checkpointTabId: string | 
   return { ...startCdpProxy(slot, { targetId: tabId, excludedTargets }), tabId, reused: Boolean(saved) };
 }
 
-// Retain tabs referenced by durable draft checkpoints, even when their slot is reused. Tabs that
-// are `givenUp` are closed outright; of the rest that nothing protects, the `keep` most recent stay.
 export async function pruneTabs(slot: number, keep: number, protectedIds: ReadonlySet<string> = new Set(), givenUp: ReadonlySet<string> = new Set()) {
   const open = await tabs(slot);
   const stray = open.filter(t => !protectedIds.has(t.id) && !givenUp.has(t.id)).slice(keep);
-  for (const tab of [...open.filter(t => givenUp.has(t.id)), ...stray])
-    await fetch(`${cdp(slot)}/json/close/${tab.id}`).catch(() => {
-      /* tab already closed or browser gone */
-    });
+  for (const tab of [...open.filter(t => givenUp.has(t.id)), ...stray]) await fetch(`${cdp(slot)}/json/close/${tab.id}`).catch(() => {});
 }
 
-// PNG of a tab (default: the most recently used real page), for the live view in the UI.
 export async function screenshot(slot = 0, tabId?: string): Promise<Uint8Array | null> {
   const all = await tabs(slot);
   const tab = tabId !== undefined ? all.find(t => t.id === tabId) : (all.find(t => !t.url.startsWith("about:") && !t.url.startsWith("chrome")) ?? all[0]);

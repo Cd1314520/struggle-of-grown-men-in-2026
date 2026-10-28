@@ -1,5 +1,3 @@
-// Jobs that only missed auto-approval because the day's allowance was used up. They are reconsidered,
-// most recently opened first, when there is allowance again.
 import { existsSync } from "node:fs";
 import { autoApply, reconsiderAutoApproval } from "./auto";
 import { db, employerApplications, getJob, openedAt, kvDelete, kvEntries, kvGet, kvSet, logEvent, notifyJobChange, updateJob, writeJob } from "./db";

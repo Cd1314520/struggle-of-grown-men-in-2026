@@ -1,15 +1,4 @@
 #!/usr/bin/env bun
-/**
- * scripts/browser-audit.ts
- *
- * Durable, isolated real-browser measurement harness.
- * Uses repository launch logic (`ensureChrome` and `startCdpProxy` / `prepareJobBrowser`)
- * on disposable displays, ports, and profiles.
- *
- * Captures low-level fingerprint surfaces and public checker verdicts
- * (Sannysoft, BrowserScan, CreepJS, Fingerprint open-source BotD, commercial demo)
- * across Direct CDP, Scoped Proxied, and Attached Browser Target automation routes.
- */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,7 +6,6 @@ import { join, resolve } from "node:path";
 import { connect } from "node:net";
 import type { CdpProxy } from "../src/cdp-proxy";
 
-// --- Types ---
 export type AuditMode = "full" | "baseline" | "after" | "smoke";
 
 export interface AuditOptions {
@@ -222,7 +210,6 @@ export interface AuditReport {
   routes: Record<string, RouteAuditResult>;
 }
 
-// --- CLI Parsing ---
 function parseArgs(): AuditOptions {
   const args = process.argv.slice(2);
   const opts: AuditOptions = {
@@ -240,7 +227,6 @@ function parseArgs(): AuditOptions {
   let routesExplicit = false;
   let timeoutExplicit = false;
 
-  // Value of a `--flag=value` argument: the text between the first and second "=".
   const inlineValue = (flagArg: string): string => flagArg.split("=")[1] ?? "";
 
   for (let i = 0; i < args.length; i++) {
@@ -336,7 +322,6 @@ Options:
   return opts;
 }
 
-// --- Preflight and Lifecycle Helpers ---
 function isPortInUse(port: number): Promise<boolean> {
   const { promise, resolve } = Promise.withResolvers<boolean>();
   const sock = connect(port, "127.0.0.1");
@@ -366,7 +351,6 @@ function isDisplayInUse(display: string): Promise<boolean> {
 async function findAuditPids(display: string, profileDir: string): Promise<number[]> {
   try {
     const dispNum = display.replace(":", "");
-    // Exact word boundary matching for display and profile dir arguments
     const pattern = `Xvfb\\s+:${dispNum}(\\s|$)|--user-data-dir=${profileDir}(\\s|$)`;
     const pgrep = Bun.spawn(["pgrep", "-f", pattern], {
       stdout: "pipe",
@@ -395,7 +379,6 @@ interface AuditSandbox {
 }
 
 async function setupSandbox(opts: AuditOptions): Promise<AuditSandbox> {
-  // Preflight check: refuse to run if display or ports are occupied
   if (await isDisplayInUse(opts.display)) {
     throw new Error(`Preflight check failed: Display ${opts.display} is already in use by an active X server. Refusing to collide.`);
   }
@@ -419,8 +402,6 @@ async function setupSandbox(opts: AuditOptions): Promise<AuditSandbox> {
   const profileDir = join(dataDir, "chrome-profile");
   mkdirSync(profileDir, { recursive: true });
 
-  // Exception: Dynamic import required because AUTO_APPLY_DATA must be populated in process.env
-  // before src/config evaluates its top-level constants (DATA = process.env.AUTO_APPLY_DATA ?? ...).
   process.env["AUTO_APPLY_DATA"] = dataDir;
 
   const { config, DATA } = await import("../src/config");
@@ -430,7 +411,7 @@ async function setupSandbox(opts: AuditOptions): Promise<AuditSandbox> {
   config.chrome.display = opts.display;
   config.chrome.cdpPort = opts.cdpPort;
   config.chrome.proxyPort = opts.proxyPort;
-  config.chrome.vncPort = 0; // disable VNC for audit sessions
+  config.chrome.vncPort = 0;
 
   let createdSocket = false;
   let cleaned = false;
@@ -440,49 +421,36 @@ async function setupSandbox(opts: AuditOptions): Promise<AuditSandbox> {
     cleaned = true;
     console.log(`[audit-lifecycle] Cleaning up isolated display ${opts.display} and profile ${profileDir}...`);
 
-    // Terminate only processes matching our exact display or profile dir
     const pids = await findAuditPids(opts.display, profileDir);
     if (pids.length > 0) {
       for (const pid of pids) {
         try {
           process.kill(pid, "SIGTERM");
-        } catch {
-          /* already exited */
-        }
+        } catch {}
       }
       await Bun.sleep(400);
       const remaining = await findAuditPids(opts.display, profileDir);
       for (const pid of remaining) {
         try {
           process.kill(pid, "SIGKILL");
-        } catch {
-          /* already exited */
-        }
+        } catch {}
       }
     }
 
-    // Only unlink socket and lock if this audit process actually created it
     if (createdSocket && existsSync(socketPath)) {
       try {
         rmSync(socketPath, { force: true });
-      } catch {
-        /* best-effort cleanup */
-      }
+      } catch {}
     }
     if (createdSocket && existsSync(lockPath)) {
       try {
         rmSync(lockPath, { force: true });
-      } catch {
-        /* best-effort cleanup */
-      }
+      } catch {}
     }
 
-    // Remove temporary data dir
     try {
       rmSync(dataDir, { recursive: true, force: true });
-    } catch {
-      // Best-effort cleanup of the temporary data dir
-    }
+    } catch {}
     console.log(`[audit-lifecycle] Isolated cleanup complete.`);
   };
 
@@ -510,7 +478,6 @@ async function setupSandbox(opts: AuditOptions): Promise<AuditSandbox> {
   };
 }
 
-// --- CDP Client ---
 export interface CdpSession {
   send: (method: string, params?: Record<string, unknown>) => Promise<Record<string, unknown>>;
   evaluate: <T>(expression: string) => Promise<T>;
@@ -575,9 +542,7 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
           for (const fn of list) fn(msg.params);
         }
       }
-    } catch {
-      // Ignore frames that are not valid CDP JSON
-    }
+    } catch {}
   };
 
   const send = (method: string, params: Record<string, unknown> = {}, timeoutMs = 15000): Promise<Record<string, unknown>> => {
@@ -633,7 +598,6 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
       return;
     }
 
-    // Held in an object so the flag set by the event listener is visible to the wait loop below.
     const loadState = { fired: false };
     const onLoad = () => {
       loadState.fired = true;
@@ -681,9 +645,7 @@ export async function createCdpSession(wsUrl: string, targetId: string, initialS
   const close = () => {
     try {
       ws.close();
-    } catch {
-      /* socket already closed */
-    }
+    } catch {}
   };
 
   return {
@@ -706,7 +668,6 @@ async function createTargetAndSession(cdpUrl: string): Promise<CdpSession> {
   return createCdpSession(target.webSocketDebuggerUrl, target.id);
 }
 
-// Attach via browser target WebSocket (mirroring OMP / Puppeteer connection)
 async function createAttachedSession(browserWsUrl: string, targetId: string): Promise<CdpSession> {
   const session = await createCdpSession(browserWsUrl, targetId);
   const attachRes = await session.send("Target.attachToTarget", {
@@ -721,7 +682,6 @@ async function createAttachedSession(browserWsUrl: string, targetId: string): Pr
   return session;
 }
 
-// --- Diagnostic HTTP Server & Wire/DOM Coherence Helpers ---
 function extractCapturedHeaders(req: Request): CapturedHttpHeaders {
   const h = req.headers;
   const rawHeaders: Record<string, string> = {};
@@ -759,14 +719,12 @@ function computeWireDomCoherence(
   const domLanguages = Array.isArray(domLang["languages"]) ? (domLang["languages"] as string[]) : [];
   const highEntropy = (domUa["highEntropyValues"] ?? {}) as Record<string, unknown>;
 
-  // 1. User-Agent
   const wireUserAgent = primaryWire?.userAgent || "";
   const userAgentMatch = Boolean(wireUserAgent && domUserAgent && wireUserAgent === domUserAgent);
   if (!userAgentMatch) {
     mismatches.push(`User-Agent wire ('${wireUserAgent}') !== DOM ('${domUserAgent}')`);
   }
 
-  // 2. Platform (Sec-CH-UA-Platform vs navigator.userAgentData.platform)
   const wirePlatformRaw = primaryWire?.secChUaPlatform || "";
   const wirePlatformClean = wirePlatformRaw.replace(/^"|"$/g, "");
   let platformMatch = true;
@@ -777,7 +735,6 @@ function computeWireDomCoherence(
     }
   }
 
-  // 3. Mobile (Sec-CH-UA-Mobile vs navigator.userAgentData.mobile)
   const wireMobile = primaryWire?.secChUaMobile || "";
   let mobileMatch = true;
   if (wireMobile) {
@@ -788,7 +745,6 @@ function computeWireDomCoherence(
     }
   }
 
-  // 4. Brands (Sec-CH-UA vs navigator.userAgentData.brands)
   const wireBrands = primaryWire?.secChUa || "";
   let brandsMatch = true;
   if (domBrands.length > 0 && wireBrands) {
@@ -803,7 +759,6 @@ function computeWireDomCoherence(
     mismatches.push("Sec-CH-UA missing on wire while userAgentData.brands is present in DOM");
   }
 
-  // 5. Languages (Accept-Language vs navigator.languages)
   const wireLang = primaryWire?.acceptLanguage || "";
   let languagesMatch = true;
   const domFirstLanguage = domLanguages[0];
@@ -816,7 +771,6 @@ function computeWireDomCoherence(
     }
   }
 
-  // 6. High Entropy Arch & Bitness
   let highEntropyArchMatch: boolean | null = null;
   let highEntropyBitnessMatch: boolean | null = null;
   if (primaryWire?.secChUaArch && typeof highEntropy["architecture"] === "string") {
@@ -851,13 +805,10 @@ function computeWireDomCoherence(
   };
 }
 
-// --- Diagnostic In-Browser Probes ---
 async function runProbes(session: CdpSession, directCdpPort: number): Promise<ProbeResults> {
   console.log(`[audit-probes] Executing diagnostic in-browser probes...`);
-  // Held in an object so headers recorded by the server's fetch handler are visible below.
   const captured: ProbeResults["capturedHeaders"] = { navigation: null, api: null };
 
-  // Ephemeral diagnostic server on localhost (a trusted, secure context)
   const diagServer = Bun.serve({
     port: 0,
     fetch(req) {
@@ -890,7 +841,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
 
   try {
     await session.navigate(`${diagOrigin}/diagnostic`, true);
-    // 1. Webdriver descriptor & native getters
     const webdriverProbe = await session.evaluate<Record<string, unknown>>(`(() => {
       const descriptor = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
       const hasOwn = Object.prototype.hasOwnProperty.call(navigator, 'webdriver');
@@ -905,7 +855,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       };
     })()`);
 
-    // 2. User-Agent, AppVersion, UserAgentData
     const uaProbe = await session.evaluate<Record<string, unknown>>(`(async () => {
       const uad = (navigator).userAgentData;
       let highEntropy = null;
@@ -930,7 +879,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       };
     })()`);
 
-    // 3. Languages
     const langProbe = await session.evaluate<Record<string, unknown>>(`(() => {
       return {
         language: navigator.language,
@@ -938,7 +886,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       };
     })()`);
 
-    // 4. Plugins & MimeTypes
     const pluginsProbe = await session.evaluate<Record<string, unknown>>(`(() => {
       const p = navigator.plugins;
       const m = navigator.mimeTypes;
@@ -954,7 +901,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       };
     })()`);
 
-    // 5. Permissions
     const permissionsProbe = await session.evaluate<Record<string, unknown>>(`(async () => {
       let queryResult = null;
       try {
@@ -969,7 +915,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       };
     })()`);
 
-    // 6. Window and Screen Metrics
     const windowMetricsProbe = await session.evaluate<Record<string, unknown>>(`(() => {
       return {
         innerWidth: window.innerWidth,
@@ -986,7 +931,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       };
     })()`);
 
-    // 7. WebGL Vendor & Renderer
     const webglProbe = await session.evaluate<Record<string, unknown>>(`(() => {
       try {
         const canvas = document.createElement('canvas');
@@ -1007,7 +951,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       }
     })()`);
 
-    // 8. Media Devices (Initial, getUserMedia, and Post-Grant)
     const mediaDevicesInitial = await session.evaluate<Record<string, unknown>>(`(async () => {
       try {
         if (!navigator.mediaDevices?.enumerateDevices) return { supported: false };
@@ -1025,7 +968,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       }
     })()`);
 
-    // Grant permission via direct browser session (direct port) without weakening the scoped proxy
     let mediaDevicesGranted: Record<string, unknown> | null = null;
     try {
       const verRes = await fetch(`http://127.0.0.1:${directCdpPort}/json/version`);
@@ -1039,7 +981,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       } finally {
         directBrowserSession.close();
       }
-      // Invoke getUserMedia under diagnostic origin to populate device tracks
       mediaDevicesGranted = await session.evaluate<Record<string, unknown>>(`(async () => {
         let gumOk = false;
         let gumError = null;
@@ -1068,7 +1009,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       mediaDevicesGranted = { error: `grantPermissions failed: ${msg}` };
     }
 
-    // 9. Context Consistency (Window vs IFrame vs Worker)
     const contextConsistencyProbe = await session.evaluate<Record<string, unknown>>(`(async () => {
       const main = {
         webdriver: navigator.webdriver,
@@ -1159,7 +1099,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       };
     })()`);
 
-    // 10. CDP console & runtime serialization artifacts
     const cdpArtifactsProbe = await session.evaluate<Record<string, unknown>>(`(() => {
       const errorStack = new Error().stack || '';
       const hasPuppeteerArtifact = Boolean(
@@ -1172,7 +1111,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       };
     })()`);
 
-    // 11. Navigator Own Keys & WebMCP Bridge Probe
     const navigatorKeysProbe = await session.evaluate<NavigatorOwnKeysProbe>(`(() => {
       const ownNames = Object.getOwnPropertyNames(navigator);
       const enumerableKeys = Object.keys(navigator);
@@ -1189,7 +1127,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
       };
     })()`);
 
-    // 12. HTTP Client Hints verification fetch
     const apiHeadersProbe = await session.evaluate<CapturedHttpHeaders | null>(`(async () => {
       try {
         const res = await fetch('/api/headers');
@@ -1226,9 +1163,6 @@ async function runProbes(session: CdpSession, directCdpPort: number): Promise<Pr
   }
 }
 
-// --- Public Anti-Bot Checker Runners ---
-
-// Sannysoft (https://bot.sannysoft.com/)
 async function checkSannysoft(session: CdpSession, screenshotPath: string, timeoutMs: number) {
   console.log(`[checker:sannysoft] Navigating to https://bot.sannysoft.com/...`);
   const startTime = Date.now();
@@ -1341,7 +1275,6 @@ async function checkSannysoft(session: CdpSession, screenshotPath: string, timeo
   }
 }
 
-// Fingerprint Open-Source BotD (openfpcdn.io/botd/v2)
 async function checkBotD(session: CdpSession, screenshotPath: string, _timeoutMs: number) {
   console.log(`[checker:botd] Testing Open-Source BotD via openfpcdn.io/botd/v2...`);
   const startTime = Date.now();
@@ -1394,7 +1327,6 @@ async function checkBotD(session: CdpSession, screenshotPath: string, _timeoutMs
   }
 }
 
-// CreepJS (https://abrahamjuliot.github.io/creepjs/)
 async function checkCreepJS(session: CdpSession, screenshotPath: string, timeoutMs: number) {
   console.log(`[checker:creepjs] Navigating to https://abrahamjuliot.github.io/creepjs/...`);
   const startTime = Date.now();
@@ -1452,11 +1384,9 @@ async function checkCreepJS(session: CdpSession, screenshotPath: string, timeout
         trustScoreReady = true;
       }
 
-      // If both detector calculations and trust score are settled, we are ready
       if (detectorReady && trustScoreReady) {
         break;
       }
-      // If detector calculations are complete, allow up to 3 seconds for trust score to populate in checker output before proceeding
       if (detectorReady && detectorReadyTime !== null && Date.now() - detectorReadyTime >= 3000) {
         break;
       }
@@ -1527,7 +1457,6 @@ async function checkCreepJS(session: CdpSession, screenshotPath: string, timeout
       const stealthRating = (fp?.headless && typeof fp.headless.stealthRating === 'number') ? fp.headless.stealthRating : null;
       const likeHeadlessRating = (fp?.headless && typeof fp.headless.likeHeadlessRating === 'number') ? fp.headless.likeHeadlessRating : null;
 
-      // Capture actual Fingerprint.headless.likeHeadless all fields and reasons
       const rawLikeHeadless = (fp?.headless?.likeHeadless && typeof fp.headless.likeHeadless === 'object')
         ? fp.headless.likeHeadless
         : {};
@@ -1555,7 +1484,6 @@ async function checkCreepJS(session: CdpSession, screenshotPath: string, timeout
         }
       }
 
-      // Capture actual stealth flags
       const rawStealth = (fp?.headless?.stealth && typeof fp.headless.stealth === 'object')
         ? fp.headless.stealth
         : {};
@@ -1566,7 +1494,6 @@ async function checkCreepJS(session: CdpSession, screenshotPath: string, timeout
         }
       }
 
-      // Capture actual headless flags
       const rawHeadless = (fp?.headless?.headless && typeof fp.headless.headless === 'object')
         ? fp.headless.headless
         : {};
@@ -1604,7 +1531,6 @@ async function checkCreepJS(session: CdpSession, screenshotPath: string, timeout
       };
     })()`);
 
-    // Clean requires all ratings clean AND confirmed totalLies === 0 AND non-null trustScore
     const hasTrustScore = report.trustScore !== null;
     const isClean =
       report.isReady &&
@@ -1651,7 +1577,6 @@ async function checkCreepJS(session: CdpSession, screenshotPath: string, timeout
   }
 }
 
-// BrowserScan (https://www.browserscan.net/bot-detection)
 async function checkBrowserScan(session: CdpSession, screenshotPath: string, timeoutMs: number) {
   console.log(`[checker:browserscan] Navigating to https://www.browserscan.net/bot-detection...`);
   const startTime = Date.now();
@@ -1663,7 +1588,6 @@ async function checkBrowserScan(session: CdpSession, screenshotPath: string, tim
       const state = await session.evaluate<{ hasResults: boolean; isScanning: boolean; isBlocked: boolean }>(`(() => {
         const text = document.body ? document.body.innerText : '';
         const isBlocked = /cf-challenge|challenge-running|Attention Required|Access Denied/i.test(text);
-        // Look for actual completed detection items
         const hasResults = /WebDriverNormal|WebDriverAbnormal|WebDriver AdvanceNormal|Test Results/i.test(text);
         const isScanning = /Scanning|Analyzing/i.test(text);
         return { hasResults, isScanning, isBlocked };
@@ -1720,7 +1644,6 @@ async function checkBrowserScan(session: CdpSession, screenshotPath: string, tim
       const scoreMatch = bodyText.match(/Bot Score[:\\s]+([0-9%]+)/i);
       if (scoreMatch) botScore = scoreMatch[1];
 
-      // 1. Overall Test Result: Check specific DOM badge or strict re-anchored regex (mutually exclusive)
       let overallResult = null;
       const resultBadge = document.querySelector('._oxrqr1, ._1ikblmd');
       if (resultBadge) {
@@ -1744,7 +1667,6 @@ async function checkBrowserScan(session: CdpSession, screenshotPath: string, tim
       const isNormal = overallResult === 'Normal';
       const isRobot = overallResult === 'Robot';
 
-      // 2. Native Navigator Status: inspect own ancestor wrapper svg status
       let navigatorStatus = null;
       const navHeader = document.getElementById('anchor_navigator') ||
         Array.from(document.querySelectorAll('h2, h3, div')).find(el => el.textContent && el.textContent.trim() === 'Native Navigator');
@@ -1769,7 +1691,6 @@ async function checkBrowserScan(session: CdpSession, screenshotPath: string, tim
         navigatorStatus = items['Native Navigator'] || items['Navigator'] || null;
       }
 
-      // 3. CDP / Dev Tool Status
       let cdpStatus = items['CDP'] || items['Dev Tool'] || null;
       if (!cdpStatus) {
         const cdpHeader = Array.from(document.querySelectorAll('h2, h3, strong, div')).find(el => {
@@ -1791,7 +1712,6 @@ async function checkBrowserScan(session: CdpSession, screenshotPath: string, tim
         }
       }
 
-      // 4. WebDriver Status
       let webdriverStatus = items['WebDriver'] || items['WebDriver Advance'] || null;
       if (!webdriverStatus) {
         const wdHeader = Array.from(document.querySelectorAll('h2, h3, strong, div')).find(el => el.textContent && el.textContent.trim() === 'WebDriver');
@@ -1810,7 +1730,6 @@ async function checkBrowserScan(session: CdpSession, screenshotPath: string, tim
         }
       }
 
-      // 5. Verdict & Clean (Mutually exclusive: Normal vs Robot; invalid/unparsed = unparsed_or_incomplete)
       const hasFailedSubtest = Boolean(
         (webdriverStatus && /abnormal|fail/i.test(webdriverStatus)) ||
         (cdpStatus && /abnormal|fail/i.test(cdpStatus)) ||
@@ -1871,7 +1790,6 @@ async function checkBrowserScan(session: CdpSession, screenshotPath: string, tim
   }
 }
 
-// Commercial Fingerprint Demo (https://demo.fingerprint.com/playground)
 async function checkFingerprintDemo(session: CdpSession, screenshotPath: string, timeoutMs: number) {
   console.log(`[checker:fingerprint-demo] Navigating to https://demo.fingerprint.com/playground...`);
   const startTime = Date.now();
@@ -2048,7 +1966,6 @@ async function checkFingerprintDemo(session: CdpSession, screenshotPath: string,
   }
 }
 
-// --- Main Audit Orchestrator ---
 export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
   const parsed = parseArgs();
   const options: AuditOptions = { ...parsed, ...opts };
@@ -2065,8 +1982,6 @@ export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
   const runScreenshotDir = join(options.screenshotDir, runId);
   mkdirSync(runScreenshotDir, { recursive: true });
   const sandbox = await setupSandbox(options);
-
-  // Compute code snapshot hashes
 
   const hasherChrome = new Bun.CryptoHasher("sha256");
   hasherChrome.update(readFileSync("src/chrome.ts"));
@@ -2102,18 +2017,14 @@ export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
   };
 
   try {
-    // 1. Launch Chrome via repository ensureChrome
     console.log(`[audit] Launching real headed Chrome via ensureChrome(0)...`);
-    // Exception: Dynamic import required after AUTO_APPLY_DATA is populated
     const { ensureChrome } = await import("../src/chrome");
     await ensureChrome(0);
     sandbox.markSocketCreated();
-    // Query /json/version
     const versionRes = await fetch(`http://127.0.0.1:${options.cdpPort}/json/version`);
     if (!versionRes.ok) throw new Error(`Chrome /json/version unreachable on port ${options.cdpPort}`);
     const chromeVersion = (await versionRes.json()) as JsonVersionInfo;
 
-    // Read root Chrome PID and cmdline from /proc
     const pids = await findAuditPids(options.display, sandbox.profileDir);
     let cmdlineArgs: string[] = [];
     for (const pid of pids) {
@@ -2128,9 +2039,7 @@ export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
           cmdlineArgs = args;
           break;
         }
-      } catch {
-        // Process exited between listing and reading its cmdline
-      }
+      } catch {}
     }
     auditReport.launch = {
       ...auditReport.launch,
@@ -2141,11 +2050,6 @@ export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
       cmdline: cmdlineArgs,
     };
     console.log(`[audit] Chrome active: ${chromeVersion.Browser}`);
-
-    // 2. Prepare Routes:
-    // Route "direct": connects directly to Chrome's CDP port (/devtools/page/<id>)
-    // Route "proxied": creates a scoped tab via prepareJobBrowser and connects through the proxy port (/devtools/page/<id>)
-    // Route "attached": connects to scoped CDP proxy via BROWSER target socket (/devtools/browser/...) using Target.attachToTarget
 
     const routesMap: Record<string, RouteAuditResult> = {};
 
@@ -2205,14 +2109,12 @@ export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
       };
 
       try {
-        // Run deep diagnostic probes
         const probes = await runProbes(session, options.cdpPort);
         routeResults.probes = probes;
         routeResults.wireCoherence = probes.wireCoherence;
 
         const checkersResults: RouteCheckers = {};
 
-        // Run requested public checkers
         if (options.checkers.includes("botd")) {
           const sPath = join(runScreenshotDir, `${routeName}-botd.png`);
           checkersResults.botd = await checkBotD(session, sPath, options.timeoutMs);
@@ -2283,7 +2185,6 @@ export async function runBrowserAudit(opts?: Partial<AuditOptions>) {
 
     auditReport.routes = routesMap;
 
-    // Write final structured report
     writeFileSync(options.outPath, JSON.stringify(auditReport, null, 2), "utf-8");
     console.log(`\n=======================================================`);
     console.log(`Audit Completed Successfully.`);

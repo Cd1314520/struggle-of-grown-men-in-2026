@@ -1,11 +1,10 @@
-// The shell's own open/closed state: the command palette, the Add a posting dialog, the shortcuts sheet.
 import { useSyncExternalStore } from "react";
 
 interface ShellState {
   paletteOpen: boolean;
   addOpen: boolean;
   shortcutsOpen: boolean;
-  menuOpen: boolean; // the navigation sheet on a phone
+  menuOpen: boolean;
 }
 let state: ShellState = { paletteOpen: false, addOpen: false, shortcutsOpen: false, menuOpen: false };
 const listeners = new Set<() => void>();

@@ -11,7 +11,6 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
     findings: list[str] = []
     warnings: list[str] = []
 
-    # Hard denylist — failing these fails the run.
     banned = {int(g["codepoint"], 16): g["name"] for g in truth.get("banned_glyphs", [])}
     banned_hits: Counter[int] = Counter()
     for ch in text:
@@ -24,7 +23,6 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
             f"banned glyph U+{cp:04X} ({banned[cp]}) appears {n} time(s)"
         )
 
-    # Soft warnings — surfaced in the report but do not affect score.
     warn = {int(g["codepoint"], 16): g["name"] for g in truth.get("warn_glyphs", [])}
     warn_hits: Counter[int] = Counter()
     for ch in text:
@@ -36,7 +34,6 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
             f"suspect glyph U+{cp:04X} ({warn[cp]}) appears {n} time(s)"
         )
 
-    # Private-use area scan — these are font-subset glyphs an ATS can't decode.
     pua_whitelist = {int(c, 16) for c in truth.get("pua_whitelist", [])}
     pua_hits: Counter[int] = Counter()
     for ch in text:
@@ -49,9 +46,6 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
             f"(likely font-subset glyph an ATS can't decode)"
         )
 
-    # Binary scoring: any banned/PUA glyph is a hard fail. Avoids the trap
-    # of someone later lowering the threshold and silently tolerating glyph
-    # corruption.
     total_failing = sum(banned_hits.values()) + sum(pua_hits.values())
     score_val = 1.0 if total_failing == 0 else 0.0
 

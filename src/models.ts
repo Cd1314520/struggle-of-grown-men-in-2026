@@ -1,6 +1,3 @@
-// The models agents run on: which ones omp and Claude Code can reach, and the choice per stage. A choice made in the
-// app is written to config.local.yml (laid over config.yml) and to the loaded config, so the next
-// worker of that stage uses it without a restart.
 import { config, LOCAL_CONFIG, MODEL_STAGES, type ModelStage } from "./config";
 import { claudeCatalog } from "./claude";
 import { errorMessage } from "./errors";
@@ -8,25 +5,20 @@ import { setSetting } from "./settings";
 import type { HarnessId } from "./worker";
 
 export interface CatalogModel {
-  selector: string; // what a stage names: "<provider>/<id>", or "claude-code/<model>" for Claude Code
+  selector: string;
   provider: string;
   name: string;
   contextWindow: number | null;
-  // Dollars per million tokens, when omp knows them.
   cost: { input: number; output: number } | null;
 }
 export interface ModelCatalog {
   models: CatalogModel[];
-  // Why a harness could not list its models; any model name may still be typed.
   errors: Partial<Record<HarnessId, string>>;
   at: string;
 }
 
 export const isModelStage = (v: unknown): v is ModelStage => MODEL_STAGES.some(s => s === v);
 
-// `omp models --json` reads the providers this machine is logged in to, and `claude auth status`
-// whether Claude Code is signed in. That takes a second or two, so the list is kept for a while;
-// `refresh` asks again (after `omp login` or `claude auth login`, say).
 const KEEP_MS = 10 * 60_000;
 let cached: ModelCatalog | null = null;
 export async function modelCatalog(refresh = false): Promise<ModelCatalog> {
@@ -56,10 +48,8 @@ async function ompCatalog(): Promise<{ models: CatalogModel[]; error: string | n
   }
 }
 
-// The list as last read, without waiting: null until the first read finishes.
 export const cachedCatalog = () => cached;
 
-// The chat models in omp's JSON listing.
 export function parseCatalog(json: string): CatalogModel[] {
   const parsed = JSON.parse(json) as { models?: unknown };
   if (!Array.isArray(parsed.models)) return [];
@@ -86,11 +76,8 @@ export function parseCatalog(json: string): CatalogModel[] {
   });
 }
 
-// Sets `models.<stage>` in config.local.yml and in the running config (src/settings.ts). null hands the
-// stage back to omp's default.
 export function setModel(stage: ModelStage, model: string | null, file = LOCAL_CONFIG) {
   setSetting(["models", stage], model, file);
 }
 
-// Each stage's model as the loaded config has it.
 export const stageModels = () => Object.fromEntries(MODEL_STAGES.map(s => [s, config.models[s] ?? null])) as Record<ModelStage, string | null>;

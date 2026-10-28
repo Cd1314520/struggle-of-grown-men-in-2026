@@ -4,8 +4,6 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-// Every scenario gets a fresh process: mock.module cannot leak into other test files,
-// and module-level DB/config initialization cannot accidentally select production data.
 async function runScenarios(scenarios: string[]) {
   const root = mkdtempSync(join(tmpdir(), "auto-apply-parking-"));
   const data = join(root, "data");

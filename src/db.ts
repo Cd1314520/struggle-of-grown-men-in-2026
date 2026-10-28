@@ -5,11 +5,6 @@ import { placeOf } from "./location";
 import { connectDatabase, migrate } from "./schema";
 import { AWAITING_OUTCOME, NOT_STARTED, OFF_BOARD, to, UNASSESSED, type Status } from "./status";
 
-// SQL lives with the module that owns the table: jobs, job_sources, status_changes, events and kv here,
-// accounts in accounts.ts, gates and answers in questions.ts, fill_state in fill-state.ts, application_steps
-// in steps.ts, the digest ledger in digest.ts. The tables themselves are defined in schema.ts.
-// `bun test` sets NODE_ENV=test. Opening the database migrates it, so a test process must say where
-// its throwaway state is (tests/setup.ts does) rather than fall through to the live data directory.
 export function refuseLiveDataUnderTest(env: Record<string, string | undefined> = process.env) {
   if (env["NODE_ENV"] === "test" && !env["AUTO_APPLY_DATA"])
     throw new Error(
@@ -39,17 +34,17 @@ export interface Job {
   pending: string | null;
   note: string | null;
   found_at: string;
-  posted_at: string | null; // when the employer opened it, where the source says: ISO time, or YYYY-MM-DD
+  posted_at: string | null;
   updated_at: string;
   submitted_at: string | null;
-  resume_sha: string | null; // sha256 of the exact PDF handed to the fill worker
+  resume_sha: string | null;
   resume_frozen_at: string | null;
   dedupe_key: string | null;
   company_key: string | null;
-  approved_by: "user" | "auto" | null; // who gave gate 1
-  checklist: string | null; // JSON: every rubric item with its answer, evidence and points
-  practice_assessment: string | null; // JSON: PracticeAssessment { version: 1, ... }
-  fill_checkpoint: string | null; // JSON: versioned FillCheckpoint; navigation only, never answer values
+  approved_by: "user" | "auto" | null;
+  checklist: string | null;
+  practice_assessment: string | null;
+  fill_checkpoint: string | null;
 }
 
 type Listener = (change: { type: "job" | "event"; jobId?: number }) => void;
@@ -62,44 +57,34 @@ const emit: Listener = change => {
   for (const fn of listeners) fn(change);
 };
 
-// Transactional callers notify only after durable state has committed.
 export const notifyJobChange = (jobId: number) => {
   emit({ type: "job", jobId });
 };
 
 export const getJob = (id: number) => db.query<Job, [number]>("SELECT * FROM jobs WHERE id = ?").get(id);
 
-// Best estimate of when a posting opened, in ms. Applying in the first hours matters, so this drives
-// both the order jobs are assessed in and how the lists are sorted.
 export function openedAt(j: Pick<Job, "posted_at" | "found_at">): number {
   const found = Date.parse(j.found_at.replace(" ", "T") + "Z");
   const said = j.posted_at ? Date.parse(j.posted_at) : NaN;
   if (!j.posted_at || Number.isNaN(said)) return found;
-  // Only the day is known: a first sighting within a day or so of it is the closer estimate.
   if (j.posted_at.length === 10) return found - said < 36 * 3600_000 ? found : said + 12 * 3600_000;
   return Math.min(said, found);
 }
 
-// Triaged jobs waiting to be assessed, most recently opened first.
 export const nextToPrep = () => jobsByStatus("triaged").sort((a, b) => openedAt(b) - openedAt(a))[0];
 
 export const jobsByStatus = (status: Status, limit = 1000) =>
   db.query<Job, [string, number]>("SELECT * FROM jobs WHERE status = ? ORDER BY id LIMIT ?").all(status, limit);
 
-// Every job in any of the given statuses, oldest first.
 export const jobsInStatuses = (statuses: readonly Status[]) =>
   db.query<Job, [string]>("SELECT * FROM jobs WHERE status IN (SELECT value FROM json_each(?)) ORDER BY id").all(JSON.stringify(statuses));
 
-// Jobs with a saved browser checkpoint, whatever their status.
 export const jobsWithCheckpoint = () => db.query<Job, []>("SELECT * FROM jobs WHERE fill_checkpoint IS NOT NULL").all();
 
-// Applications still waiting for an outcome, most recently submitted first.
 export const applicationsAwaitingOutcome = (limit = 300) =>
   db
     .query<Job, [string, number]>("SELECT * FROM jobs WHERE status IN (SELECT value FROM json_each(?)) ORDER BY submitted_at DESC LIMIT ?")
     .all(JSON.stringify(AWAITING_OUTCOME), limit);
-
-// ---- what the UI lists
 
 export type BoardJob = Pick<
   Job,
@@ -118,8 +103,6 @@ export type BoardJob = Pick<
   | "updated_at"
   | "submitted_at"
 >;
-// Every job in the given statuses, without the long text columns: a job list before it is paged.
-// With the practice assessment, which decides the rubric a row's score is on.
 export const listedJobs = (statuses: readonly Status[]) =>
   db
     .query<BoardJob & Pick<Job, "practice_assessment">, [string]>(
@@ -127,7 +110,6 @@ export const listedJobs = (statuses: readonly Status[]) =>
       FROM jobs WHERE status IN (SELECT value FROM json_each(?))`,
     )
     .all(JSON.stringify(statuses));
-// How many jobs in the given statuses each employer has.
 export const countByCompany = (statuses: readonly Status[]) =>
   new Map(
     db
@@ -137,10 +119,7 @@ export const countByCompany = (statuses: readonly Status[]) =>
       .all(JSON.stringify(statuses))
       .map(r => [r.company, r.n]),
   );
-// Lists that grow with every scan: only their most recently touched `limit` reach the board.
 const BACKLOG: readonly Status[] = ["locating", "triaged", "held", "rejected", "failed"];
-// Everything past triage, most recently touched first. Leaves out the long text columns. Jobs under
-// review, in an application or applied to are always all there, however long the backlog behind them.
 export const boardJobs = (limit = 500) =>
   db
     .query<BoardJob, [string, string, number]>(
@@ -165,7 +144,6 @@ export const statusCounts = (): Record<string, number> =>
       .map(r => [r.status, r.n]),
   );
 
-// Statuses that count as an application to the employer: sent, or approved and on its way.
 const APPLICATIONS: readonly Status[] = [
   "approved",
   "filling",
@@ -178,7 +156,6 @@ const APPLICATIONS: readonly Status[] = [
   "rejected_by_company",
   "withdrawn",
 ];
-// How many applications the job's employer has besides this job, ever.
 export const employerApplications = (job: Pick<Job, "id" | "company_key">) =>
   job.company_key
     ? (db
@@ -188,8 +165,6 @@ export const employerApplications = (job: Pick<Job, "id" | "company_key">) =>
         .get(job.id, job.company_key, JSON.stringify(APPLICATIONS))?.n ?? 0)
     : 0;
 
-// Other live jobs at the same employer.
-// Practice assessments recorded on full assessments of other jobs at the same employer, newest first.
 export const employerAssessments = (job: Pick<Job, "id" | "company_key">) =>
   job.company_key
     ? db
@@ -213,12 +188,6 @@ export const siblingJobs = (job: Pick<Job, "id" | "company_key">, limit = 20) =>
 
 export const jobSources = (jobId: number) =>
   db.query<{ url: string; source: string; location: string | null }, [number]>("SELECT url, source, location FROM job_sources WHERE job_id = ?").all(jobId);
-
-// ---- duplicates: one row per (employer, role), however many boards, aggregators or locations list it
-//
-// Two postings are the same role when the employer matches and either the titles say the same thing
-// (ignoring word order, abbreviations, punctuation and tags like "(Remote)" or a requisition id) or
-// the titles are close and the description text is nearly identical.
 
 const COMPANY_NOISE = new Set([
   "inc",
@@ -262,7 +231,6 @@ const TITLE_SYNONYMS: Record<string, string> = {
   qa: "quality assurance",
   ai: "artificial intelligence",
 };
-// What separates two genuinely different openings with otherwise similar titles.
 const LEVEL = new Set(["1", "2", "3", "4", "5", "senior", "junior", "staff", "principal", "lead", "manager", "intern", "associate", "director"]);
 const TITLE_TAGS = /[([][^)\]]*\b(remote|hybrid|onsite|on-site|usa?|united states|contract|full[- ]time|part[- ]time|req|r-?\d+|jr\d+|\d{4,})\b[^)\]]*[)\]]/gi;
 const squash = (t: string) =>
@@ -301,8 +269,6 @@ function shingles(text: string) {
 }
 
 type Twinnable = Pick<Job, "company" | "title" | "description">;
-// The existing job this posting duplicates, if any.
-// The title a posting added by hand without one gets. Two of them say nothing about being the same role.
 export const UNTITLED = "(untitled posting)";
 export function findTwin(j: Twinnable, candidates?: Job[]): Job | null {
   if (j.title === UNTITLED) return null;
@@ -318,9 +284,7 @@ export function findTwin(j: Twinnable, candidates?: Job[]): Job | null {
     const overlap = jaccard(tokens, theirs);
     if (overlap < 0.5) continue;
     const differing = [...tokens].filter(t => !theirs.has(t)).concat([...theirs].filter(t => !tokens.has(t)));
-    if (differing.some(t => LEVEL.has(t))) continue; // "Engineer 1" and "Engineer 2" are different jobs
-    // Close titles: accept unless both bodies are there to compare and they disagree.
-    // Related titles: only when the body text is nearly identical.
+    if (differing.some(t => LEVEL.has(t))) continue;
     const mine = j.description ?? "",
       other = c.description ?? "";
     if (mine.length <= 400 || other.length <= 400) {
@@ -332,7 +296,6 @@ export function findTwin(j: Twinnable, candidates?: Job[]): Job | null {
   return null;
 }
 
-// Tracking parameters differ per board; everything else in the URL identifies the posting.
 export function normalizeUrl(raw: string) {
   try {
     const u = new URL(raw);
@@ -343,7 +306,6 @@ export function normalizeUrl(raw: string) {
     return raw;
   }
 }
-// The job a (normalized) URL belongs to, as its own posting or as another listing of it.
 const jobIdForUrl = (url: string) =>
   db.query<{ id: number }, [string, string]>("SELECT id FROM jobs WHERE url = ? UNION SELECT job_id FROM job_sources WHERE url = ?").get(url, url)?.id ?? null;
 export const knownJobId = (raw: string) => jobIdForUrl(normalizeUrl(raw));
@@ -359,14 +321,10 @@ const mergeLocation = (existing: string | null, extra: string | null) => {
   return existing.toLowerCase().includes(extra.toLowerCase()) ? existing : `${existing} | ${extra}`.slice(0, 300);
 };
 
-// Aggregator listings only link on to the employer's form; a company board is the form itself.
 const AGGREGATORS = new Set(["remotive", "jobicy", "remoteok", "linkedin", "indeed"]);
 
-// Where the listing a job is applied through is. `location` leads with it; the places of the other
-// listings folded into the job follow, each after " | ".
 export const appliedLocation = (job: Pick<Job, "location">) => job.location?.split(" | ")[0] ?? null;
 
-// Makes another listing the one a job is applied through. The old one stays on as a listing.
 export function applyThrough(job: Pick<Job, "id" | "url" | "source" | "location">, url: string, source: string, location: string | null) {
   addSource(job.id, job.url, job.source, appliedLocation(job));
   db.query("DELETE FROM job_sources WHERE url = ?").run(url);
@@ -374,9 +332,6 @@ export function applyThrough(job: Pick<Job, "id" | "url" | "source" | "location"
   db.query("UPDATE jobs SET url = ?, source = ?, location = ? WHERE id = ?").run(url, source, places, job.id);
 }
 
-// A role is often listed once per office. Whether `listing` is a better one to apply through than the
-// job's current one: the employer's own form beats an aggregator's link to it, and between two of a
-// kind a listing in the United States beats one abroad.
 export function betterListing(job: Pick<Job, "source" | "location">, listing: { source: string; location: string | null }) {
   const aggregated = AGGREGATORS.has(job.source);
   if (aggregated !== AGGREGATORS.has(listing.source)) return aggregated;
@@ -384,14 +339,11 @@ export function betterListing(job: Pick<Job, "source" | "location">, listing: { 
 }
 
 function fold(into: Job, url: string, source: string, location: string | null, description: string | null) {
-  // Only a job no application was ever started for changes where it applies here; see preferUsListings.
   if (NOT_STARTED.includes(into.status) && !into.resume_sha && betterListing(into, { source, location })) {
     const cameHome = AGGREGATORS.has(into.source) === AGGREGATORS.has(source);
     applyThrough(into, url, source, location);
-    // What was decided about the listing abroad says nothing about this one: assess the job again.
     if (cameHome && !UNASSESSED.includes(into.status)) writeJob(into.id, { status: "found", note: null });
   } else addSource(into.id, url, source, location);
-  // Until it has been assessed, let the extra listing widen the location and fill a missing description.
   if (UNASSESSED.includes(into.status))
     db.query("UPDATE jobs SET location = ?, description = COALESCE(description, ?) WHERE id = ?").run(
       mergeLocation(into.location, location),
@@ -400,14 +352,12 @@ function fold(into: Job, url: string, source: string, location: string | null, d
     );
 }
 
-// Inserts a posting, or folds it into the job it duplicates (returns null either way when nothing new was added).
 export function insertJob(
   j: Pick<Job, "url" | "source" | "company" | "title" | "location" | "description"> & { posted?: string | null },
   status: Status = "found",
 ) {
   const url = normalizeUrl(j.url);
   if (knownUrl(url)) {
-    // Jobs saved before posting dates were recorded pick theirs up the next time the board is read.
     if (j.posted) db.query("UPDATE jobs SET posted_at = ? WHERE url = ? AND posted_at IS NULL").run(j.posted, url);
     return null;
   }
@@ -424,17 +374,12 @@ export function insertJob(
   return Number(res.lastInsertRowid);
 }
 
-// Removes a job that was folded into another, with what was recorded under its id. Only jobs nothing
-// has acted on are ever folded, so there is no fill state to carry over; triggers on jobs remove its
-// status history and any fill_state row.
 function deleteJob(id: number) {
   db.query("DELETE FROM events WHERE job_id = ?").run(id);
   db.query("DELETE FROM jobs WHERE id = ?").run(id);
   for (const key of ["feedback", "locate.tries", "auto.deferred"]) kvDelete(`${key}.${id}`);
 }
 
-// Points a job found on a job-search site at the employer's own posting. When that posting is already
-// a job here, this one is folded into it instead.
 export function relocateJob(job: Job, rawUrl: string, description: string | null): "moved" | "merged" {
   const url = normalizeUrl(rawUrl);
   const other = jobIdForUrl(url);
@@ -450,7 +395,6 @@ export function relocateJob(job: Job, rawUrl: string, description: string | null
   return "moved";
 }
 
-// Re-keys rows and folds duplicates saved before the current matching rules. Safe to run on every start.
 const DEDUPE_VERSION = "2";
 export function dedupeExisting() {
   const stale = kvGet("dedupe.version") !== DEDUPE_VERSION;
@@ -458,7 +402,6 @@ export function dedupeExisting() {
   for (const j of unkeyed)
     db.query("UPDATE jobs SET dedupe_key = ?, company_key = ? WHERE id = ?").run(dedupeKey(j.company, j.title), companyKey(j.company), j.id);
   kvSet("dedupe.version", DEDUPE_VERSION);
-  // Only rows nothing has acted on yet may be folded away; the most advanced row of a set is kept.
   const rank = (st: string) => ({ skipped: 0, found: 1, held: 2, locating: 3, triaged: 3 })[st] ?? 9;
   let merged = 0;
   for (const g of db.query<{ company_key: string }, []>("SELECT company_key FROM jobs GROUP BY company_key HAVING count(*) > 1").all()) {
@@ -473,7 +416,6 @@ export function dedupeExisting() {
         kept.push(r);
         continue;
       }
-      // Gone before the fold, which may make its URL the one the twin applies through.
       moveSources(r.id, twin.id);
       deleteJob(r.id);
       fold(twin, r.url, r.source, r.location, r.description);
@@ -483,7 +425,6 @@ export function dedupeExisting() {
   if (merged) logEvent("system", `Folded ${merged} duplicate postings into existing jobs`);
 }
 
-// Every column a caller may set. `id` never changes and `updated_at` is stamped on every write.
 export type JobFields = Partial<Omit<Job, "id" | "updated_at">>;
 const WRITABLE_JOB_COLUMNS: Record<keyof JobFields, true> = {
   url: true,
@@ -512,12 +453,9 @@ const WRITABLE_JOB_COLUMNS: Record<keyof JobFields, true> = {
   fill_checkpoint: true,
 };
 
-// Writes the given columns without telling listeners. For callers inside a transaction, which call
-// notifyJobChange themselves once it has committed; everything else uses updateJob.
 export function writeJob(id: number, fields: JobFields) {
   const keys = Object.keys(fields) as (keyof JobFields)[];
   if (!keys.length) return;
-  // Column names cannot be bound as parameters, so only known ones ever reach the statement.
   const unknown = keys.filter(k => !Object.hasOwn(WRITABLE_JOB_COLUMNS, k));
   if (unknown.length) throw new Error(`Not a writable jobs column: ${unknown.join(", ")}`);
   const sets = keys.map(k => `${k} = ?`).join(", ");
@@ -530,23 +468,16 @@ export function updateJob(id: number, fields: JobFields) {
   emit({ type: "job", jobId: id });
 }
 
-// A prep worker does not survive a restart: its jobs go back in the queue. Returns how many. (Counted
-// from the rows themselves: `changes` would include what the status-history trigger writes.)
 export const requeueInterruptedPrep = () => db.query("UPDATE jobs SET status = 'triaged' WHERE status = 'prepping' RETURNING id").all().length;
 
-// Sends held jobs back through triage. Returns how many.
 export const releaseHeldJobs = () =>
   db.query("UPDATE jobs SET status = 'found', note = NULL, updated_at = datetime('now') WHERE status = 'held' RETURNING id").all().length;
-// Only the jobs held because their employer is a target (prep.ts, rubric.ts) or at triage (scan.ts),
-// not those the owner held by hand.
 export const releaseTargetHolds = () =>
   db
     .query(
       "UPDATE jobs SET status = 'found', note = NULL, updated_at = datetime('now') WHERE status = 'held' AND (note LIKE 'not a practice job:%' OR note LIKE 'held back %') RETURNING id",
     )
     .all().length;
-
-// ---- status history: written by triggers on jobs (schema.ts), only read here
 
 export interface StatusChange {
   from_status: Status;
@@ -555,12 +486,10 @@ export interface StatusChange {
   approved_by: "user" | "auto" | null;
   at: string;
 }
-// Every status a job has moved through since history began, oldest first.
 export const statusHistory = (jobId: number, limit = 500) =>
   db
     .query<StatusChange, [number, number]>("SELECT from_status, to_status, note, approved_by, at FROM status_changes WHERE job_id = ? ORDER BY id LIMIT ?")
     .all(jobId, limit);
-// The status each of these jobs last moved from. A job with no recorded move is left out.
 export const lastMovedFrom = (jobIds: readonly number[]) =>
   new Map(
     db
@@ -571,8 +500,6 @@ export const lastMovedFrom = (jobIds: readonly number[]) =>
       .all(JSON.stringify(jobIds))
       .map(r => [r.job_id, r.from_status]),
   );
-
-// ---- events
 
 export interface EventRow {
   id: number;
@@ -588,15 +515,12 @@ export function logEvent(kind: string, message: string, jobId?: number | null, w
   emit(jobId == null ? { type: "event" } : { type: "event", jobId });
 }
 
-// The newest event's id, so a run can later ask for only the events logged after it started.
 export const lastEventId = () => db.query<{ id: number | null }, []>("SELECT MAX(id) AS id FROM events").get()?.id ?? 0;
-// A worker's steps and messages since `afterId`, newest first.
 export const workerEvents = (worker: string, afterId: number, limit = 8) =>
   db
     .query<EventRow, [string, number, number]>("SELECT * FROM events WHERE worker = ? AND id > ? AND kind IN ('step', 'agent') ORDER BY id DESC LIMIT ?")
     .all(worker, afterId, limit);
 
-// Newest first; `before` pages back from an event id, `kinds` keeps only those kinds.
 export const recentEvents = (limit = 150, before: number | null = null, kinds: readonly string[] = []) =>
   db
     .query<EventRow, [number, number, string, number]>(
@@ -606,11 +530,8 @@ export const recentEvents = (limit = 150, before: number | null = null, kinds: r
     )
     .all(before ?? Number.MAX_SAFE_INTEGER, kinds.length, JSON.stringify(kinds), limit);
 
-// The agents' step-by-step chatter: each step taken, each tool call, each message. Useful while an
-// application is in flight and for a while after; everything else in events is a decision or an outcome.
 const CHATTER = JSON.stringify(["step", "tool", "agent"]);
 
-// Without the chatter: what a person scanning the feed cares about.
 export const highlightEvents = (limit = 80, before: number | null = null, kinds: readonly string[] = []) =>
   db
     .query<Omit<EventRow, "worker"> & { company: string | null; title: string | null }, [string, number, number, string, number]>(
@@ -624,8 +545,6 @@ export const highlightEvents = (limit = 80, before: number | null = null, kinds:
     )
     .all(CHATTER, before ?? Number.MAX_SAFE_INTEGER, kinds.length, JSON.stringify(kinds), limit);
 
-// Removes chatter older than `days`; returns how many records went. Nothing else is ever removed:
-// approvals, gates, errors, mail and what the user did stay for good.
 export function pruneChatter(days: number): number {
   if (!(days > 0)) return 0;
   return db
@@ -640,17 +559,13 @@ export const jobEvents = (jobId: number, limit = 200) =>
     )
     .all(jobId, limit);
 
-// ---- kv: small durable values keyed by name
-
 export const kvGet = (key: string) => db.query<{ value: string }, [string]>("SELECT value FROM kv WHERE key = ?").get(key)?.value ?? null;
 export const kvSet = (key: string, value: string) =>
   db.query("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
 export const kvDelete = (key: string) => db.query("DELETE FROM kv WHERE key = ?").run(key);
-// Every entry whose key starts with `prefix`, oldest first.
 export const kvEntries = (prefix: string) =>
   db
     .query<{ key: string; value: string }, [string, string]>("SELECT key, value FROM kv WHERE substr(key, 1, length(?)) = ? ORDER BY rowid")
     .all(prefix, prefix);
 
-// A fresh database has nothing worth telling; an existing one records what changed under it.
 if (dbExisted) for (const migration of appliedMigrations) logEvent("system", `Database schema upgraded to version ${migration.version} (${migration.name})`);

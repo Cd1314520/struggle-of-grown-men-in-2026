@@ -1,4 +1,3 @@
-// Highlights: what the agents and the owner did, as sentences, by day.
 import { ArrowUpRight, Bot } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ActivityResult } from "../../../src/api-types";
@@ -9,7 +8,6 @@ import { feed, isKindFilter, KIND_FILTERS, type FeedRow, type KindFilter } from 
 import { KindIcon } from "./kind-icon";
 import { activityBar, byDay, Clock, Fold, JobLink, LoadOlder, useActivityPages, type ActivityHead } from "./parts";
 
-// No link of its own: the row holds the job's link, or the jobs and boards it happened to.
 function Row({ row }: { row: FeedRow }) {
   const repeats = row.n > 1 && !row.jobs.length && !row.boards.length;
   return (
@@ -28,7 +26,6 @@ function Row({ row }: { row: FeedRow }) {
           )}
         </Clamp>
       }
-      // The clock is the fact, as the same row's time is on Overview; the day it belongs to is the label above.
       fact={
         <>
           <Clock at={row.at} />
@@ -37,8 +34,6 @@ function Row({ row }: { row: FeedRow }) {
       }
       secondary={
         (row.jobs.length > 1 || row.boards.length > 1 || row.job) && (
-          // The line truncates its first child, which would clip the folds' taller touch targets: this one
-          // reaches as far as they do.
           <div className="flex min-w-0 flex-1 flex-col gap-1 touch:-my-2 touch:py-2">
             {row.jobs.length > 1 ? (
               <Fold label={plural(row.jobs.length, "job")}>
@@ -59,7 +54,6 @@ function Row({ row }: { row: FeedRow }) {
           </div>
         )
       }
-      // The words run to the time, as every list's do: the snippet's measure is lifted.
       snippet={row.detail && <div data-detail>{row.detail}</div>}
       className="[&_div:has(>[data-detail])]:max-w-none"
     />
@@ -75,8 +69,6 @@ export function Highlights({ head }: { head: ActivityHead }) {
   const q = useActivityPages("highlights", KIND_FILTERS[filter].kinds);
   const rows = useMemo(() => rowsOf(q.data?.pages), [q.data]);
   const days = useMemo(() => byDay(rows, r => r.day), [rows]);
-  // A page of 200 entries can fold into a handful of rows (a bulk migration, a board outage): keep
-  // reading until the screen has something to show.
   const pages = q.data?.pages.length ?? 0;
   useEffect(() => {
     if (q.hasNextPage && !q.isFetchingNextPage && !q.isFetching && rows.length < 25 && pages < 12) void q.fetchNextPage();
@@ -85,7 +77,6 @@ export function Highlights({ head }: { head: ActivityHead }) {
   const loadOlder = async () => {
     setLoadingOlder(true);
     try {
-      // Each click shows at least a screenful more, however much of it folds away.
       let res = await q.fetchNextPage();
       for (let i = 0; i < 8 && res.hasNextPage && rowsOf(res.data?.pages).length < rows.length + 15; i++) res = await res.fetchNextPage();
     } finally {

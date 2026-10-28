@@ -47,7 +47,7 @@ function parsePacket(text: string): Wire {
 interface TestHarnessOptions {
   nativeUa?: string | null;
   scopeTargetId?: string;
-  failMethods?: readonly string[]; // upstream answers these with an error
+  failMethods?: readonly string[];
 }
 
 function createHarness(options: TestHarnessOptions = {}) {
@@ -192,8 +192,6 @@ function createHarness(options: TestHarnessOptions = {}) {
       return promise;
     }
 
-    // Transport handshake: roundtrip harmless command so that proxy conn.ready is
-    // guaranteed resolved and upstream WebSocket transport is fully open before connectClient returns.
     const handshake = await send("Runtime.enable");
     assert.equal(handshake.error, undefined, "transport handshake roundtrip failed");
 
@@ -794,7 +792,6 @@ describe("CDP proxy keeps the driven page in front", () => {
       );
       assert.ok(injected(harness, "Runtime.evaluate").some(m => m.params["expression"] === "window.print = () => {};"));
 
-      // Driving the same page again straight away needs nothing more.
       await client.send("Runtime.callFunctionOn", { functionDeclaration: "function () {}", objectId: "x" });
       await client.send("Input.dispatchKeyEvent", { type: "keyUp", key: "a" });
       assert.equal(injected(harness, "Page.bringToFront").length, 1);

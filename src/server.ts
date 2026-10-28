@@ -61,22 +61,15 @@ const safeThresholds = () => {
     return null;
   }
 };
-// The resume content file lives in the resume project, everything else in profile/.
 const profilePath = (name: string) => (name === MAIN ? STOCK_MAIN : join(PROFILE, name));
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const fail = (message: string, status = 400) => json({ error: message }, status);
 
-// The app has no login. What stands in for one is that only its own pages may talk to it: the
-// browsers it drives visit arbitrary sites on this machine, and any of them could otherwise post an
-// approval to 127.0.0.1, or read the profile through a hostname re-pointed at it.
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const ownHost = (hostname: string) => LOOPBACK.has(hostname) || (!!config.publicUrl && new URL(config.publicUrl).hostname === hostname);
-// Why this request is refused, or null when it may go ahead.
 export function refusal(req: Request): string | null {
-  // The name the request was addressed to. A page on another site can only reach the app under a name of its own.
   if (!ownHost(new URL(req.url).hostname)) return "this app does not answer under that host name";
   if (req.method === "GET" || req.method === "HEAD") return null;
-  // Browsers say where a request that changes something comes from; tools like curl send neither header.
   const site = req.headers.get("sec-fetch-site");
   if (site && site !== "same-origin" && site !== "none") return "requests from other sites are refused";
   const origin = req.headers.get("origin");
@@ -95,7 +88,6 @@ function resumeDiff(job: Job) {
   return out.stdout.toString().split("\n").slice(4).join("\n");
 }
 
-// Reading companies.yml is most of what a summary would cost, so its count is kept until the file changes.
 let companies: { stamp: string; count: number } | null = null;
 function boardCount() {
   const file = statSync(profilePath("companies.yml"), { throwIfNoEntry: false });
@@ -104,7 +96,6 @@ function boardCount() {
   return companies.count + feedNames().length;
 }
 
-// The app's state without its lists: what /api/state and /api/summary share.
 function settings(scheduler: Scheduler): Omit<Summary, "attention"> {
   return {
     counts: statusCounts(),
@@ -158,7 +149,6 @@ function summary(scheduler: Scheduler): Summary {
   return { ...rest, attention: { ...attention, total } };
 }
 
-// One page of the event log. The full log names the job of each event as the highlights do.
 function activity(url: URL): ActivityResult {
   const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 60));
   const before = Number(url.searchParams.get("before")) || null;
@@ -176,7 +166,6 @@ function activity(url: URL): ActivityResult {
 function jobDetail(scheduler: Scheduler, job: Job): JobDetail {
   const files = resumeFiles(job.id, job.resume_sha);
   const gate = getOpenGate(job.id);
-  // Historical slot assignments are not ownership: ordinary parked browsers are reused.
   const slot = scheduler.fillSlot(job.id);
   const steps = jobSteps(job.id);
   return {
@@ -219,17 +208,15 @@ function jobAction(scheduler: Scheduler, job: Job, action: string, text: string)
       scheduler.abortFill(job.id);
       updateJob(job.id, to.rejected(text || null));
       break;
-    case "hold": // set aside for later, like a job at a target employer held back; retry releases it
+    case "hold":
       if (job.status === "held") return "already held";
       if (job.status === "rejected") return "rejected; reconsider it first";
       if (wasSent(job)) return "this application was already sent; it cannot be held";
       scheduler.abortFill(job.id);
       updateJob(job.id, to.held(text || "held by you"));
       break;
-    case "redo": // re-run scoring/tailoring with the user's feedback
+    case "redo":
       if (job.status !== "awaiting_approval") return "the resume can only be changed while the job is awaiting approval";
-      // Once an application has started, its resume is frozen and a draft may already carry it: a
-      // re-tailored copy would never be uploaded.
       if (job.resume_sha) return "this application has already started with its frozen resume; the resume can no longer be changed";
       if (!text) return "feedback text required";
       scheduler.abortFill(job.id);
@@ -238,17 +225,15 @@ function jobAction(scheduler: Scheduler, job: Job, action: string, text: string)
       break;
     case "retry":
       if (!RETRYABLE.includes(job.status)) return "nothing to retry";
-      // A held job the user picks out by hand is assessed and tailored regardless of the hold-back rule.
       if (job.status === "held") kvSet(`feedback.${job.id}`, "The candidate chose to apply to this job now. Do not hold it back.");
       kvSet(`locate.tries.${job.id}`, "0");
       updateJob(job.id, existsSync(workingPdf(job.id)) ? to.awaitingApproval(null) : isBoardUrl(job.url) ? to.locating() : to.triaged());
       break;
-    case "mark_submitted": // user finished it by hand
+    case "mark_submitted":
       if (wasSent(job)) return "already recorded as submitted";
       scheduler.abortFill(job.id);
       updateJob(job.id, to.submitted(text || "submitted manually"));
       break;
-    // What happened after it was sent, as the user knows it: mail the agent never saw, or a correction.
     case "mark_offer":
     case "mark_declined":
     case "withdraw": {
@@ -258,7 +243,7 @@ function jobAction(scheduler: Scheduler, job: Job, action: string, text: string)
       recordOutcome(job.id, outcome, text || (outcome === "withdrawn" ? "withdrawn by you" : "marked by you"));
       break;
     }
-    case "reopen_application": // back in process after an outcome recorded by mistake
+    case "reopen_application":
       if (!["offer", "rejected_by_company", "withdrawn"].includes(job.status)) return "this application has no outcome to undo";
       recordOutcome(job.id, "reopen", text || "reopened by you");
       break;
@@ -266,21 +251,18 @@ function jobAction(scheduler: Scheduler, job: Job, action: string, text: string)
       if (!ambiguous) return "submission is not ambiguous";
       resolveAmbiguous(job.id, "not_submitted");
       break;
-    case "respond": // answer a question, approve/adjust the final submit, or release a manual hand-off
+    case "respond":
       if (!respond(job.id, text)) return "this gate is no longer open or cannot accept an ordinary response";
       break;
     default:
       return "unknown action";
   }
-  // An explicit user decision supersedes any queued automatic approval, even while quota is exhausted.
   forgetDeferredApproval(job.id);
   logEvent("user", `${action}${text ? `: ${text}` : ""}`, job.id);
   scheduler.pump();
   return null;
 }
 
-// The user's changes to the steps of an application that was sent. `op` names the change; `step` the
-// step it applies to (all but add).
 const STEP_DONE: Record<string, string> = {
   add: "added",
   done: "done",
@@ -356,7 +338,6 @@ const png = (file: string, page: number) => {
   return image ? new Response(image, { headers: { "content-type": "image/png", "cache-control": "no-store" } }) : fail("no such page", 404);
 };
 
-// Answers one request against the given scheduler.
 export function createHandler(scheduler: Scheduler) {
   return async function handle(req: Request): Promise<Response> {
     const refused = refusal(req);
@@ -533,7 +514,6 @@ export function createHandler(scheduler: Scheduler) {
         },
         "triaged",
       );
-      // Name the job it matched, so the page can link to it instead of only saying no.
       if (!id) return json({ error: "already known", id: knownJobId(jobUrl) }, 409);
       scheduler.pump();
       return json({ id });
@@ -546,12 +526,10 @@ export function createHandler(scheduler: Scheduler) {
         if (bad.length) return fail("fill in profile/targets.md first");
         void scheduler.scan({ discover: what === "discover" });
       } else if (what === "release_held") {
-        // back through triage, which judges them again against the current targets
         const n = releaseHeldJobs();
         logEvent("user", `released ${n} held jobs for re-triage`);
         void scheduler.scan();
       } else if (what === "release_targets") {
-        // the jobs held back at target employers, once they are no longer held back
         const n = releaseTargetHolds();
         logEvent("user", `released ${n} jobs held at target employers for re-triage`);
         void scheduler.scan();
@@ -585,7 +563,6 @@ export function createHandler(scheduler: Scheduler) {
       const { path: key, value, reset } = await body();
       if (!Array.isArray(key) || !key.length || !key.every(k => typeof k === "string" && /^\w+$/.test(k))) return fail("path must name a setting");
       if (reset !== true && value === undefined) return fail("send a value, or reset: true for config.yml's");
-      // A public address under another name would refuse the very page that set it.
       if (key.join(".") === "publicUrl") {
         const host = new URL(req.url).hostname;
         const next = reset === true ? (readBase() as Record<string, unknown>)["publicUrl"] : value;
@@ -613,12 +590,11 @@ export function createHandler(scheduler: Scheduler) {
     if (path === "/api/resume/stock.pdf") return pdf(stockPdf());
     if (path === "/api/resume/draft.pdf") return pdf(draftPdf());
     if (path === "/api/resume/stock.png" || path === "/api/resume/draft.png") {
-      if (path === "/api/resume/stock.png") stockResume(); // compiled if the sources changed since
+      if (path === "/api/resume/stock.png") stockResume();
       return png(path.endsWith("stock.png") ? stockPdf() : draftPdf(), Math.max(1, Number(url.searchParams.get("page")) || 1));
     }
     if (path === "/api/resume/example" && req.method === "POST") {
       if (existsSync(STOCK_MAIN)) return fail("there is already a stock resume", 409);
-      // Marked, so nothing is applied with the example's made-up person until its details are replaced.
       const example = readFileSync(join(RESUME_DIR, "main.example.typ"), "utf8");
       writeFileSync(STOCK_MAIN, `// ${PLACEHOLDER}: replace every detail below with your own, then delete this line.\n${example}`);
       logEvent("user", `started ${MAIN} from the example resume`);
@@ -629,7 +605,6 @@ export function createHandler(scheduler: Scheduler) {
       const op = importMatch[1] ?? "start";
       let err: string | null;
       if (op === "start") {
-        // Only the app's own pages may post here (refusal), and the size is checked before the body is read.
         if (Number(req.headers.get("content-length") ?? Infinity) > MAX_BYTES + 1024 * 1024) return fail("the files are too large", 413);
         // eslint-disable-next-line @typescript-eslint/no-deprecated -- the body is bounded above and comes from the app's own page
         const form = await req.formData().catch(() => null);
@@ -696,14 +671,13 @@ export function createHandler(scheduler: Scheduler) {
   };
 }
 
-// Starts the app: the HTTP server, a pacing proxy per browser, and the scheduler.
 export function main() {
   const seeded = seedProfile();
   if (seeded.length) logEvent("system", `Copied the example ${seeded.join(", ")} into profile/: fill them in on the Profile page`);
-  void modelCatalog(); // read once now, so the setup count in the summary knows the models
+  void modelCatalog();
   const scheduler = new Scheduler();
   const server = Bun.serve({
-    hostname: "127.0.0.1", // holds credentials and controls a logged-in browser: local only. `tailscale serve` publishes it to the tailnet
+    hostname: "127.0.0.1",
     port: config.port,
     idleTimeout: 0,
     fetch: createHandler(scheduler),

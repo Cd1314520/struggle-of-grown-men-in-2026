@@ -1,4 +1,3 @@
-# Only the TypeScript is formatted. Prose, YAML, the UI's page and stylesheet, and generated files keep their own layout.
 *
 !*/
 !src/**/*.ts

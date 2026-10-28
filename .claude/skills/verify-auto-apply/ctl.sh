@@ -1,27 +1,23 @@
 #!/usr/bin/env bash
-# Starts, checks and stops the verification instance of auto-apply. See SKILL.md.
-#   ctl.sh start | doctor | stop | reset
-# VERIFY_PORT (default 18787) and VERIFY_HOME (default <repo>/artifacts/verify-auto-apply) pick the
-# instance; two runs with different values of both do not meet.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../../.." && pwd)"
 PORT="${VERIFY_PORT:-18787}"
 HOME_DIR="${VERIFY_HOME:-$REPO/artifacts/verify-auto-apply}"
-STATE="$HOME_DIR/state"       # throwaway: database, profile, resume. Removed by stop.
-EVIDENCE="$HOME_DIR/evidence" # proof artifacts. Never removed by this script.
+STATE="$HOME_DIR/state"
+EVIDENCE="$HOME_DIR/evidence"
 PIDFILE="$STATE/server.pid"
 LOG="$EVIDENCE/server.log"
 BASE="http://127.0.0.1:$PORT"
 
-ours() { # the pid we started, if it is still that process
+ours() {
   [ -f "$PIDFILE" ] || return 1
   local pid; pid="$(cat "$PIDFILE")"
   local cmd; cmd="$(tr '\0' ' ' 2>/dev/null <"/proc/$pid/cmdline")" || return 1
   [[ "$cmd" == *verify-auto-apply/serve.ts* ]] && echo "$pid"
 }
-listener() { # pid listening on our port, or nothing
+listener() {
   local line; line="$(ss -ltnpH "sport = :$PORT" 2>/dev/null)" || true
   [[ "$line" =~ pid=([0-9]+) ]] && echo "${BASH_REMATCH[1]}" || true
 }
@@ -31,8 +27,6 @@ case "${1:-}" in
     if pid="$(ours)"; then echo "already running: pid $pid at $BASE"; exit 0; fi
     if [ -n "$(listener)" ]; then echo "port $PORT is held by pid $(listener), which this script did not start; pick another VERIFY_PORT" >&2; exit 1; fi
     mkdir -p "$STATE" "$EVIDENCE"
-    # VERIFY_SNAPSHOT: a directory holding data/, profile/ and resume/ (e.g. a scrubbed copy of the live
-    # state) to start from instead of the nine seeded jobs. Copied, so the snapshot itself is never written.
     if [ -n "${VERIFY_SNAPSHOT:-}" ] && [ ! -f "$STATE/data/app.db" ]; then
       cp -r "$VERIFY_SNAPSHOT/." "$STATE/" && echo "state copied from snapshot $VERIFY_SNAPSHOT"
     fi

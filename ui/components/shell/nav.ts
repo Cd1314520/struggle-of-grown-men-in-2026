@@ -1,4 +1,3 @@
-// The sections of the app, in the order the sidebar lists them, with what their badge counts.
 import {
   Activity,
   Archive,
@@ -21,7 +20,7 @@ export interface NavItem {
   label: string;
   icon: LucideIcon;
   group: "workspace" | "library" | "system";
-  go?: string; // the letter after G that opens it
+  go?: string;
   badge?: (s: Summary) => { value: number; tone: "neutral" | "accent" | "warning" } | null;
 }
 

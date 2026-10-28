@@ -1,5 +1,3 @@
-// Setup: what a new install still needs, step by step, each checked live against this machine. Steps still
-// to do are open, the first with the page's one primary action; done steps fold to a line.
 import { Check, ChevronDown, CircleCheck, Copy, ExternalLink, Minus, Radar, RefreshCw, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -9,7 +7,6 @@ import { api, queryClient, refreshAll, useSetup, useSummary } from "../../lib/ap
 import { cn } from "../../lib/cn";
 import { href } from "../../lib/router";
 
-// A shell command, with a button that copies it.
 function Code({ children }: { children: string }) {
   return (
     <div className="group relative my-2 rounded-md border border-border bg-subtle">
@@ -33,9 +30,7 @@ interface StepCopy {
   title: string;
   description: string;
   how?: (r: SetupResult) => ReactNode;
-  // The step's way forward. `primary` when it is the step to do next.
   action?: (props: { primary: boolean; step: SetupStep; result: SetupResult }) => ReactNode;
-  // Checks shown as a list; the rest are only counted.
   shown?: (c: SetupCheck) => boolean;
 }
 
@@ -174,7 +169,6 @@ const STEPS: Record<SetupStepId, StepCopy> = {
   },
 };
 
-// A check's line: what it is, and what was found. The value wraps under the label on a phone.
 function CheckRow({ c, optional }: { c: SetupCheck; optional: boolean }) {
   const needed = c.required && !optional;
   const Icon = c.ok ? Check : needed ? X : Minus;
@@ -197,9 +191,6 @@ function CheckRow({ c, optional }: { c: SetupCheck; optional: boolean }) {
   );
 }
 
-// One step, as a row of the list: its number (or a check), what it is, and where it stands at the right. A
-// step still to do is open under its title (its checks, how to do it, its action); a done one is a row, its
-// details behind a toggle.
 function StepRow({ step, n, current, result }: { step: SetupStep; n: number; current: boolean; result: SetupResult }) {
   const [open, setOpen] = useState(false);
   const copy = STEPS[step.id];
@@ -275,7 +266,6 @@ export function SetupPage() {
       queryClient.setQueryData(["setup"], await api.setup(true));
       void refreshAll();
     } catch {
-      // shown by the request
     } finally {
       setChecking(false);
     }
@@ -283,7 +273,6 @@ export function SetupPage() {
   const required = data?.steps.filter(st => st.required) ?? [];
   const done = required.filter(st => st.done).length;
   const current = data?.steps.find(st => !st.done && st.required) ?? data?.steps.find(st => !st.done);
-  // How far along: a line under the bar, and on a phone the bar's own line, beside Check again.
   const progress = data && (
     <>
       <span className="tabular text-sm whitespace-nowrap text-fg-muted">

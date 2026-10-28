@@ -1,14 +1,10 @@
-// LinkedIn and Indeed job search, read logged out with no account. They are used only to find
-// postings: nothing is applied to on either site, and each posting is looked up on the employer's
-// own site first (see locate.ts). Neither site offers this as a public API, so requests
-// are few, spaced out, and stop for hours at the first sign of a block.
 import { fetchCompany, htmlToText, posted, type Ats, type Company, type Posting } from "./ats";
 import { config } from "./config";
 import { companyKey, findTwin, knownUrl, kvGet, kvSet, type Job } from "./db";
 
 export interface Boards {
   location: string;
-  distance: number; // miles
+  distance: number;
   queries: string[];
   initialHours?: number;
   linkedin?: { minutes: number; pages: number };
@@ -19,7 +15,6 @@ type Board = (typeof BOARDS)[number];
 
 export const isBoardUrl = (url: string) => /^https?:\/\/([\w-]+\.)*(linkedin|indeed)\.com\//i.test(url);
 
-// Recruiters and reposting sites that hide the employer: there is no posting of theirs to find.
 const NO_EMPLOYER =
   /^(jobs via |lensa$|jobot|jobgether|talentify|dice$|cybercoders|actalent|teksystems|robert half|insight global|randstad|motion recruitment|hiremefast|get\.?it )/i;
 
@@ -28,7 +23,6 @@ const pause = () => sleep(6000 + Math.random() * 9000);
 const BLOCK_HOURS = 6;
 class Blocked extends Error {}
 
-// Hours of postings to ask for: since the last successful read plus an overlap, or the initial window.
 function windowHours(board: Board, b: Boards) {
   const last = Date.parse(kvGet(`last.board.${board}.ok`) ?? "");
   const initial = b.initialHours ?? 72;
@@ -73,7 +67,7 @@ async function linkedin(b: Boards): Promise<Posting[]> {
       const cards = html.split(/<li>/).slice(1);
       if (!cards.length) {
         if (html.replace(/<!--.*?-->|<!DOCTYPE html>/gs, "").trim()) throw new Blocked("search returned a page with no postings");
-        break; // end of the results
+        break;
       }
       let fresh = 0;
       for (const card of cards) {
@@ -96,14 +90,12 @@ async function linkedin(b: Boards): Promise<Posting[]> {
           posted: posted(/<time[^>]*datetime="([^"]+)"/.exec(card)?.[1]),
         });
       }
-      // Newest first: a page of postings already seen means the rest are older still.
       if (!fresh || cards.length < LINKEDIN_PAGE) break;
     }
   }
   return out;
 }
 
-// The job page's description, for a posting whose employer page gave none. One request.
 export async function linkedinDescription(url: string): Promise<string | null> {
   const id = /linkedin\.com\/jobs\/view\/(?:[^/?]*-)?(\d+)/.exec(url)?.[1];
   if (!id) return null;
@@ -121,7 +113,6 @@ export async function linkedinDescription(url: string): Promise<string | null> {
   }
 }
 
-// Indeed's mobile app API: 100 postings a request, with the description and the employer's own link.
 const INDEED_HEADERS = {
   "content-type": "application/json",
   accept: "application/json",
@@ -166,7 +157,6 @@ async function indeed(b: Boards): Promise<Posting[]> {
       const company = (j?.employer?.name ?? j?.sourceEmployerName ?? "").trim();
       if (!j?.key || !j.title || !company || seen.has(j.key) || NO_EMPLOYER.test(company)) continue;
       seen.add(j.key);
-      // Postings that are not "Easily apply" carry the employer's own link.
       const direct = j.recruit?.viewJobUrl && !isBoardUrl(j.recruit.viewJobUrl) ? j.recruit.viewJobUrl : null;
       out.push({
         url: direct ?? `https://www.indeed.com/viewjob?jk=${j.key}`,
@@ -190,7 +180,6 @@ export const boardMinutes = (name: Board) => {
   return minutes;
 };
 
-// New postings from one board, newest first. Throws when the board refused; it is then left alone for a while.
 export async function fetchBoard(name: Board): Promise<Posting[]> {
   if (Date.now() < Date.parse(kvGet(`board.${name}.blockedUntil`) ?? "1970-01-01")) return [];
   const started = new Date().toISOString();
@@ -207,8 +196,6 @@ export async function fetchBoard(name: Board): Promise<Posting[]> {
     throw err;
   }
 }
-
-// ---- the employer's own posting, when its board is one of the public ones and the slug is guessable
 
 const PROBE: Ats[] = ["greenhouse", "lever", "ashby"];
 const MISS_DAYS = 14;
@@ -231,13 +218,11 @@ export async function probeEmployer(job: Job): Promise<{ company: Company; posti
       boardFound = true;
       const same = postings.filter(p => p.url && findTwin({ company: job.company, title: p.title, description: p.description }, [job]));
       const here = words(job.location);
-      // The same title is often open in several places: take the one for this location, else a US one.
       const posting =
         same.find(p => [...words(p.location)].some(w => here.has(w))) ?? same.find(p => /\b(US|USA|United States)\b/.test(p.location ?? "")) ?? same[0];
       if (posting) return { company, posting };
     }
   }
-  // No board under that name: do not ask again for a while. A board without this role is asked again.
   if (!boardFound) kvSet(`locate.miss.${key}`, new Date().toISOString());
   return null;
 }

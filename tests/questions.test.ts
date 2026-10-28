@@ -3,8 +3,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Each scenario imports the production modules in a fresh process with throwaway state.
-// Never mock shared modules or change the test runner's environment/module cache.
 const prelude = `
 import assert from "node:assert/strict";
 import { db, getJob, kvGet, kvSet, updateJob, onChange } from ${JSON.stringify(join(import.meta.dir, "../src/db.ts"))};
@@ -138,7 +136,6 @@ describe("durable questions", () => {
     const unstructured = parkGate(4, { ...prompt, context: "" }, null);
     assert.deepEqual(answerGate(a.id, "No", "bank"), { jobIds: [1, 2] });
     assert.equal(getGate(a.id).scope, "bank");
-    // The rest wait for the answer bank to settle them (recheck.ts), as does a future application.
     assert.equal(getOpenGate(3).id, changed.id);
     assert.equal(findStoredAnswer(5, prompt), null);
     assert.deepEqual(unfiledAnswers(10).map(k => [k.employer, k.title, k.question, k.options, k.answer]), [["Acme, Inc.", "Engineer", prompt.text, ["Yes", "No"], "No"]]);
@@ -159,7 +156,6 @@ describe("durable questions", () => {
     queueQuestion(1, prompt); queueQuestion(1, second); queueQuestion(1, third);
     assert.deepEqual(nextQueuedQuestion(1), prompt);
     const first = parkGate(1, nextQueuedQuestion(1), checkpoint);
-    // The inbox says how many more this application will ask, and when it asked this one.
     const asking = () => listQuestionGroups().flatMap(g => g.jobs).find(j => j.id === 1);
     assert.equal(asking().queuedAfter, 2);
     assert.equal(asking().askedAt, first.createdAt);
@@ -175,7 +171,6 @@ describe("durable questions", () => {
     assert.equal(getOpenGate(1), null);
     assert.deepEqual(resumeContext(1).answers.map(a => a.answer), ["No", "No", "Yes"]);
 
-    // A worker that starts again clears the queue: an answer then requeues at once.
     job(2);
     queueQuestion(2, prompt); queueQuestion(2, second);
     clearQueuedQuestions(2);
@@ -280,7 +275,6 @@ describe("durable questions", () => {
     assert.deepEqual(resumeContext(1), before);
     assert.equal(findStoredAnswer(1, prompt), "No");
     job(2);
-    // Another application answers from the answer bank once the kept answer is filed there.
     assert.equal(findStoredAnswer(2, prompt), null);
     assert.deepEqual(unfiledAnswers(10).map(k => k.answer), ["No"]);
     assert.equal(isSubmitting(1), false);
@@ -490,13 +484,11 @@ describe("durable questions", () => {
     recordCheckpoint(1, checkpoint);
     recordCheckpoint(2, checkpoint);
 
-    // 1. Invalid recovery attempts:
     assert.throws(() => queueRecovery(999, "nonexistent"));
     const qGate = parkGate(3, prompt, checkpoint);
     assert.throws(() => queueRecovery(3, qGate.id));
     cancelJobGates(3);
 
-    // 2. Manual gate recovery:
     const mGate = parkGate(1, { kind: "manual", text: "Cloudflare CAPTCHA blocked navigation", context: "Site maintenance outage" }, checkpoint);
     assert.deepEqual([...manualLeases()], []);
     assert.throws(() => queueRecovery(1, "stale-gate-id"));
@@ -511,7 +503,6 @@ describe("durable questions", () => {
     assert.equal(isRecovering(1), true);
     assert.deepEqual([...manualLeases()], []);
 
-    // 3. Ambiguous gate recovery:
     const aGate = parkGate(2, { kind: "submission_ambiguous", text: "Final submission timed out", context: "Network dropped during submit" }, checkpoint);
     authorizeSubmit(2);
     assert.deepEqual([...manualLeases()], []);
@@ -539,7 +530,6 @@ describe("durable questions", () => {
     assert.throws(() => resolveAmbiguityWithEvidence(1, "submitted", badEvidence));
     assert.throws(() => resolveAmbiguityWithEvidence(1, "submitted", { ...badEvidence, notes: "Valid notes" }));
 
-    // Incompatible source/status combinations:
     assert.throws(() => resolveAmbiguityWithEvidence(1, "submitted", {
       notes: "Valid notes", requisitionId: "REQ-100", source: "portal", status: "not_submitted", checkpoint
     }));
@@ -548,7 +538,6 @@ describe("durable questions", () => {
       notes: "Valid notes", requisitionId: "REQ-100", source: "portal", status: "submitted", checkpoint
     }));
 
-    // Positive draft resolution:
     resolveAmbiguityWithEvidence(1, "not_submitted", {
       notes: "Draft application active on portal",
       requisitionId: "REQ-100",
@@ -564,7 +553,6 @@ describe("durable questions", () => {
     assert.equal(isVerifying(1), false);
     assert.equal(isRecovering(1), true);
 
-    // Re-setup for positive submitted resolution:
     job(2);
     recordCheckpoint(2, checkpoint);
     queueVerification(2);
@@ -593,47 +581,36 @@ describe("durable questions", () => {
     job(1);
     recordCheckpoint(1, checkpoint);
 
-    // Ordinary question gate is NOT in handoff history:
     parkGate(1, prompt, checkpoint);
     cancelJobGates(1);
     assert.deepEqual(resumeContext(1).handoffHistory, []);
 
-    // Create multiple handoffs:
-    // 1st: Root failure (e.g. outage before account)
     const g1 = parkGate(1, { kind: "manual", text: "Workday outage HTTP 302 before account", context: "No account created" }, checkpoint);
     cancelJobGates(1);
 
-    // 2nd: Another handoff
     const g2 = parkGate(1, { kind: "manual", text: "Intermediate attempt 2", context: "Do not create account" }, checkpoint);
     cancelJobGates(1);
 
-    // 3rd: Another handoff
     const g3 = parkGate(1, { kind: "manual", text: "Intermediate attempt 3", context: "Wait for human" }, checkpoint);
     cancelJobGates(1);
 
-    // 4th: Another handoff
     const g4 = parkGate(1, { kind: "manual", text: "Intermediate attempt 4", context: "Session expired" }, checkpoint);
     cancelJobGates(1);
 
-    // 5th: Another handoff
     const g5 = parkGate(1, { kind: "manual", text: "Intermediate attempt 5", context: "Retry login" }, checkpoint);
     cancelJobGates(1);
 
-    // 6th: Ambiguous submission
     const g6 = parkGate(1, { kind: "submission_ambiguous", text: "Final submission timed out", context: "Inspect exact application" }, checkpoint);
     cancelJobGates(1);
 
-    // 7th: Most recent handoff
     const g7 = parkGate(1, { kind: "manual", text: "Latest status check failed", context: "Check candidate home" }, checkpoint);
 
     const ctx = resumeContext(1);
     assert.equal(ctx.handoffHistory.length, 6, "strictly bounded to 6 records");
-    // Preserves oldest 2 (root failure g1 and g2):
     assert.equal(ctx.handoffHistory[0].text, "Workday outage HTTP 302 before account");
     assert.equal(ctx.handoffHistory[0].context, "No account created");
     assert.equal(ctx.handoffHistory[0].kind, "manual");
     assert.equal(ctx.handoffHistory[1].text, "Intermediate attempt 2");
-    // Preserves newest 4 (g4, g5, g6, g7):
     assert.equal(ctx.handoffHistory[2].text, "Intermediate attempt 4");
     assert.equal(ctx.handoffHistory[3].text, "Intermediate attempt 5");
     assert.equal(ctx.handoffHistory[4].text, "Final submission timed out");

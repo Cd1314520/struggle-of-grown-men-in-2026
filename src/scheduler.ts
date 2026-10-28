@@ -1,6 +1,3 @@
-// The scheduler: what runs when. It holds everything that is only true while this process is up (which
-// workers are running, which job has which browser) and starts whatever work is waiting. The workers
-// themselves live in scan.ts, locate.ts, prep.ts, fill.ts and track.ts.
 import * as chrome from "./chrome";
 import { browserCount, config, describing } from "./config";
 import {
@@ -55,7 +52,6 @@ import { scanSources } from "./scan";
 import { FILL_STAGE, PARKED, to } from "./status";
 import { trackMailbox } from "./track";
 
-// The outside world a scheduler acts on. The defaults are the real agent runner and the real browsers.
 export interface SchedulerDeps {
   runWorker: RunWorker;
   browser: Browser;
@@ -69,17 +65,11 @@ interface FillCandidate {
 interface FillStart {
   job: Job;
   checkpoint: FillCheckpoint | null;
-  // A new application, not one already started: only these count toward limits.applyPerDay.
   isNew: boolean;
 }
 
 const employerOf = (job: Job) => job.company_key ?? job.company;
 
-// New applications are spread over limits.applySpreadHours instead of all starting when the daily
-// cap resets: a posting found mid-day is applied to within the gap, and no site sees a burst.
-// Resumes and verifications are not paced, and neither is a posting opened within FRESH_MS: the first
-// hours are when an application counts, and the gap would hold a scan's batch of new ones for hours.
-// Such a start still restarts the gap for the older postings behind it.
 const FRESH_MS = 24 * 3600_000;
 const isFresh = (job: Job) => Date.now() - openedAt(job) < FRESH_MS;
 function newApplicationGap(): number {
@@ -88,10 +78,6 @@ function newApplicationGap(): number {
   return hours > 0 && cap > 0 ? (hours * 3600_000) / cap : 0;
 }
 
-// Employers with an application that is started but not finished: parked on a question, a final
-// review or a handoff, or queued to resume its draft. A new application to one of them waits for that
-// one to finish, so one site's quirk or one unanswered question stalls a single application, not every
-// role at the employer.
 function employersWithOpenApplication(): Set<string> {
   const open = new Set<string>();
   for (const job of jobsInStatuses(["approved", "filling", ...PARKED]))
@@ -99,7 +85,6 @@ function employersWithOpenApplication(): Set<string> {
   return open;
 }
 
-// Every worker's result says whether the model provider is taking work.
 function watchCapacity(run: RunWorker): RunWorker {
   return options => {
     const handle = run(options);
@@ -114,7 +99,6 @@ function watchCapacity(run: RunWorker): RunWorker {
   };
 }
 
-// Assessments a capacity refusal ended before the back-off existed were marked failed; they never ran.
 function requeueCapacityFailures() {
   let requeued = 0;
   for (const job of jobsByStatus("failed", 100_000))
@@ -125,7 +109,6 @@ function requeueCapacityFailures() {
   if (requeued) logEvent("system", `Requeued ${requeued} assessments the model provider refused for capacity`);
 }
 
-// Fill workers a capacity refusal stopped before final submit was authorized resume their drafts.
 function recoverCapacityHandoffs() {
   for (const job of jobsByStatus("needs_manual")) {
     const gate = getOpenGate(job.id);
@@ -135,9 +118,6 @@ function recoverCapacityHandoffs() {
   }
 }
 
-// Hand-offs that a fresh try usually clears, and how many tries each job gets before the hand-off
-// waits for the user: a browser that stopped taking input gets a new worker and tab at once; an
-// employer's site that was down gets another look a few hours later.
 const RETRIED: Partial<Record<BlockerCause, { afterMs: number; tries: number }>> = {
   browser: { afterMs: 0, tries: 1 },
   site_down: { afterMs: 3 * 60 * 60 * 1000, tries: 2 },
@@ -146,7 +126,6 @@ export function retryPassingHandoffs() {
   for (const job of jobsByStatus("needs_manual")) {
     const gate = getOpenGate(job.id);
     if (gate?.kind !== "manual" || isSubmitting(job.id) || manualLeaseGate(job.id) || !readCheckpoint(job.id)) continue;
-    // The worker records the cause just before it parks; a gate without its own blocker is not retried.
     const blockers = jobBlockers(job.id);
     const last = blockers.at(-1);
     const rule = last && RETRIED[last.cause];
@@ -163,9 +142,6 @@ export function retryPassingHandoffs() {
   }
 }
 
-// Jobs a fill worker could be started for, in the order they should be tried: verification of an
-// ambiguous submit first, then draft recovery, then jobs with a saved draft, then the most recently
-// opened posting, as prep takes them: applying in its first hours matters most.
 function fillQueue(): FillCandidate[] {
   const rank = (c: FillCandidate) => (c.verify ? 4 : 0) + (c.recovering ? 2 : 0) + (c.job.fill_checkpoint === null ? 0 : 1);
   return jobsInStatuses(["approved", "needs_manual"])
@@ -174,10 +150,6 @@ function fillQueue(): FillCandidate[] {
     .sort((a, b) => rank(b) - rank(a) || openedAt(b.job) - openedAt(a.job) || a.job.id - b.job.id);
 }
 
-// Auto-approvals waiting for a browser are held to the rules as they stand now, before one is spent
-// on them: the rules may have changed since prep approved the job. One whose stored assessment only
-// lacks a judgment the rules now ask for goes back to prep to get it; any other that no longer
-// qualifies is held for the user. Applications already started are left to the check at fill start.
 export function reviewStandingApprovals() {
   for (const job of jobsByStatus("approved")) {
     if (job.approved_by !== "auto" || job.resume_sha || job.fill_checkpoint) continue;
@@ -194,8 +166,6 @@ export function reviewStandingApprovals() {
   }
 }
 
-// Auto-approvals not yet started, past the employer's allowance (autoApply.perEmployer), go back to the
-// user. Worst first, so when none has started it is the employer's best-scored role that stays.
 export function trimEmployerApprovals() {
   const queued = jobsByStatus("approved")
     .filter(job => job.approved_by === "auto" && !job.resume_sha && !job.fill_checkpoint)
@@ -209,9 +179,7 @@ export function trimEmployerApprovals() {
   }
 }
 
-// How long agents' step-by-step records are kept when config.yml does not say.
 const CHATTER_DAYS = 30;
-// Once a day, drop the step-by-step records that have aged out.
 function pruneOldChatter() {
   if (!due("last.prune", 24 * 60)) return;
   kvSet("last.prune", new Date().toISOString());
@@ -220,8 +188,6 @@ function pruneOldChatter() {
   if (removed) logEvent("system", `Removed ${removed} agent step records older than ${days} days`);
 }
 
-// What a restart finds in the fill stage. Open gates remain parked; answered gates remain queued. A
-// marker is never cleared by startup, generic retry, or the act of requesting approval.
 function recoverInterruptedFills() {
   for (const j of jobsInStatuses(FILL_STAGE)) {
     const checkpoint = readCheckpoint(j.id) ?? defaultCheckpoint(j, lastSlot(j.id) ?? 0);
@@ -254,16 +220,11 @@ export class Scheduler {
   private readonly rt: FillRuntime;
   private readonly running = new Set<string>();
   private prepActive = 0;
-  // One application per browser: filling[n] is the job in browser n. A browser rests between applications,
-  // and no two applications start close together. Both times are kept across restarts.
   private readonly filling: (FillSession | null)[];
   private readonly restUntil: number[];
   private nextFillAt: number;
-  // When the next new application may start (see newApplicationGap). Kept across restarts.
   private nextNewAt: number;
-  // Activation is asynchronous; keep ownership even if the gate is resolved meanwhile.
   private readonly manualActivations = new Map<number, number>();
-  // The resume import under way, if any.
   private importRun: ImportRun | null = null;
 
   constructor(deps: Partial<SchedulerDeps> = {}) {
@@ -274,8 +235,6 @@ export class Scheduler {
     this.nextFillAt = Number(kvGet("fill.nextAt") ?? 0);
     this.nextNewAt = Number(kvGet("fill.nextNewAt") ?? 0);
   }
-
-  // ---- workers that run one at a time
 
   isRunning(name: string) {
     return this.running.has(name);
@@ -311,7 +270,6 @@ export class Scheduler {
     return this.exclusive("track", () => trackMailbox(this.run));
   }
 
-  // Answers kept for the answer bank go into answers.md first, so the recheck answers what they now settle.
   recheck() {
     return this.exclusive("recheck", async () => {
       const filed = bankDue() && (await fileKeptAnswers(this.run));
@@ -320,7 +278,6 @@ export class Scheduler {
     });
   }
 
-  // Turns the files readied by beginImport or reviseImport into a draft resume (src/resume-import.ts).
   importResume() {
     return this.exclusive("import", async () => {
       const control: ImportRun = { handle: null, cancelled: false };
@@ -340,8 +297,6 @@ export class Scheduler {
     return true;
   }
 
-  // ---- fill sessions and the browsers they hold
-
   abortFill(jobId: number) {
     const session = this.rt.sessions.get(jobId);
     if (session) endSession(session);
@@ -357,7 +312,6 @@ export class Scheduler {
     return false;
   }
 
-  // A live link is valid only while this job owns the browser, not merely because it used it once.
   fillSlot(jobId: number): number | null {
     const session = this.rt.sessions.get(jobId);
     if (session && ownsFill(this.rt, session)) return session.slot;
@@ -365,7 +319,6 @@ export class Scheduler {
     return null;
   }
 
-  // Jobs whose employer account is in use: by a current worker, or by a person inspecting a browser.
   private busyOwners(leases: Map<number, number>) {
     return [...this.rt.sessions.keys(), ...leases.values(), ...this.manualActivations.values()];
   }
@@ -409,9 +362,6 @@ export class Scheduler {
     this.pump();
   }
 
-  // ---- starting work
-
-  // Start whatever work is waiting. Safe to call any time state changes.
   pump() {
     if (backedOff()) return;
     if (!this.isRunning("locate") && usedToday("locate") < locatePerDay() && jobsByStatus("locating", 1).length) void this.locate();
@@ -448,20 +398,15 @@ export class Scheduler {
       });
   }
 
-  // The first queued job that browser `slot` can take now.
   private pickFill(slot: number, queue: FillCandidate[], leases: Map<number, number>, started: Set<string>): FillStart | null {
-    // Only current workers and explicit human inspection own employer sessions.
     const employers = new Set<string>();
     for (const owner of this.busyOwners(leases)) {
       const activeJob = getJob(owner);
       if (activeJob) employers.add(employerOf(activeJob));
     }
-    // Recovery is priority, not ownership: skipped candidates cannot block the slot.
-    // Multiple parked/recovering applications may share a persistent profile.
     for (const { job: candidate, verify } of queue) {
       if (this.rt.sessions.has(candidate.id) || employers.has(employerOf(candidate)) || getOpenGate(candidate.id)) continue;
       const saved = readCheckpoint(candidate.id);
-      // Resuming an application already started finishes work the cap was spent on; it does not wait for tomorrow's.
       const isNew = !verify && !saved && !candidate.resume_sha;
       if (
         isNew &&
@@ -491,7 +436,6 @@ export class Scheduler {
     fill(this.rt, job, session)
       .catch(async (err: unknown) => {
         stopFailedFill(this.rt, session, `fill: ${errorMessage(err)}`);
-        // A thrown callback cannot free a still-running worker's slot.
         if (session.handle) {
           session.handle.abort();
           await session.handle.done;
@@ -508,7 +452,6 @@ export class Scheduler {
       });
   }
 
-  // Puts right what a restart interrupted, then keeps the schedule.
   start() {
     interruptedImport();
     dedupeExisting();
@@ -519,7 +462,6 @@ export class Scheduler {
     recoverCapacityHandoffs();
     reviewStandingApprovals();
     trimEmployerApprovals();
-    // A digest that keeps failing the same way is logged once, not once a tick; Settings shows its last error.
     let digestError: string | null = null;
     const tick = () => {
       pruneOldChatter();
@@ -531,7 +473,6 @@ export class Scheduler {
           digestError = msg;
         },
       );
-      // Scans end in triage, and tracking is an agent too: both wait out a capacity pause.
       if (backedOff()) return;
       if (due("last.scan", config.schedule.scanMinutes) && !profileProblems(["targets.md"]).length)
         void this.scan({ discover: due("last.discover", config.schedule.discoverMinutes) });

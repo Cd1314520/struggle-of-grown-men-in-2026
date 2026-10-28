@@ -1,4 +1,3 @@
-// One question in focus: what is asked, for which application, and the ways to answer it.
 import { ArrowLeft, ArrowUpRight, ChevronDown, ChevronUp, Clock, CornerDownRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AnswerScope, QuestionGroup } from "../../../src/questions";
@@ -14,12 +13,11 @@ export interface Answer {
   gateId: string;
   answer: string;
   scope: AnswerScope;
-  via: number | "text"; // the option picked, or the typed box: which control shows the spinner
+  via: number | "text";
 }
 
 const SAVE_KEY = combo("↵");
 
-// The form's own wording, folded to a few lines when long: some carry a whole arbitration agreement.
 function FormContext({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   const long = text.length > 320 || text.split("\n").length > 5;
@@ -50,7 +48,6 @@ function FormContext({ text }: { text: string }) {
   );
 }
 
-// When several applications ask: which one this answer is for, and the list of them. One is named in the header.
 function Asking({ group, gateId, onGateId }: { group: QuestionGroup; gateId: string; onGateId: (id: string) => void }) {
   if (group.jobs.length < 2) return null;
   const titles = group.jobs.map(j => j.title);
@@ -140,11 +137,11 @@ export function FocusPane({
   onAnswer: (a: Answer, group: QuestionGroup) => void;
   onMove: (by: 1 | -1) => void;
   onSkip: () => void;
-  onBack: () => void; // a phone's way back to the queue
+  onBack: () => void;
 }) {
   const [draft, setDraft] = useState(() => drafts.get(group.key) ?? "");
   const [gateId, setGateId] = useState(group.jobs[0]?.gateId ?? "");
-  const [keep, setKeep] = useState(group.kind === "question"); // on unless unticked for a one-off
+  const [keep, setKeep] = useState(group.kind === "question");
   const box = useRef<HTMLTextAreaElement>(null);
   const opts = choices(group),
     keyed = opts.length <= MAX_KEYED,
@@ -184,7 +181,6 @@ export function FocusPane({
     },
     {
       key: "Enter",
-      // Enter still activates a focused link or button; anywhere else it starts a typed answer.
       run: ev => {
         if (ev.target instanceof HTMLElement && ev.target.matches("a, button")) ev.target.click();
         else box.current?.focus();
@@ -195,7 +191,6 @@ export function FocusPane({
       inFields: true,
       run: ev => {
         if (typing(ev.target) && ev.target instanceof HTMLElement) ev.target.blur();
-        // On a phone the question covers the queue: Esc closes it, as it does an open job.
         else if (!matchMedia(WIDE).matches) onBack();
       },
     },
@@ -203,7 +198,6 @@ export function FocusPane({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* The open job's panel bar: same height and button size. */}
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-3 lg:px-6">
         <a
           href={href("questions")}
@@ -262,7 +256,6 @@ export function FocusPane({
             <h2 className={cn("font-semibold tracking-[-0.01em] break-words text-fg", group.text.length > 180 ? "text-lg" : "text-xl")}>
               {questionText(group.text)}
             </h2>
-            {/* Who asks: the bar above names only the employer, so the role is here, where it can wrap. */}
             {job && (
               <p className="text-base break-words">
                 <span className="font-medium text-fg">{job.company}</span>
@@ -289,7 +282,6 @@ export function FocusPane({
 
           <div className="flex flex-col gap-3">
             {opts.length > 0 && (
-              // Two up only where a pair of short options fits side by side: the pane, not the window, decides.
               <div className="@container">
                 <div className={cn("grid gap-2", opts.length % 2 === 0 && opts.length <= 4 && opts.every(o => o.length <= 28) && "@xl:grid-cols-2")}>
                   {opts.map((o, i) => (
@@ -308,7 +300,6 @@ export function FocusPane({
                 </div>
               </div>
             )}
-            {/* A composer: the typed answer and the button that saves it, in one frame. */}
             <div className="rounded-lg border border-border bg-surface shadow-xs transition-[border-color,box-shadow] focus-within:border-accent focus-within:ring-3 focus-within:ring-accent/15 hover:border-border-strong focus-within:hover:border-accent">
               <Textarea
                 ref={box}
@@ -370,7 +361,6 @@ export function FocusPane({
         </div>
       </div>
 
-      {/* Where the pane is too narrow for every key (a 1024px window), the last ones clip rather than widen the page. */}
       <footer className="hidden h-10 shrink-0 items-center gap-5 overflow-hidden border-t border-border px-6 text-xs whitespace-nowrap text-fg-muted lg:flex touch:hidden">
         <span className="flex items-center gap-1.5">
           <Kbd>J</Kbd>

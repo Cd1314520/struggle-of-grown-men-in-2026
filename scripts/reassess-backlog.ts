@@ -61,7 +61,6 @@ function selectAndFilter(db: Database) {
     if (Number.isFinite(id)) feedbackIds.add(id);
   }
 
-  // Jobs the user held by hand stay as they put them, whatever the rules would now say.
   const heldByUser = new Set(
     db
       .query<{ job_id: number }, []>(
@@ -96,7 +95,6 @@ function selectAndFilter(db: Database) {
       continue;
     }
 
-    // Skip rows that already have a valid practice assessment made under the current rules
     const assessment = parsePracticeAssessment(j.practice_assessment);
     if (assessment !== null && !needsJudgment(assessment, describing())) {
       excludedByReason["already_has_practice_assessment"] = (excludedByReason["already_has_practice_assessment"] ?? 0) + 1;
@@ -140,10 +138,8 @@ export function runReassessment(options: { apply?: boolean; dbPath?: string; sil
   const apply = !!options.apply;
   const silent = !!options.silent;
 
-  // Refuses a database that is not at this code's schema version; it never upgrades one itself.
   const db = openDatabase(dbPath, apply ? "readwrite" : "readonly");
   try {
-    // In apply mode, selection and writes run inside the same transaction
     const { allJobs, eligibleJobs, eligibleByStatus, excludedByReason } = apply
       ? db.transaction(() => {
           const filtered = selectAndFilter(db);

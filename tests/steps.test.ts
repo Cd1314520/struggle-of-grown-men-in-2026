@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MIGRATIONS, migrate } from "../src/schema";
 
-// Each scenario imports the production modules in a fresh process with throwaway state.
 const prelude = `
 import assert from "node:assert/strict";
 import { db, getJob, statusHistory } from ${JSON.stringify(join(import.meta.dir, "../src/db.ts"))};
@@ -40,7 +39,6 @@ describe("application steps", () => {
     assert.equal(first.added, true);
     assert.equal(getJob(1).status, "interview");
     assert.equal(getJob(1).note, "Codility OA");
-    // The same message read again; and a second request in the same message is its own step.
     assert.deepEqual(steps.addStep(getJob(1), { kind: "assessment", title: "Codility OA again", source: "mail", message_id: "m1" }), { id: first.id, added: false });
     assert.equal(steps.addStep(getJob(1), { kind: "schedule", title: "Book a call", source: "mail", message_id: "m1" }).added, true);
     assert.equal(steps.jobSteps(1).length, 2);
@@ -56,12 +54,9 @@ describe("application steps", () => {
   it("says whose move it is from the steps' states", () => {
     scenario(`
     job(1);
-    // done_at is stamped with the real clock, so "now" must be the real clock too: a fixed date falls
-    // behind it, and a step done "later" would then seem older than an interview booked after it.
     const now = Date.now();
     const a = steps.addStep(getJob(1), { kind: "assessment", title: "OA", source: "mail" }).id;
     const b = steps.addStep(getJob(1), { kind: "questionnaire", title: "Form", due_at: "2026-10-25", source: "mail" }).id;
-    // The user's move: the step with the nearest deadline leads.
     let next = steps.nextSteps(now).get(1);
     assert.equal(next.whose, "you"); assert.equal(next.label, "Form"); assert.equal(next.due, true);
     steps.changeStep(b, { state: "done", note: "sent it" });
@@ -71,9 +66,7 @@ describe("application steps", () => {
     steps.changeStep(a, { state: "done" });
     next = steps.nextSteps(now).get(1);
     assert.equal(next.whose, "them"); assert.equal(next.quiet, false);
-    // done_at is stamped with the real clock, so quiet is measured from it.
     assert.equal(steps.nextSteps(Date.now() + 8 * DAY).get(1).quiet, true);
-    // A booked interview is upcoming until it is held, then waiting on them since it was held.
     const c = steps.addStep(getJob(1), { kind: "schedule", title: "Onsite", source: "user" }).id;
     assert.throws(() => steps.changeStep(c, { state: "scheduled" }), /time/);
     steps.changeStep(c, { state: "scheduled", scheduled_at: at(now + 2 * DAY) });
@@ -81,7 +74,6 @@ describe("application steps", () => {
     assert.equal(next.whose, "upcoming"); assert.equal(next.label, "Onsite");
     next = steps.nextSteps(now + 3 * DAY).get(1);
     assert.equal(next.whose, "them"); assert.equal(next.at, at(now + 2 * DAY));
-    // Reopening clears the done stamp.
     steps.changeStep(a, { state: "todo" });
     assert.equal(steps.getStep(a).done_at, null);
     assert.deepEqual(steps.openSteps([1]).map(s => s.id), [a, b, c]);
@@ -118,7 +110,6 @@ describe("application steps", () => {
     steps.removeStep(b);
     assert.equal(getJob(1).status, "submitted");
 
-    // A removed step leaves an ended application alone.
     job(2);
     const c = steps.addStep(getJob(2), { kind: "other", title: "x", source: "mail" }).id;
     steps.recordOutcome(2, "rejected_by_company", "not moving forward");

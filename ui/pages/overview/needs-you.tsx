@@ -1,4 +1,3 @@
-// What waits on the owner, one row per kind with its count, each a way into the page that clears it.
 import {
   ChevronRight,
   CircleCheck,
@@ -28,8 +27,6 @@ interface Row {
   tone: Tone;
 }
 
-// In the order they are best dealt with: what is about to be sent first, then what holds applications
-// back, then the new matches, which keep.
 export function attentionRows(s: Summary): Row[] {
   const a = s.attention;
   const needsYou = "#pipeline?group=needs_you";
@@ -82,7 +79,6 @@ export function attentionRows(s: Summary): Row[] {
     },
     { key: "review", label: "Review", hint: "Assessed matches waiting for your approval", count: a.review, href: "#review", icon: Inbox, tone: "accent" },
   ];
-  // Setup counts the profile among its steps; the files left are named, as they are what most often remains.
   const problems = s.profileProblems;
   if (s.setupRemaining)
     rows.push({

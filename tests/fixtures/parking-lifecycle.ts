@@ -1,4 +1,3 @@
-// Subprocess-only fixture: all state is throwaway; browser, model and mailbox are inert.
 import assert from "node:assert/strict";
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -7,12 +6,10 @@ import type { WorkerHandle, WorkerOptions } from "../../src/worker";
 import type { JobBrowser } from "../../src/chrome";
 import type { Browser } from "../../src/fill-session";
 
-// Dynamic imports intentionally exercise module initialization boundaries:
-// isolation guards/config precede DB opening, and mocks precede scheduler loading.
 assert(process.env["AUTO_APPLY_DATA"] && process.env["AUTO_APPLY_PROFILE"] && process.env["AUTO_APPLY_RESUME_DIR"], "isolated paths required");
 const scenario = process.argv[2];
 const { config, jobDir, DATA } = await import("../../src/config");
-config.approval = "gated"; // every application waits at both gates
+config.approval = "gated";
 config.targets.holdBack = false;
 config.concurrency.fill = scenario?.startsWith("restart-") || scenario === "recovery-prefix" ? 2 : 1;
 config.concurrency.prep = 0;
@@ -22,7 +19,7 @@ config.limits.applyPerDay = 50;
 config.limits.applySpreadHours = 0;
 
 if (scenario === "target-isolation") {
-  await import("./cdp-isolation"); // Deliberately load real proxy before any worker/browser mocks.
+  await import("./cdp-isolation");
   process.exit(0);
 }
 
@@ -45,7 +42,6 @@ if (scenario === "browser") {
   const chrome = await import("../../src/chrome");
   await chrome.pruneTabs(0, 1, new Set(["draft"]));
   assert.deepEqual(closed, ["obsolete"]);
-  // A tab that was given up is closed even though it is the most recent one.
   closed.length = 0;
   await chrome.pruneTabs(0, 1, new Set(["draft"]), new Set(["recent"]));
   assert.deepEqual(closed, ["recent"]);
@@ -78,11 +74,9 @@ interface SimulatedWorker {
   options: WorkerOptions;
   aborted: boolean;
   exit: () => void;
-  // The process ends with an error, as when the model provider refuses the turn.
   fail: (error: string) => void;
 }
 const workers: SimulatedWorker[] = [];
-// The scheduler is handed a simulated agent runner and browser in place of the real ones.
 const runWorker = (options: WorkerOptions): WorkerHandle => {
   const { promise: done, resolve } = Promise.withResolvers<Awaited<WorkerHandle["done"]>>();
   const worker: SimulatedWorker = {
@@ -96,7 +90,6 @@ const runWorker = (options: WorkerOptions): WorkerHandle => {
     },
   };
   workers.push(worker);
-  // Abort deliberately does NOT settle done: assert slot stays owned until exit.
   return {
     done,
     abort: () => {
@@ -110,12 +103,8 @@ let nextTab = 0;
 let activateWait: Promise<void> | null = null;
 if (scenario?.startsWith("restart-")) for (const id of [1, 2, 3, 4]) simulatedTabs.add(id === 1 ? "draft-tab" : `draft-tab-${id}`);
 const browser: Browser = {
-  ensureChrome: async () => {
-    /* browser is inert in this fixture */
-  },
-  pruneTabs: async () => {
-    /* simulated tabs are never pruned */
-  },
+  ensureChrome: async () => {},
+  pruneTabs: async () => {},
   screenshot: () => Promise.resolve(null),
   tabs: () => Promise.resolve([...simulatedTabs].map(id => ({ id, title: "Fixture requisition", url: "https://fixture.invalid/draft", ws: "" }))),
   activateApplicationTab: async (_slot: number, tabId: string) => {
@@ -157,9 +146,7 @@ await mock.module("../../src/gmail", () => ({
   },
 }));
 await mock.module("../../src/digest", () => ({
-  tickQuestionDigest: async () => {
-    /* digest mail is disabled in this fixture */
-  },
+  tickQuestionDigest: async () => {},
 }));
 const { db, getJob, kvSet, updateJob } = await import("../../src/db");
 const { authorizeSubmit, isSubmitting, isVerifying, isRecovering } = await import("../../src/fill-state");
@@ -176,8 +163,6 @@ function must<T>(value: T | null | undefined, what: string): T {
 const jobRow = (id: number) => must(getJob(id), `job ${id}`);
 const openGate = (jobId: number) => must(core.getOpenGate(jobId), `open gate for job ${jobId}`);
 const workerAt = (index: number) => must(workers[index], `worker ${index}`);
-// One sighting time for every job: the fill queue takes the most recently opened first, so jobs found
-// a second apart would otherwise start in an order that depends on the clock.
 const FOUND_AT = new Date().toISOString().slice(0, 19).replace("T", " ");
 function addJob(id: number) {
   db.query("INSERT INTO jobs (id,url,source,company,title,status,approved_by,found_at) VALUES (?,?,?, ?,?,'approved','user',?)").run(
@@ -239,9 +224,7 @@ if (scenario === "restart-setup") {
     core.readCheckpoint(2),
   );
   core.answerGate(answered.id, "durable answer", "application");
-  // This interrupted runnable marker must become ambiguity, not an ordinary resume.
   authorizeSubmit(3);
-  // Use another slot for ambiguity so its lease doesn't intentionally block the queued answer.
   const checkpoint = must(core.readCheckpoint(3), "checkpoint for job 3");
   core.recordCheckpoint(3, { ...checkpoint, slot: 1 });
   writeFileSync(join(DATA, "expected-sha.txt"), must(jobRow(2).resume_sha, "resume SHA for job 2"));
@@ -281,7 +264,7 @@ if (scenario === "blocked-prefix") {
       insert.run(id, `https://fixture.invalid/blocked/${id}`, `Blocked employer ${id}`, `Blocked requisition ${id}`, JSON.stringify(checkpoint));
     }
   })();
-  addJob(1002); // Fresh and eligible, but checkpoint-bearing resumes must come first.
+  addJob(1002);
   addJob(1003);
   const frozen = resume.freezeResume(1003);
   updateJob(1003, { resume_sha: frozen.sha, resume_frozen_at: new Date().toISOString() });
@@ -379,7 +362,6 @@ if (
   ].includes(scenario ?? "")
 )
   addJob(2);
-// Opened well before the first sighting: old enough to be paced.
 if (scenario === "paced") db.query("UPDATE jobs SET posted_at = ? WHERE id = 2").run(new Date(Date.now() - 3 * 864e5).toISOString());
 if (["manual-same-employer", "terminal-success", "terminal-closed", "terminal-persistence-failure"].includes(scenario ?? ""))
   updateJob(2, { company: jobRow(1).company, company_key: jobRow(1).company_key });
@@ -398,7 +380,6 @@ if (scenario === "release" || scenario === "quick-answer") {
   if (scenario === "quick-answer") {
     assert.equal(core.respond(1, "100000"), true);
     assert.equal(core.respond(1, "200000"), false);
-    // The cap is spent, but resuming an application already started does not wait for tomorrow's.
     config.limits.applyPerDay = 1;
     writeFileSync(join(jobDir(1), resume.PDF_NAME), "changed working PDF must not upload");
     writeFileSync(join(jobDir(1), resume.MAIN), "changed working source must not freeze");
@@ -860,7 +841,6 @@ if (scenario === "release" || scenario === "quick-answer") {
   const terminalReport = call(second, "report_result", { outcome: "submitted", note: "Confirmation #ABC-123" });
   assert.equal(await terminalReport, "Recorded.");
 
-  // Consumer-visible terminal status is immediate
   assert.equal(jobRow(1).status, "submitted");
   assert.equal(jobRow(1).pending, null);
   assert.equal(core.getOpenGate(1), null, "success clears marker without ambiguity gate");
@@ -870,14 +850,12 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(second.aborted, true, "terminal result aborts worker process");
   assert.equal(must(jobBrowsers[1], "job browser 1").ownsTarget("draft-tab"), false, "browser revoked on terminal result");
 
-  // Scheduler and employer slot remain occupied until process exits
   scheduler.pump();
   assert.equal(workers.length, 2, "slot remains occupied until handle.done / process exit");
   assert.equal(scheduler.activeFillSession(1), true, "session remains until process exit");
   assert.equal(scheduler.fillSlot(1), null, "slot ownership revoked for inactive session");
   assert.equal(jobRow(2).status, "approved", "same-employer job cannot start while previous worker runs");
 
-  // Stale callbacks while process is winding down cannot alter terminal status
   const staleSubmit = await call(second, "confirm_submit", { ...navigation, summary: "Stale attempt" });
   assert.match(staleSubmit, /ERROR: stale or parked fill worker/);
   const staleFail = await call(second, "report_result", { outcome: "failed", cause: "no_response", note: "Stale late failure" });
@@ -885,7 +863,6 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(jobRow(1).status, "submitted");
   assert.equal(isSubmitting(1), false);
 
-  // Worker process exits
   second.exit();
   scheduler.pump();
   await until(() => workers.length === 3);
@@ -893,13 +870,11 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(third.options.jobId, 2, "same-employer job starts only after process exit");
   assert.equal(scheduler.activeFillSession(1), false, "fill session freed after process exit");
 
-  // Stale callbacks after successor has started cannot touch terminal job or successor
   const stalePostExit = await call(second, "report_result", { outcome: "closed", note: "Late callback" });
   assert.match(stalePostExit, /ERROR: stale or parked fill worker/);
   assert.equal(jobRow(1).status, "submitted");
   assert.equal(jobRow(2).status, "filling");
 
-  // Tabs and frozen resume preserved
   assert.equal(simulatedTabs.has("draft-tab"), true, "tabs preserved");
   assert.equal(jobRow(1).resume_sha, initialSha, "frozen resume preserved");
   assert.equal(resume.frozenResume(1, initialSha).sha, initialSha);
@@ -915,7 +890,6 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(first.aborted, true);
   assert.equal(must(jobBrowsers[0], "job browser 0").ownsTarget("draft-tab"), false, "browser revoked on closed report");
 
-  // Slot remains held until process exit
   scheduler.pump();
   assert.equal(workers.length, 1);
   assert.equal(scheduler.activeFillSession(1), true);

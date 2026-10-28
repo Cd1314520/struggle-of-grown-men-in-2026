@@ -6,7 +6,6 @@ import { navigate } from "../../lib/router";
 import { Button, Callout, Dialog, DialogContent, Input } from "../ui";
 import { useShell } from "./state";
 
-// Add a posting by URL, from anywhere. A posting already tracked links to its job instead.
 export function AddPostingDialog() {
   const { addOpen, setAddOpen } = useShell();
   const [url, setUrl] = useState("");
@@ -52,8 +51,6 @@ export function AddPostingDialog() {
   return (
     <Dialog open={addOpen} onOpenChange={close}>
       <DialogContent
-        // The URL box takes focus, set here rather than with autoFocus so the dialog first records
-        // where focus was, to return it there on close.
         onOpenAutoFocus={e => {
           e.preventDefault();
           field.current?.focus();

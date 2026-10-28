@@ -1,6 +1,3 @@
-// Auto apply: the rules under which the app gives an approval itself instead of waiting for the user
-// (`approval: auto`). Gate 1 is decided here, from what prep reported; gate 2 follows `approval` for
-// every job. Anything the rules do not clear lands in To review exactly as before.
 import { config, describing } from "./config";
 import type { Job } from "./db";
 import { employerListing } from "./employers";
@@ -16,8 +13,6 @@ export const autoApply = () => ({
   enabled: config.approval === "auto",
 });
 
-// Why auto apply must not take a job on this assessment, or null. While target employers are held
-// back only a proven practice job may be approved; otherwise the employer must still have been judged.
 function employerRefusal(assessment: ReturnType<typeof parsePracticeAssessment>): string | null {
   if (config.targets.holdBack) {
     const refusal = practiceRefusal(assessment, describing());
@@ -27,8 +22,6 @@ function employerRefusal(assessment: ReturnType<typeof parsePracticeAssessment>)
   return null;
 }
 
-// A stored assessment read against the candidate's employer lists as they stand now: an employer
-// moved onto the frontier list since the job was assessed is no longer spent on practice.
 function storedAssessment(job: { company?: string; practice_assessment?: string | null }) {
   const assessment = parsePracticeAssessment(job.practice_assessment);
   return assessment && job.company !== undefined ? { ...assessment, listed: employerListing(job.company) } : assessment;
@@ -40,7 +33,6 @@ export interface AutoApprovalResult {
   deferred?: "daily_cap";
 }
 
-// Whether a freshly prepped job may skip gate 1. `note` says why not, for the job's page.
 export function autoApproval(
   verdict: Verdict,
   facts: { concerns: string | null; handPicked: boolean; approvedToday: number; employerApplications?: number },
@@ -48,11 +40,9 @@ export function autoApproval(
   const rules = autoApply();
   if (!rules.enabled) return { approve: false, note: null };
   const review = (why: string) => ({ approve: false, note: `needs your review: ${why}` });
-  // A job the user sent back or picked out by hand is one they are watching.
   if (facts.handPicked) return review("you asked for this one yourself");
   if (verdict.decision !== "apply") return review(verdict.reason);
 
-  // Independently of the verdict, the employer evidence must allow it.
   const refusal = employerRefusal(verdict.practice);
   if (refusal) return review(refusal);
 
@@ -94,12 +84,6 @@ export interface ReconsiderResult {
   reason: string | null;
 }
 
-/**
- * Pure helper to reconsider auto-approval for a deferred / eligible job.
- * Re-evaluates persisted checklist JSON against current rubric and validates persisted practice assessment.
- * Fails closed on malformed checklist, stale qualifications, non-qualifying practice evidence,
- * or manual / frozen / submitted job state.
- */
 export function reconsiderAutoApproval(job: ReconsiderJob, facts: ReconsiderFacts): ReconsiderResult {
   const deny = (reason: string, approvalNote?: string | null): ReconsiderResult => ({
     approved: false,
@@ -178,16 +162,12 @@ export function reconsiderAutoApproval(job: ReconsiderJob, facts: ReconsiderFact
   };
 }
 
-// Whether the fill worker stops for gate 2 on this job: always when approval is gated. Otherwise an
-// application is sent without asking, except one auto apply approved that, while target employers are
-// held back, no longer proves a practice job.
 export function confirmsSubmit(job: { approved_by: string | null; company?: string; practice_assessment?: string | null }): boolean {
   if (config.approval !== "auto") return true;
   if (job.approved_by === "auto" && config.targets.holdBack && !practiceReason(storedAssessment(job), describing())) return true;
   return false;
 }
 
-// Early gate before freeze/navigation: re-check auto-approved practice jobs at fill start.
 export function checkAutoApprovedPractice(job: {
   approved_by: string | null;
   company?: string;
@@ -203,9 +183,6 @@ export function checkAutoApprovedPractice(job: {
   const assessment = storedAssessment(job);
   const refusal = practiceRefusal(assessment, describing());
   if (!refusal) return { ok: true, reason: practiceReason(assessment, describing()) ?? "" };
-  // An application already under way cannot be assessed again: its resume is frozen. When all its
-  // assessment lacks is a judgment asked for since, it may carry on filling; confirmsSubmit still
-  // sees that it does not qualify and stops it for the user before anything is sent.
   if (job.resume_sha && needsJudgment(assessment, describing()))
     return { ok: true, reason: "started before the practice rules asked for a judgment; final submit needs your confirmation" };
   return { ok: false, reason: `auto-approved, but not a practice job: ${refusal}` };

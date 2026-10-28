@@ -1,4 +1,3 @@
-// The latest decisions and outcomes from the event log, with a way into the full feed.
 import { useQuery } from "@tanstack/react-query";
 import { History } from "lucide-react";
 import { EmptyState, ListBody, ListRow, Time } from "../../components/ui";
@@ -9,13 +8,10 @@ import { feed, type FeedRow } from "../activity/feed";
 import { KindIcon } from "../activity/kind-icon";
 import { RailHead } from "./rail";
 
-// Enough to end the right column near where the left one does.
 const SHOWN = 6;
 
-// A row of the Activity page's feed, with the same icon, so the same event reads the same on both pages.
 function Item({ r }: { r: FeedRow }) {
   const many = r.jobs.length > 1;
-  // One job: the row opens it. Several: they are on the Activity page.
   const link = r.job && !many ? { href: href("job", r.job.id) } : {};
   return (
     <ListRow
@@ -30,7 +26,6 @@ function Item({ r }: { r: FeedRow }) {
 }
 
 export function Recent() {
-  // Scans and repeats fold into one row each, so a few dozen entries make the handful shown.
   const { data } = useQuery({ queryKey: ["activity", "overview"], queryFn: () => api.activity({ feed: "highlights", limit: 60 }) });
   const rows = data ? feed(data.items).slice(0, SHOWN) : undefined;
   return (

@@ -1,5 +1,3 @@
-// Pipeline: the automation at work. Every application past review and not yet sent, by stage, with
-// what waits on the owner first.
 import { ArrowRight, CircleCheck, MessageSquareText } from "lucide-react";
 import { useRef } from "react";
 import type { ListResult, ListRow as Row } from "../../../src/api-types";
@@ -33,21 +31,16 @@ import { stageSegments, STAGES } from "./stages";
 import { thresholdOf } from "../job/model";
 
 const STUCK = new Set(["needs_you", "questions", "failed"]);
-// A score from before a job went back to be assessed again says nothing yet.
 const UNASSESSED: readonly Status[] = ["triaged", "locating", "prepping"];
 
-// With no stage chosen, open on the first that holds anything: Needs you when it does.
 const firstStage = (list: ListResult) => list.groups.find(g => g.count > 0)?.key ?? "needs_you";
 
-// What the row waits on: the open gate when it waits on the owner, else its status.
 const gateOf = (row: Row) => (row.group === "needs_you" ? row.gate : null);
 function Stage({ row }: { row: Row }) {
   const gate = gateOf(row);
   return gate ? <StatusLabel tone="warning" label={GATE[gate]} /> : <JobStatus status={row.status} />;
 }
 
-// The time that matters in each stage: how long it has waited on the owner, when the agent last
-// touched it, or when the posting appeared.
 const timeOf = (group: string, row: Row) => (group === "assessing" ? row.opened_at : row.updated_at);
 
 const EMPTY: Record<string, readonly [title: string, description: string]> = {
@@ -69,14 +62,10 @@ export function PipelinePage() {
   const lp = useListParams();
   const { data: summary } = useSummary();
   const search = useRef<HTMLInputElement>(null);
-  // A job opened by a link (the digest's, Questions', an old bookmark's) opens on its own stage and page, so
-  // it is in the list beside it and J/K walk its neighbours.
   const record = useOpenRecord({ base: "pipeline", view: "pipeline", lp, search, defaultGroup: firstStage });
   const { data, rows, openId } = record;
   const group = record.group ?? "needs_you";
   const stage = STAGES[group];
-  // The stage is a fact of the row only where the rows' stages differ (Needs you's gates); else the
-  // panel's title already says it.
   const mixed = new Set(rows.map(r => gateOf(r) ?? r.status)).size > 1;
 
   const wide = useMedia(WIDE),
@@ -84,8 +73,6 @@ export function PipelinePage() {
   const compact = openId !== null && wide;
   const current = data?.groups.find(g => g.key === group);
   const empty = EMPTY[group];
-  // Nothing in Assessing has a score yet: its fact is how long it has been there. Sorted longest waiting,
-  // a stage paused on the owner says for how long instead of the fit.
   const scored = group !== "assessing";
   const waiting = (group === "needs_you" || group === "questions") && !lp.sort;
 
@@ -135,7 +122,6 @@ export function PipelinePage() {
       notice={
         group === "questions" &&
         !!current?.count && (
-          // A narrow list has room for the link alone, which then says it all.
           <ListNotice
             icon={<MessageSquareText />}
             {...(tablet &&
@@ -191,7 +177,6 @@ export function PipelinePage() {
               lead={<CompanyMark name={r.company} />}
               title={unent(r.title)}
               secondary={unent(r.company)}
-              // What it waits on where the stages differ (Needs you's gates); else where it is.
               gist={mixed ? <Stage row={r} /> : !!r.location?.trim() && <span title={r.location}>{place(r.location)}</span>}
               fact={
                 waiting ? (

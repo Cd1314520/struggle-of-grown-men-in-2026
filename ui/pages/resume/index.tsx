@@ -1,7 +1,3 @@
-// Resume: the stock resume every application is tailored from, and the notes tailoring may draw on. Files of
-// any kind can be imported: an agent writes them on the template, and the draft replaces the stock resume
-// only when the owner says so. The pages lie on a grey well, the paper viewer; the import and the notes are
-// sections in a pane beside it.
 import { Download, FileText, NotebookPen, Pencil } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -25,20 +21,18 @@ import { plural } from "../../lib/format";
 import { href } from "../../lib/router";
 import { Sheets, Upload } from "./parts";
 
-// Every write ends the same way: the page follows the server.
 const act = async (run: () => Promise<unknown>, done?: string) => {
   try {
     await run();
     if (done) toast.success(done);
     return true;
   } catch {
-    return false; // the request showed why
+    return false;
   } finally {
     void refreshAll();
   }
 };
 
-// The paper viewer: a resume's pages centred on the canvas, the one grey well on the sheet.
 function Viewer({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-full bg-canvas px-4 py-8 sm:px-8 lg:min-h-[calc(var(--app-h)-3rem-1px)]">
@@ -90,8 +84,6 @@ function Running({ r }: { r: ResumeState }) {
   );
 }
 
-// A finished import: what the agent says about it, what to check, and use it, discard it or ask for changes.
-// Its pages are in the viewer beside it.
 function Draft({ r }: { r: ResumeState }) {
   const imp = r.import;
   const [notes, setNotes] = useState(true);
@@ -274,7 +266,6 @@ export function ResumePage() {
   );
   return (
     <Workspace
-      // On a phone the bar's one line says what the resume is beside its actions, rather than them alone on it.
       className="max-lg:[&_div:has(>[data-lead])]:flex-1"
       bar={{
         title: "Resume",
@@ -318,7 +309,6 @@ export function ResumePage() {
         <WorkspaceBody
           asideWidth="pane"
           aside={
-            // The pane keeps its place beside the pages as they scroll.
             <div className="lg:sticky lg:top-[calc(3rem+1px)]">
               {status === "failed" && <Failed r={r} />}
               {status === "running" ? (

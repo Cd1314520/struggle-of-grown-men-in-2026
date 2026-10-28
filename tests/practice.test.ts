@@ -15,7 +15,6 @@ import { evaluate, type Verdict } from "../src/rubric";
 import { autoApproval, checkAutoApprovedPractice, confirmsSubmit, reconsiderAutoApproval } from "../src/auto";
 import { config, PROFILE } from "../src/config";
 
-// Snapshot config for clean restoration
 const initialConfig = JSON.stringify(config);
 const snapshot = () => JSON.parse(initialConfig) as Record<string, unknown>;
 
@@ -29,7 +28,6 @@ function restoreConfig() {
   Object.assign(config, initial);
 }
 
-// Scored against a rubric and employer lists of its own, put back as they were for the test files after this one.
 const fixtures: Record<string, string> = {
   "rubric.yml": readFileSync(join(import.meta.dir, "fixtures", "practice-rubric.yml"), "utf8"),
   "employers.yml": "frontier: [Stripe]\npractice: []\n",
@@ -46,7 +44,6 @@ beforeEach(restoreConfig);
 afterEach(restoreConfig);
 afterAll(restoreConfig);
 
-// Evidence a worker sends today, before the host adds `listed` and `against`.
 const judged = (fields: Record<string, unknown> = {}) => ({
   target: "no",
   employerEvidence: "Regional insurer; internal claims tooling",
@@ -56,7 +53,6 @@ const judged = (fields: Record<string, unknown> = {}) => ({
 });
 const scaledTech = (fields: Record<string, unknown> = {}) =>
   judged({ target: "yes", employerEvidence: "Payments platform, thousands of engineers", ...fields });
-// Stored assessments: one that makes a job practice, and one that keeps it for later.
 const QUALIFIES: PracticeAssessment = {
   version: 4,
   target: "no",
@@ -71,7 +67,6 @@ const KEPT: PracticeAssessment = { ...QUALIFIES, target: "yes", employerEvidence
 describe("practice assessment boundaries", () => {
   const CASES: [string, unknown, boolean][] = [
     ["an employer judged not a target qualifies", judged(), true],
-    // Even an agent-native employer that is not a target is fine to practise on.
     ["a non-target qualifies whatever its agent use", judged({ agentNative: "yes", agentNativeEvidence: "Internal agent platform" }), true],
     ["a target with unclear agent adoption does not", scaledTech(), false],
     ["an agent-native target does not", scaledTech({ agentNative: "yes", agentNativeEvidence: "Ships agents to customers" }), false],
@@ -174,7 +169,6 @@ describe("why a job is or is not one for practice", () => {
     expect(practiceRefusal(old, true)).toBe("the employer has not been judged under the current practice rules");
     expect(needsJudgment(old, true)).toBe(true);
     expect(needsJudgment(assessPractice(judged()), true)).toBe(false);
-    // Judged before targets were described: only a description in use asks for the judgment.
     expect(needsJudgment(assessPractice(judged({ target: null })), true)).toBe(true);
     expect(needsJudgment(assessPractice(judged({ target: null })), false)).toBe(false);
     expect(needsJudgment(null, true)).toBe(false);
@@ -233,7 +227,6 @@ describe("rubric evaluate", () => {
 
   it("holds a target on the real rubric, whatever its practice fit", () => {
     config.targets.holdBack = true;
-    // A poor practice fit does not throw away a job the real search wants.
     const answers = answersList({ "practice.python": "no", "practice.coding_is_core": "no", "practice.skills_overlap": "no" });
     const res = evaluate(answers, scaledTech()) as Verdict;
     expect(res.decision).toBe("hold");
@@ -250,7 +243,6 @@ describe("rubric evaluate", () => {
     expect(res.rubric).toBe("real");
     expect(res.score).toBe(100);
     expect(res.reason).toBe("a target employer, kept for later (Payments platform, thousands of engineers); real score 100 (threshold 65)");
-    // An employer that is not a target is still scored on the practice rubric.
     expect((evaluate(answersList(), judged()) as Verdict).rubric).toBe("practice");
   });
 
@@ -312,24 +304,20 @@ describe("autoApproval and submission safety", () => {
       items: [],
       practice: null,
     };
-    // Missing practice facts -> denied
     expect(autoApproval(baseVerdict, { concerns: null, handPicked: false, approvedToday: 0 }).approve).toBe(false);
 
-    // High salary facts -> denied
     const highSalaryVerdict: Verdict = {
       ...baseVerdict,
       practice: KEPT,
     };
     expect(autoApproval(highSalaryVerdict, { concerns: null, handPicked: false, approvedToday: 0 }).approve).toBe(false);
 
-    // Valid practice facts -> approved
     const validVerdict: Verdict = {
       ...baseVerdict,
       practice: QUALIFIES,
     };
     expect(autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 0 }).approve).toBe(true);
 
-    // Gated caps: handPicked and daily limits
     const handPickedRes = autoApproval(validVerdict, { concerns: null, handPicked: true, approvedToday: 0 });
     expect(handPickedRes.approve).toBe(false);
     expect(handPickedRes.deferred).toBeUndefined();
@@ -338,7 +326,6 @@ describe("autoApproval and submission safety", () => {
     expect(capBlockedRes.approve).toBe(false);
     expect(capBlockedRes.deferred).toBe("daily_cap");
 
-    // One application per employer: a second passing role there waits for review, not for tomorrow.
     config.autoApply = { ...config.autoApply, perEmployer: 1 };
     expect(autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 0, employerApplications: 0 }).approve).toBe(true);
     const employerRes = autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 0, employerApplications: 1 });
@@ -352,19 +339,15 @@ describe("autoApproval and submission safety", () => {
     config.targets.holdBack = true;
     const validEvidence = JSON.stringify(QUALIFIES);
 
-    // Missing or invalid evidence -> fails closed (true)
     expect(confirmsSubmit({ approved_by: "auto", practice_assessment: null })).toBe(true);
     expect(confirmsSubmit({ approved_by: "auto", practice_assessment: JSON.stringify({ version: 0 }) })).toBe(true);
     expect(confirmsSubmit({ approved_by: "auto", practice_assessment: JSON.stringify(KEPT) })).toBe(true);
 
-    // Fully qualifying auto job -> skips confirmation (false)
     expect(confirmsSubmit({ approved_by: "auto", practice_assessment: validEvidence })).toBe(false);
 
-    // Targets not held back: an auto-approved target is sent like any other.
     config.targets.holdBack = false;
     expect(confirmsSubmit({ approved_by: "auto", practice_assessment: JSON.stringify(KEPT) })).toBe(false);
 
-    // Gated: everything stops for the user.
     config.approval = "gated";
     expect(confirmsSubmit({ approved_by: "auto", practice_assessment: validEvidence })).toBe(true);
   });
@@ -378,10 +361,8 @@ describe("autoApproval and submission safety", () => {
 
   it("checkAutoApprovedPractice guards fill start before freeze or browser", () => {
     config.targets.holdBack = true;
-    // Manual job always passes
     expect(checkAutoApprovedPractice({ approved_by: "user" }).ok).toBe(true);
 
-    // Auto job requires valid assessment
     expect(checkAutoApprovedPractice({ approved_by: "auto", practice_assessment: null }).ok).toBe(false);
     expect(
       checkAutoApprovedPractice({
@@ -397,7 +378,6 @@ describe("autoApproval and submission safety", () => {
       }).ok,
     ).toBe(true);
 
-    // An employer on the frontier list is never spent on practice, whatever was stored.
     const listed = checkAutoApprovedPractice({ approved_by: "auto", company: "Stripe, Inc.", practice_assessment: JSON.stringify(QUALIFIES) });
     expect(listed).toEqual({ ok: false, reason: "auto-approved, but not a practice job: the employer is on your frontier list" });
   });
@@ -447,29 +427,24 @@ describe("autoApproval deferred 'daily_cap' contract", () => {
       practice: QUALIFIES,
     };
 
-    // Quota below limit -> approves without deferred
     const underQuota = autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 4 });
     expect(underQuota.approve).toBe(true);
     expect(underQuota.deferred).toBeUndefined();
 
-    // Quota hit -> denies with deferred: 'daily_cap'
     const atQuota = autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 5 });
     expect(atQuota.approve).toBe(false);
     expect(atQuota.deferred).toBe("daily_cap");
 
-    // Prior gate failure: score below minScore does NOT get deferred even when quota is full
     const lowScoreVerdict: Verdict = { ...validVerdict, score: 75 };
     const lowScoreRes = autoApproval(lowScoreVerdict, { concerns: null, handPicked: false, approvedToday: 5 });
     expect(lowScoreRes.approve).toBe(false);
     expect(lowScoreRes.deferred).toBeUndefined();
 
-    // Prior gate failure: non-apply decision does NOT get deferred
     const skipVerdict: Verdict = { ...validVerdict, decision: "skip", reason: "failed required" };
     const skipRes = autoApproval(skipVerdict, { concerns: null, handPicked: false, approvedToday: 5 });
     expect(skipRes.approve).toBe(false);
     expect(skipRes.deferred).toBeUndefined();
 
-    // Prior gate failure: practice assessment lacks evidence does NOT get deferred
     const noPracticeVerdict: Verdict = {
       ...validVerdict,
       practice: KEPT,
@@ -478,7 +453,6 @@ describe("autoApproval deferred 'daily_cap' contract", () => {
     expect(noPracticeRes.approve).toBe(false);
     expect(noPracticeRes.deferred).toBeUndefined();
 
-    // Prior gate failure: unclear required item does NOT get deferred
     const unclearVerdict: Verdict = {
       ...validVerdict,
       items: [
@@ -499,17 +473,14 @@ describe("autoApproval deferred 'daily_cap' contract", () => {
     expect(unclearRes.approve).toBe(false);
     expect(unclearRes.deferred).toBeUndefined();
 
-    // Prior gate failure: assessment raised concerns does NOT get deferred
     const concernsRes = autoApproval(validVerdict, { concerns: "relocation required", handPicked: false, approvedToday: 5 });
     expect(concernsRes.approve).toBe(false);
     expect(concernsRes.deferred).toBeUndefined();
 
-    // Prior gate failure: handPicked does NOT get deferred
     const handPickedRes = autoApproval(validVerdict, { concerns: null, handPicked: true, approvedToday: 5 });
     expect(handPickedRes.approve).toBe(false);
     expect(handPickedRes.deferred).toBeUndefined();
 
-    // Prior gate failure: autoApply disabled does NOT get deferred
     config.approval = "gated";
     const disabledRes = autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 5 });
     expect(disabledRes.approve).toBe(false);
@@ -541,7 +512,6 @@ describe("reconsiderAutoApproval pure helper", () => {
       concerns: null,
     };
 
-    // Cap hit: 5 approvals today -> deferred with daily_cap
     const capRes = reconsiderAutoApproval(job, { handPicked: false, approvedToday: 5 });
     expect(capRes.approved).toBe(false);
     expect(capRes.approval.deferred).toBe("daily_cap");
@@ -549,7 +519,6 @@ describe("reconsiderAutoApproval pure helper", () => {
     expect(capRes.verdict?.score).toBeGreaterThanOrEqual(80);
     expect(capRes.verdict?.items.length).toBeGreaterThan(0);
 
-    // Next day: cap reset (0 approvals today) -> approves cleanly
     const resetRes = reconsiderAutoApproval(job, { handPicked: false, approvedToday: 0 });
     expect(resetRes.approved).toBe(true);
     expect(resetRes.approval.approve).toBe(true);
@@ -577,10 +546,8 @@ describe("reconsiderAutoApproval pure helper", () => {
       concerns: null,
     };
 
-    // Blocked at perDay: 5 with approvedToday: 5
     expect(reconsiderAutoApproval(job, { handPicked: false, approvedToday: 5 }).approved).toBe(false);
 
-    // Increase limit to 50
     config.autoApply.perDay = 50;
     const unblockedRes = reconsiderAutoApproval(job, { handPicked: false, approvedToday: 5 });
     expect(unblockedRes.approved).toBe(true);
@@ -592,7 +559,6 @@ describe("reconsiderAutoApproval pure helper", () => {
     config.approval = "auto";
     config.autoApply = { minScore: 80, perDay: 10 };
 
-    // 1. Array with item.key
     const resKey = reconsiderAutoApproval(
       {
         status: "awaiting_approval",
@@ -608,7 +574,6 @@ describe("reconsiderAutoApproval pure helper", () => {
     );
     expect(resKey.approved).toBe(true);
 
-    // 2. Missing key (only id provided) fails closed
     const resId = reconsiderAutoApproval(
       {
         status: "awaiting_approval",
@@ -640,13 +605,9 @@ describe("reconsiderAutoApproval pure helper", () => {
       practice_assessment: validPracticeJson,
     };
 
-    // Missing checklist
     expect(reconsiderAutoApproval({ ...base, checklist: null }, { handPicked: false, approvedToday: 0 }).approved).toBe(false);
-    // Bad JSON
     expect(reconsiderAutoApproval({ ...base, checklist: "{ not json" }, { handPicked: false, approvedToday: 0 }).approved).toBe(false);
-    // Empty array
     expect(reconsiderAutoApproval({ ...base, checklist: "[]" }, { handPicked: false, approvedToday: 0 }).approved).toBe(false);
-    // Items without answer
     expect(
       reconsiderAutoApproval({ ...base, checklist: JSON.stringify([{ id: "practice.us_employer" }]) }, { handPicked: false, approvedToday: 0 }).approved,
     ).toBe(false);
@@ -711,12 +672,10 @@ describe("reconsiderAutoApproval pure helper", () => {
       practice_assessment: validPracticeJson,
     };
 
-    // Required item answered "no"
     const failedRequired = validStoredChecklistArray({ "practice.us_employer": "no" });
     const resReq = reconsiderAutoApproval({ ...base, checklist: JSON.stringify(failedRequired) }, { handPicked: false, approvedToday: 0 });
     expect(resReq.approved).toBe(false);
 
-    // Non-required items answered "no" lowering score below minScore
     const lowScore = validStoredChecklistArray({
       "practice.coding_is_core": "no",
       "practice.python": "no",
@@ -744,28 +703,23 @@ describe("reconsiderAutoApproval pure helper", () => {
       practice_assessment: validPracticeJson,
     };
 
-    // 1. Array answer coercion attempt (['yes'])
     const badAnswerList = validStoredChecklistArray();
     const arrayAnswerChecklist = JSON.stringify(badAnswerList.map((item, idx) => (idx === 0 ? { ...item, answer: ["yes"] } : item)));
     const resArrayAnswer = reconsiderAutoApproval({ ...base, checklist: arrayAnswerChecklist }, { handPicked: false, approvedToday: 0 });
     expect(resArrayAnswer.approved).toBe(false);
 
-    // 2. Key array coercion attempt (['practice.us_employer'])
     const arrayKeyChecklist = JSON.stringify(badAnswerList.map((item, idx) => (idx === 0 ? { ...item, key: ["practice.us_employer"] } : item)));
     const resArrayKey = reconsiderAutoApproval({ ...base, checklist: arrayKeyChecklist }, { handPicked: false, approvedToday: 0 });
     expect(resArrayKey.approved).toBe(false);
 
-    // 3. Object evidence coercion attempt ({ quote: "evidence text" })
     const objectEvidenceChecklist = JSON.stringify(badAnswerList.map((item, idx) => (idx === 0 ? { ...item, evidence: { quote: "evidence text" } } : item)));
     const resObjectEvidence = reconsiderAutoApproval({ ...base, checklist: objectEvidenceChecklist }, { handPicked: false, approvedToday: 0 });
     expect(resObjectEvidence.approved).toBe(false);
 
-    // 4. Missing or non-string evidence (e.g. evidence: 123)
     const numberEvidenceChecklist = JSON.stringify(badAnswerList.map((item, idx) => (idx === 0 ? { ...item, evidence: 123 } : item)));
     const resNumberEvidence = reconsiderAutoApproval({ ...base, checklist: numberEvidenceChecklist }, { handPicked: false, approvedToday: 0 });
     expect(resNumberEvidence.approved).toBe(false);
 
-    // 5. Duplicate keys
     const duplicateKeyChecklist = JSON.stringify([...badAnswerList, { key: "practice.us_employer", answer: "yes", evidence: "duplicate item" }]);
     const resDuplicateKey = reconsiderAutoApproval({ ...base, checklist: duplicateKeyChecklist }, { handPicked: false, approvedToday: 0 });
     expect(resDuplicateKey.approved).toBe(false);
@@ -786,12 +740,10 @@ describe("reconsiderAutoApproval pure helper", () => {
       checklist: JSON.stringify(validStoredChecklistArray()),
     };
 
-    // A target employer, kept for later
     const highSalaryObj = KEPT;
     const resHigh = reconsiderAutoApproval({ ...base, practice_assessment: JSON.stringify(highSalaryObj) }, { handPicked: false, approvedToday: 0 });
     expect(resHigh.approved).toBe(false);
 
-    // A version this code does not know
     const badVersion = { ...validPracticeObj, version: 5 };
     const resVer = reconsiderAutoApproval({ ...base, practice_assessment: JSON.stringify(badVersion) }, { handPicked: false, approvedToday: 0 });
     expect(resVer.approved).toBe(false);
@@ -813,19 +765,13 @@ describe("reconsiderAutoApproval pure helper", () => {
       practice_assessment: validPracticeJson,
     };
 
-    // Handpicked via facts
     expect(reconsiderAutoApproval(baseJob, { handPicked: true, approvedToday: 0 }).approved).toBe(false);
-    // Already approved manually
     expect(reconsiderAutoApproval({ ...baseJob, approved_by: "user" }, { handPicked: false, approvedToday: 0 }).approved).toBe(false);
-    // Already approved automatically
     expect(reconsiderAutoApproval({ ...baseJob, approved_by: "auto" }, { handPicked: false, approvedToday: 0 }).approved).toBe(false);
-    // Frozen resume
     expect(reconsiderAutoApproval({ ...baseJob, resume_sha: "frozen_sha" }, { handPicked: false, approvedToday: 0 }).approved).toBe(false);
     expect(reconsiderAutoApproval({ ...baseJob, resume_frozen_at: "2026-10-10" }, { handPicked: false, approvedToday: 0 }).approved).toBe(false);
-    // Submitted status
     expect(reconsiderAutoApproval({ ...baseJob, status: "submitted" as const }, { handPicked: false, approvedToday: 0 }).approved).toBe(false);
     expect(reconsiderAutoApproval({ ...baseJob, submitted_at: "2026-10-10" }, { handPicked: false, approvedToday: 0 }).approved).toBe(false);
-    // Other status
     expect(reconsiderAutoApproval({ ...baseJob, status: "held" as const }, { handPicked: false, approvedToday: 0 }).approved).toBe(false);
     expect(reconsiderAutoApproval({ ...baseJob, status: "rejected" as const }, { handPicked: false, approvedToday: 0 }).approved).toBe(false);
   });

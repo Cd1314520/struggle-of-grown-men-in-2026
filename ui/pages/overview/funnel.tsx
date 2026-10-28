@@ -1,4 +1,3 @@
-// Where the postings found in the last 30 days ended up: one bar per stage, each a share of the first.
 import type { Stats } from "../../../src/api-types";
 import { Skeleton, WorkspaceSection } from "../../components/ui";
 import { useStats } from "../../lib/api";
@@ -13,7 +12,6 @@ const STAGES: readonly (readonly [key: Exclude<keyof Stats["funnel"], "found">, 
   ["responded", "Heard back"],
 ];
 
-// "926 approvals in 30 days, all by auto apply."
 function approvals({ auto, user }: Stats["approvals"]) {
   const n = auto + user;
   if (!n) return "No approvals in 30 days.";

@@ -2,7 +2,6 @@ import { useRef, type ReactNode } from "react";
 import { cn } from "../../lib/cn";
 import { useEdgeFade } from "./tabs";
 
-// A titled block inside the open job's panel (Why it fits, Details): an h2, with its count and actions centred on it.
 export function Section({
   title,
   count,
@@ -37,8 +36,6 @@ export function Section({
   );
 }
 
-// The heading of a group outside a list ("Misses", "On the form", a day in a job's activity). Inside a list
-// the group is a ListGroup band.
 export function Subhead({ children, count, className }: { children: ReactNode; count?: number | undefined; className?: string }) {
   return (
     <div className={cn("text-sm font-semibold text-fg", className)}>
@@ -48,14 +45,12 @@ export function Subhead({ children, count, className }: { children: ReactNode; c
   );
 }
 
-// The sections of one page (Settings, Profile's files), in a WorkspaceBody's `nav` aside: from lg a list in
-// that column, below lg a strip under the bar that scrolls sideways. The aside makes it sticky.
 export interface SectionNavItem<K extends string> {
   key: K;
   label: ReactNode;
-  hint?: ReactNode; // under the label, from lg: a file's gist
-  tone?: "danger" | undefined; // the label in danger: a section with a problem
-  href?: string | undefined; // a link rather than a button, where each item is a route (Profile's files)
+  hint?: ReactNode;
+  tone?: "danger" | undefined;
+  href?: string | undefined;
 }
 export function SectionNav<K extends string>({
   label,

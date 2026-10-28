@@ -1,7 +1,5 @@
 import { cn } from "../../lib/cn";
 
-// A count beside a navigation item or tab: a quiet number, as Linear's sidebar counts are, tinted when it
-// waits on you. `badge`: a filled pill over an icon (the phone's tab bar), where a bare number would float.
 export function Count({
   value,
   tone = "neutral",

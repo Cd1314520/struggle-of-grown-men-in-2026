@@ -1,4 +1,3 @@
-// Gmail and the daily questions digest: one section, the digest's buttons in its footer.
 import { Copy, RefreshCw, Send } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -66,7 +65,6 @@ function Gmail({ s }: { s: Summary }) {
   );
 }
 
-// The digest's delivery states as the owner would say them.
 const DIGEST_STATE: Record<string, [Tone, string]> = {
   disabled: ["neutral", "Off"],
   not_connected: ["danger", "Mailbox not connected"],
@@ -78,7 +76,6 @@ const DIGEST_STATE: Record<string, [Tone, string]> = {
   failed: ["danger", "Last send failed"],
 };
 
-// When the next daily digest goes out, in the digest's own time zone: "Today 09:00".
 function nextDigest(d: DigestStatus) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: d.timeZone,
@@ -102,7 +99,6 @@ export function Mail({ s }: { s: Summary }) {
   const d = s.digest;
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState("");
-  // Sending, then reading the status back either way: a send that threw may still have gone out.
   const run = async (send: boolean) => {
     if (busy) return;
     setBusy(true);

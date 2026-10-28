@@ -1,7 +1,5 @@
 #import "resume.typ": *
 
-// Copy this file to main.typ and replace everything in it with your own details.
-// main.typ and the compiled PDF are not tracked: they are yours.
 #let name = "Alex Rivera"
 #let location = "Springfield, USA"
 #let email = "alex.rivera@example.com"
@@ -12,7 +10,6 @@
 
 #show: resume.with(
   author: name,
-  // All the lines below are optional.
   location: location,
   email: email,
   linkedin: linkedin,
@@ -26,14 +23,7 @@
   personal-info-position: left,
 )
 
-/*
-* Lines that start with == are formatted into section headings
-* #edu(dates: "", degree: "", gpa: "", institution: "", location: "", consistent: false)
-* #work(company: "", dates: "", location: "", title: "")
-* #project(dates: "", name: "", role: "", url: "")
-* #certificates(name: "", issuer: "", url: "", date: "")
-* #extracurriculars(activity: "", dates: "")
-*/
+
 == Work Experience
 
 #work(

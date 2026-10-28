@@ -1,5 +1,3 @@
-// The stock resume is a Typst project (content file + template). Each job gets its own copy to
-// tailor; the PDF is always compiled to the same stock filename so uploads never look versioned.
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -11,12 +9,10 @@ export const MAIN = config.resume.main;
 
 const typFiles = () => readdirSync(RESUME_DIR).filter(f => f.endsWith(".typ"));
 
-// Fresh copy of the stock sources into a job's working directory.
 export function stageResume(dir: string) {
   for (const f of typFiles()) copyFileSync(join(RESUME_DIR, f), join(dir, f));
 }
 
-// Template files (everything except the content file) must come back untouched.
 export const changedTemplateFiles = (dir: string) =>
   typFiles().filter(f => f !== MAIN && (!existsSync(join(dir, f)) || !readFileSync(join(dir, f)).equals(readFileSync(join(RESUME_DIR, f)))));
 
@@ -26,7 +22,6 @@ export function pageCount(pdf: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-// Compile the current stock resume and return its page count (the ceiling for tailored copies).
 export function stockPages(): number | null {
   const dir = join(DATA, "stock");
   mkdirSync(dir, { recursive: true });
@@ -37,11 +32,10 @@ export function stockPages(): number | null {
 
 export const stockPdf = () => join(DATA, "stock", PDF_NAME);
 
-// The stock resume as the Resume page shows it, compiled once per change to the project's files.
 export interface StockResume {
   exists: boolean;
   pages: number | null;
-  error: string | null; // why it does not compile
+  error: string | null;
   updatedAt: string | null;
 }
 let compiled: { stamp: string; pages: number | null; error: string | null } | null = null;
@@ -63,7 +57,6 @@ export function stockResume(): StockResume {
   return { exists: true, pages: compiled.pages, error: compiled.error, updatedAt: statSync(STOCK_MAIN).mtime.toISOString() };
 }
 
-// One page of a PDF as a PNG: phones cannot embed PDFs, and an image is calmer than a PDF viewer on desktop.
 export function pagePng(pdf: string, page = 1): Uint8Array | null {
   if (!existsSync(pdf)) return null;
   const out = Bun.spawnSync(["pdftoppm", "-png", "-r", "120", "-f", String(page), "-l", String(page), pdf]);
@@ -73,13 +66,11 @@ export function pagePng(pdf: string, page = 1): Uint8Array | null {
 export const workingPdf = (jobId: number) => join(jobDir(jobId), PDF_NAME);
 const frozenDir = (jobId: number, sha: string) => join(jobDir(jobId), "applied", sha.slice(0, 12));
 
-// Freeze the exact PDF (and its source) that an application will upload. The fill worker uploads
-// the frozen copy, so what is recorded is what was sent, whatever happens to the working copy later.
 export function freezeResume(jobId: number) {
   const pdf = workingPdf(jobId);
   const sha = createHash("sha256").update(readFileSync(pdf)).digest("hex");
   const dir = frozenDir(jobId, sha);
-  if (existsSync(dir)) return frozenResume(jobId, sha); // Never replace previously frozen bytes.
+  if (existsSync(dir)) return frozenResume(jobId, sha);
   mkdirSync(join(jobDir(jobId), "applied"), { recursive: true });
   const staged = mkdtempSync(join(jobDir(jobId), "applied", ".freeze-"));
   try {
@@ -102,7 +93,6 @@ export function freezeResume(jobId: number) {
   return frozenResume(jobId, sha);
 }
 
-// Fail closed on missing/corrupt frozen artifacts. Never substitute the mutable working PDF.
 export function frozenResume(jobId: number, sha: string) {
   if (!/^[a-f0-9]{64}$/.test(sha)) throw new Error("invalid frozen resume SHA");
   const dir = frozenDir(jobId, sha);
@@ -138,7 +128,6 @@ export function frozenResume(jobId: number, sha: string) {
   return { sha, pdf };
 }
 
-// What to show for a job: the frozen copy once one exists, otherwise the working copy.
 export function resumeFiles(jobId: number, sha: string | null) {
   const dir = sha && existsSync(frozenDir(jobId, sha)) ? frozenDir(jobId, sha) : jobDir(jobId);
   return { pdf: join(dir, PDF_NAME), main: join(dir, MAIN), frozen: dir !== jobDir(jobId) };

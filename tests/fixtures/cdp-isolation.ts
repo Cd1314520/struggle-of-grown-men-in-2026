@@ -1,5 +1,3 @@
-// Loaded by the isolated lifecycle fixture, never by the production server.
-// Real proxy/HTTP/WebSocket transport against a deterministic local CDP backend.
 import assert from "node:assert/strict";
 import type { ServerWebSocket } from "bun";
 import { config } from "../../src/config";
@@ -74,7 +72,6 @@ function addTarget(url: string, type = "page", parentId?: string): Target {
   targets.set(target.targetId, target);
   return target;
 }
-// Chrome target ordering intentionally leaves these ahead of newly created pages.
 addTarget("https://fixture.invalid/unrelated-history");
 const manual = addTarget("https://fixture.invalid/manual");
 manual.draft = "human is editing this unsaved form";
@@ -168,8 +165,6 @@ const upstream = Bun.serve<Connection>({
         }
         case "Target.setAutoAttach": {
           if (msg.params["autoAttach"] === true) {
-            // Browser-level attachment affects every page before filtering events.
-            // Page-level attachment is limited to descendants and obeys TargetFilter.
             const requested: unknown = msg.params["filter"];
             const filters: unknown[] = Array.isArray(requested) ? requested : [];
             for (const info of targets.values()) {
@@ -196,7 +191,6 @@ const upstream = Bun.serve<Connection>({
           break;
         case "Target.createTarget": {
           const created = addTarget(String(msg.params["url"]));
-          // Event deliberately precedes the createTarget reply, as real CDP can.
           broadcast("Target.targetCreated", { targetInfo: created });
           result = { targetId: created.targetId };
           break;
@@ -204,7 +198,7 @@ const upstream = Bun.serve<Connection>({
         case "Page.navigate":
           assert(target, "navigation lacked an attached page");
           target.url = String(msg.params["url"]);
-          target.draft = ""; // navigating away destroys unsaved form contents
+          target.draft = "";
           result = { frameId: `frame-${target.targetId}` };
           break;
         case "Runtime.evaluate":
@@ -265,7 +259,6 @@ async function connect(browser: JobBrowser) {
   await call("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
   const get = await call("Target.getTargets");
   assert(Array.isArray(get.result?.["targetInfos"]));
-  // Model browser.open's problematic selection: adopt the first discoverable page.
   const selected: unknown = get.result["targetInfos"].find((info: unknown) => object(info) && info["type"] === "page");
   assert(object(selected) && typeof selected["targetId"] === "string");
   const attached = await call("Target.attachToTarget", { targetId: selected["targetId"], flatten: true });
@@ -281,15 +274,13 @@ try {
   assert.equal(a.selected, first.tabId);
   await a.call("Page.navigate", { url: "https://fixture.invalid/application/A" }, a.sessionId);
   await a.call("Runtime.evaluate", { expression: "write-draft", value: "A unsaved salary answer" }, a.sessionId);
-  first.revoke(); // equivalent to durable park; listener remains bound until exit
+  first.revoke();
   assert.equal((await fetch(`http://127.0.0.1:${first.port}/json/list`)).status, 410);
 
   const second = await prepareJobBrowser(0, null, new Set([first.tabId, manual.targetId]));
   proxies.push(second);
   assert.notEqual(second.tabId, first.tabId);
   assert.notEqual(second.port, first.port, "revoked listener must remain bound until old process exits");
-  // Also exercise helpers that adopt the first HTTP-discovered page and speak
-  // CDP directly to its page socket, instead of using a browser-level session.
   const visible: unknown = await (await fetch(`http://127.0.0.1:${second.port}/json/list`)).json();
   assert(Array.isArray(visible));
   const chosen: unknown = visible.find((entry: unknown) => object(entry) && entry["type"] === "page");
@@ -325,7 +316,6 @@ try {
   assert.equal(live(second.tabId).url, "https://fixture.invalid/application/B");
   assert.equal(live(first.tabId).draft, "A unsaved salary answer");
   assert.equal(live(first.tabId).url, "https://fixture.invalid/application/A");
-  // Even a manual page related to the current target must not be auto-attached.
   manual.parentId = second.tabId;
   const frame = addTarget("https://fixture.invalid/frame", "iframe", second.tabId);
   const b = await connect(second);
@@ -403,7 +393,7 @@ try {
   assert.equal(typeof attachedPopup.result?.["sessionId"], "string");
   await b.call("Runtime.evaluate", { expression: "write-draft", value: "Owned popup form" }, String(attachedPopup.result?.["sessionId"]));
   assert.equal(live(popupId).draft, "Owned popup form");
-  await b.call("Browser.getVersion"); // ordered barrier after target notifications
+  await b.call("Browser.getVersion");
   assert(
     b.events.some(event => event.method === "Target.targetCreated" && object(event.params["targetInfo"]) && event.params["targetInfo"]["targetId"] === popupId),
   );
@@ -427,7 +417,7 @@ try {
   }
   const disabled = await b.call("Target.setAutoAttach", { autoAttach: false, waitForDebuggerOnStart: false, flatten: true });
   assert.equal(disabled.error, undefined);
-  await b.call("Browser.getVersion"); // barrier after injected detach replies
+  await b.call("Browser.getVersion");
   assert(
     !commands.some(command => command.method === "Target.detachFromTarget" && popupSessions.includes(String(command.params["sessionId"]))),
     "cleanup must not detach closed popup sessions",
@@ -440,7 +430,7 @@ try {
   assert.equal(live(first.tabId).draft, "A unsaved salary answer");
   assert.equal(manual.draft, "human is editing this unsaved form");
 
-  first.close(); // old worker exited; no Chrome page is closed
+  first.close();
   second.revoke();
   second.close();
   const resumed = await prepareJobBrowser(0, first.tabId, new Set([second.tabId, manual.targetId]));
@@ -458,7 +448,7 @@ try {
   assert.equal(live(first.tabId).draft, "A unsaved salary answer");
   assert.equal(manual.draft, "human is editing this unsaved form");
   resumed.close();
-  targets.delete(first.tabId); // Simulate a genuinely lost checkpoint target.
+  targets.delete(first.tabId);
   const recovery = await prepareJobBrowser(0, first.tabId, new Set([second.tabId, manual.targetId]));
   proxies.push(recovery);
   assert.notEqual(recovery.tabId, first.tabId);

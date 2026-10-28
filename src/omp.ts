@@ -1,5 +1,3 @@
-// Minimal client for `omp --mode rpc`: one process per unit of work, JSONL over stdio. Host tools are
-// handed to omp with `set_host_tools`, and omp calls back with `host_tool_call` frames.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
@@ -8,7 +6,6 @@ import { logEvent } from "./db";
 import { errorMessage } from "./errors";
 import { isStatus, type ToolArgs, type WorkerHandle, type WorkerOptions, type WorkerResult } from "./worker";
 
-// The subset of omp's RPC frames this client reads.
 interface Frame {
   type?: string;
   id?: unknown;
@@ -86,16 +83,13 @@ export function runOmp(opts: WorkerOptions): WorkerHandle {
     try {
       void proc.stdin.write(JSON.stringify(frame) + "\n");
       void proc.stdin.flush();
-    } catch {
-      // process already gone; the exit path reports it
-    }
+    } catch {}
   };
   const log = (kind: string, message: string) => {
     logEvent(kind, message, opts.jobId, opts.name);
   };
 
   let lastText = "";
-  // Assigned from callbacks, which control-flow narrowing cannot see.
   let result = null as WorkerResult | null;
   let abortRequested = false as boolean;
 

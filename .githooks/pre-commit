@@ -1,5 +1,2 @@
 #!/bin/sh
-# Typecheck, lint, format check and tests must pass before anything is committed.
-# Enabled by `git config core.hooksPath .githooks`, which `bun install` sets (package.json "prepare").
-# Skip once with `git commit --no-verify`.
 exec bun run check

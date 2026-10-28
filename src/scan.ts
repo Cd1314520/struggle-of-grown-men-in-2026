@@ -1,4 +1,3 @@
-// Scan: read every source, save what is new, and let a triage worker decide what is worth a full read.
 import { boardHost, feedNames, fetchCompany, fetchDescription, fetchFeed, loadCompanies, watchBoardOf, type Company } from "./ats";
 import { boardMinutes, boardNames, fetchBoard, isBoardUrl } from "./boards";
 import { config, readProfile } from "./config";
@@ -12,10 +11,8 @@ import { screenOut } from "./screen";
 import { to } from "./status";
 import { addCompanyTool, render, workDir } from "./worker-tools";
 
-// Hosts read at once during a scan.
 const SCAN_LANES = 6;
 
-// A board that is down would otherwise log the same error on every scan.
 const feedErrors = new Map<string, number>();
 function feedError(key: string, err: unknown) {
   if (Date.now() - (feedErrors.get(key) ?? 0) < 6 * 3600_000) return;
@@ -23,8 +20,6 @@ function feedError(key: string, err: unknown) {
   logEvent("error", `feed ${key}: ${errorMessage(err)}`);
 }
 
-// Reads every source. Cheap when nothing changed: known postings are ignored and duplicates folded,
-// so agents only run for postings never seen before.
 export async function scanSources(run: RunWorker, opts: { discover?: boolean } = {}) {
   kvSet("last.scan", new Date().toISOString());
   requireProfile(["targets.md"]);
@@ -40,7 +35,6 @@ export async function scanSources(run: RunWorker, opts: { discover?: boolean } =
     if (n) from.push(`${label} ${n}`);
     added += n;
   };
-  // Boards on different hosts are read side by side; boards that share a host, one after another.
   const byHost = new Map<string, Company[]>();
   for (const company of loadCompanies()) byHost.set(boardHost(company), [...(byHost.get(boardHost(company)) ?? []), company]);
   const queue = [...byHost.values()].sort((a, b) => b.length - a.length);
@@ -78,7 +72,6 @@ export async function scanSources(run: RunWorker, opts: { discover?: boolean } =
   await triage(run);
 }
 
-// Drops what screenOut rules out. Jobs the candidate picked by hand are left to the model.
 function screen(batch: Job[]): Job[] {
   const left: Job[] = [];
   let dropped = 0;
@@ -100,7 +93,7 @@ async function triage(run: RunWorker) {
     const batch = screen(found);
     if (!batch.length) continue;
     const ids = new Set(batch.map(j => j.id));
-    let kept = null as number[] | null; // set from the tool callback
+    let kept = null as number[] | null;
     let held: number[] = [];
     const { done } = run({
       name: "triage",
@@ -134,13 +127,11 @@ async function triage(run: RunWorker) {
     });
     await done;
     if (!kept) throw new Error("triage worker finished without reporting; will retry on the next scan");
-    // With nothing held back, what the targets would keep for later is read now.
     const keep = new Set<number>(config.targets.holdBack ? kept : [...kept, ...held]);
     const hold = new Set<number>(config.targets.holdBack ? held : []);
     for (const j of batch) {
       if (keep.has(j.id) && isBoardUrl(j.url)) updateJob(j.id, to.locating());
       else if (keep.has(j.id)) {
-        // Boards that list titles only: get the body now that the posting is worth reading.
         const description = j.description ? undefined : await fetchDescription(j.url);
         updateJob(j.id, { ...to.triaged(), ...(description ? { description } : {}) });
       } else if (hold.has(j.id)) updateJob(j.id, to.held("held back at triage"));

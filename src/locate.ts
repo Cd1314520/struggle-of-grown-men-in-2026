@@ -1,4 +1,3 @@
-// Locate: a job that passed triage on a job-search site is pointed at the employer's own posting.
 import { addCompany, fetchDescription, watchBoardOf } from "./ats";
 import { isBoardUrl, linkedinDescription, probeEmployer } from "./boards";
 import { config } from "./config";
@@ -12,8 +11,6 @@ const LOCATE_BATCH = 8;
 const NOT_EMPLOYER = /(linkedin|indeed|dice|ziprecruiter|glassdoor|simplyhired|monster|lensa|builtin|jooble|talent|careerbuilder|jobgether|google)\.com\//i;
 export const locatePerDay = () => config.limits.locatePerDay ?? 40;
 
-// Jobs that passed triage on a LinkedIn or Indeed listing: find the employer's own posting, first on
-// the public boards (free), then with a web-search agent. What cannot be found is skipped.
 export async function locateEmployerPostings(run: RunWorker) {
   for (const job of jobsByStatus("locating")) {
     if (!isBoardUrl(job.url)) {
@@ -77,7 +74,6 @@ export async function locateEmployerPostings(run: RunWorker) {
             return merged ? "Recorded (that posting was already known)." : "Recorded.";
           },
         },
-        // The board's feed may list the job even when its pages cannot be read from a search.
         add_company: addCompanyTool(postings => {
           const same = [...open.values()].flatMap(j =>
             postings
@@ -106,7 +102,6 @@ export async function locateEmployerPostings(run: RunWorker) {
       },
     });
     const res = await done;
-    // Unreported jobs get one more attempt, then give way.
     for (const j of open.values())
       if (Number(kvGet(`locate.tries.${j.id}`)) >= 2) updateJob(j.id, to.skipped("could not find a posting on the employer's own site"));
     if (res.status !== "completed") break;

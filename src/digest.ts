@@ -38,10 +38,8 @@ interface Delivery {
   error: string | null;
 }
 
-// ---- statements used in more than one place. Nothing outside this module touches the digest ledger.
 const lastSent = () =>
   db.query<{ sent_at: string }, []>("SELECT sent_at FROM question_digest_deliveries WHERE state = 'sent' ORDER BY sent_at DESC LIMIT 1").get();
-// Never overwrites a delivery that has since been proven sent.
 const markUnsent = (id: string, state: "uncertain" | "failed", error: string) =>
   db.query("UPDATE question_digest_deliveries SET state = ?, error = ? WHERE id = ? AND state != 'sent'").run(state, error, id);
 
@@ -83,7 +81,6 @@ function unnotifiedGroups(): { group: QuestionGroup; fingerprint: string }[] {
   );
   const groups = listQuestionGroups().map(group => ({
     group,
-    // Membership, gate IDs, timestamps and answer values are deliberately absent.
     fingerprint: createHash("sha256")
       .update(JSON.stringify([group.key, group.kind, group.text, group.context, group.options]))
       .digest("hex"),
@@ -91,8 +88,6 @@ function unnotifiedGroups(): { group: QuestionGroup; fingerprint: string }[] {
   return groups.filter(item => !notified.has(item.fingerprint));
 }
 
-// Steps still to do whose deadline is within two days, each mentioned once per deadline. Kept in the
-// same ledger as the question groups, so one daily message carries both.
 const DUE_WITHIN_HOURS = 48;
 function unnotifiedSteps(now: number): { step: DueStep; fingerprint: string }[] {
   const notified = db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM question_digest_notified WHERE fingerprint = ?");
@@ -132,8 +127,6 @@ function plaintext(groups: QuestionGroup[], steps: DueStep[], deliveryId: string
   };
   for (const group of groups) {
     lines.push(`${labels[group.kind]} — ${group.jobs.length} application${group.jobs.length === 1 ? "" : "s"}`);
-    // Context and non-question gate text can contain filled answers, cover letters or submission
-    // summaries. Keep those in the app; mail contains unanswered prompts, counts and links only.
     if (group.kind === "question") {
       lines.push(group.text);
       if (group.options.length) lines.push(`Choices: ${group.options.join(" | ")}`);
@@ -183,8 +176,6 @@ async function deliver(options: { force?: boolean; now?: Date }): Promise<Result
   if (!options.force && clock.time < cfg.time) return { sent: false, groups: 0, reason: "before_schedule" };
   const timestamp = now.toISOString();
 
-  // Claim before any await. A unique pending row plus immediate transaction prevents two
-  // server processes from preparing overlapping messages or retrying the same failure.
   const claimed = db
     .transaction((): { delivery: Delivery; reconcile: boolean } | Result => {
       const active = db.query<Delivery, []>("SELECT * FROM question_digest_deliveries WHERE state != 'sent' LIMIT 1").get();
@@ -192,8 +183,6 @@ async function deliver(options: { force?: boolean; now?: Date }): Promise<Result
         if (!options.force && now.getTime() - Date.parse(active.attempt_at) < RETRY_INTERVAL_MS)
           return { sent: false, groups: active.group_count, messageId: active.id, reason: "retry_later" };
         const reconcile = active.state === "sending" || active.state === "uncertain";
-        // Only definitely rejected legacy deliveries may acquire the new footer before retry.
-        // Never rewrite a sent/uncertain snapshot or resend an older ambiguous message.
         if (active.state === "failed") {
           const footer = `Auto-Apply delivery reference: ${digestDeliveryReference(active.id)}`;
           if (!active.body.endsWith(footer)) {
@@ -256,7 +245,6 @@ async function deliver(options: { force?: boolean; now?: Date }): Promise<Result
     if (reconcile) {
       const match = await findSentSelfMessage(delivery.id, delivery.recipient);
       if (!match) {
-        // Search indexing can lag. Absence is not proof of rejection, even after a restart.
         const error = "Send outcome is unknown; no matching self-message in Sent yet. Automatic resend is blocked to avoid duplicates.";
         markUnsent(delivery.id, "uncertain", error);
         kvSet("questionDigest.error", error);

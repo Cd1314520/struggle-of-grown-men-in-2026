@@ -12,7 +12,6 @@ const ANYWHERE: Group = [
     [["?"], "Keyboard shortcuts"],
   ],
 ];
-// G then a letter: every page that has one, as the sidebar orders them.
 const GO_TO: Group = ["Go to", NAV.flatMap(n => (n.go ? [[["G", n.go.toUpperCase()], n.label] as const] : []))];
 
 const GROUPS: readonly Group[] = [
@@ -76,7 +75,6 @@ export function ShortcutsDialog() {
   const { shortcutsOpen, setShortcutsOpen } = useShell();
   return (
     <Dialog open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
-      {/* Nothing to type here: focusing the close button would only paint a ring on it. Esc still closes. */}
       <DialogContent
         title="Keyboard shortcuts"
         className="sm:max-w-2xl"
@@ -84,7 +82,6 @@ export function ShortcutsDialog() {
           e.preventDefault();
         }}
       >
-        {/* Getting around on the left, working a list on the right. */}
         <div className="grid gap-x-10 gap-y-5 sm:grid-cols-2">
           <div className="flex flex-col gap-5">
             <Section group={ANYWHERE} />

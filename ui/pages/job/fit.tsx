@@ -1,4 +1,3 @@
-// The Fit tab: the whole checklist the score came from, what cost points first, and the practice verdict.
 import { Check, CircleHelp, X } from "lucide-react";
 import { useState } from "react";
 import type { JobDetail, Summary } from "../../../src/api-types";
@@ -14,7 +13,6 @@ const MARK = {
 
 function ItemRow({ item }: { item: Item }) {
   const [open, setOpen] = useState(false);
-  // What the item weighs leads its evidence, so the statement gets the whole line above.
   const weight = <span className="tabular mr-2 font-medium text-fg-muted">{item.required ? "Required" : `${item.points} / ${item.weight}`}</span>;
   return (
     <li className="flex gap-3 py-3">
@@ -95,7 +93,6 @@ function PracticeEvidence({ job, targets }: { job: JobDetail; targets: Summary["
   );
 }
 
-// `phase` is the rubric the score is on; the other one, answered too, folds away under it.
 export function Fit({ job, phase, targets, threshold }: { job: JobDetail; phase: Phase; targets: Summary["targets"]; threshold: number | null }) {
   const items = checklistOf(job);
   const here = items.filter(i => i.phase === phase),
@@ -142,7 +139,6 @@ export function Fit({ job, phase, targets, threshold }: { job: JobDetail; phase:
   );
 }
 
-// A list row's one fact where the fit is what matters: "Fit 88", the number toned as everywhere else.
 export function FitFact({ value, threshold }: { value: number | null; threshold: number | null }) {
   return (
     <span className="flex items-baseline gap-1">

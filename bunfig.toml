@@ -1,3 +1,2 @@
 [test]
-# Points the whole test run at throwaway state before any module is loaded.
 preload = ["./tests/setup.ts"]

@@ -1,48 +1,37 @@
-// Lists of records: the one list system, after Linear's. A list fills its Workspace edge to edge (workspace.tsx:
-// the bar, then the rows, then the footer), and every row is a ListRow: a lead (mark or icon), a title, the
-// meta and the gist, and ONE fact at the right. On a wide list with a mouse that is one 44px line; in a
-// column beside an open record, on a phone and on touch, two. No columns, no header row. Groups are tinted
-// ListGroup bands. See docs/ui.md, "Lists".
 import { isValidElement, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 
-// The gutter every row, group label, notice and footer shares: the Workspace sets it; outside one, 16px.
 const X = "px-[var(--list-x,1rem)]";
 
-// The grid tracks of a row: lead | body | fact | actions.
-const LEAD = "auto", // the lead's own box: 32px, 24px on a wide list
+const LEAD = "auto",
   BODY = "minmax(0,1fr)";
 const tracks = (...t: (string | false | undefined)[]) => t.filter(Boolean).join(" ");
 const shown = (n: ReactNode) => n !== undefined && n !== null && n !== false;
 
 const LINES = { 1: "line-clamp-1", 2: "line-clamp-2", 3: "line-clamp-3" } as const;
-// With a mouse from lg every row is two lines, a list column too: the title takes one (the open record
-// beside it, or the hover, shows the rest), the second line the other. On touch the title wraps.
 const DESK = { 1: "", 2: "lg:line-clamp-1 touch:line-clamp-2", 3: "lg:line-clamp-1 touch:line-clamp-3" } as const;
 const SNIPPET = { 2: "line-clamp-2", 3: "line-clamp-3" } as const;
 
 export type ListRowProps = Omit<ComponentProps<"a">, "title" | "ref"> & {
-  href?: string; // a link row; without it the row is a div that holds links or buttons of its own
+  href?: string;
   selected?: boolean;
-  lead?: ReactNode; // <CompanyMark> or <ListIcon>
-  indent?: boolean; // keep the lead's room empty (rows under a company ListGroup)
+  lead?: ReactNode;
+  indent?: boolean;
   title: ReactNode;
-  titleLines?: 1 | 2 | 3 | "none"; // on touch; default 2 (always one line from lg with a mouse). "none": the title clamps itself (a Clamp)
-  titleClassName?: string; // e.g. font-normal, when the title is agent prose rather than a name
-  secondary?: ReactNode; // the second line's meta, usually the company: its first child truncates
-  gist?: ReactNode; // after the meta, behind a dash: the one thing that matters (the next step, the stage, the reason)
-  snippet?: ReactNode; // prose rows only (blockers, questions, highlights), clamped
-  snippetLines?: 2 | 3; // default 2 on a desktop, 3 on touch
-  fact?: ReactNode; // ONE short fact at the right, ≤ 12 characters: "Asked 3d", "Waiting 6h", "Fit 88", "4h"
-  actions?: ReactNode; // icon-sm buttons right of the fact, shown on hover (always on touch)
-  dense?: boolean; // the log: one line on a desktop, two lines on touch
-  cells?: readonly ReactNode[]; // a dense row only: its fixed-width leads before the title (the time, the kind)
-  columns?: string; // a dense row only: those leads' widths, "4.5rem 8rem"
+  titleLines?: 1 | 2 | 3 | "none";
+  titleClassName?: string;
+  secondary?: ReactNode;
+  gist?: ReactNode;
+  snippet?: ReactNode;
+  snippetLines?: 2 | 3;
+  fact?: ReactNode;
+  actions?: ReactNode;
+  dense?: boolean;
+  cells?: readonly ReactNode[];
+  columns?: string;
 };
 
-// No boxed lines: each row draws a hairline under itself, edge to edge on a one-line list, from the title's x
-// on a two-line one.
 const ROW =
   "group relative scroll-mt-12 scroll-mb-12 text-sm text-fg outline-none transition-colors after:pointer-events-none after:absolute after:right-0 after:bottom-0 after:h-px after:bg-border/70 focus-visible:bg-subtle focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-inset";
 
@@ -67,7 +56,6 @@ export function ListRow({
   style,
   ...props
 }: ListRowProps) {
-  // A div when the row holds links of its own; typed as the link, whose props are a superset.
   const Row = (href ? "a" : "div") as "a";
   const link = href !== undefined;
   const frame = cn(ROW, link && "cursor-pointer hover:bg-subtle", selected && "bg-muted/70 hover:bg-muted");
@@ -107,7 +95,6 @@ export function ListRow({
   const hasLead = lead !== undefined || indent;
   const hasFact = shown(fact),
     hasActions = shown(actions);
-  // One line where the list is wide: everything but a prose row, whose snippet needs the room under the title.
   const one = !shown(snippet) && titleLines !== "none";
   return (
     <Row
@@ -118,10 +105,8 @@ export function ListRow({
       className={cn(
         frame,
         "grid min-h-16 grid-cols-(--row) items-center gap-x-3 py-3 touch:min-h-[4.5rem] touch:items-start touch:py-3.5",
-        // On two lines the hairline starts where the title does: past the 32px lead and its 12px gap.
         hasLead ? "after:left-[calc(var(--list-x,1rem)+2.75rem)]" : "after:left-[var(--list-x,1rem)]",
         "row-wide:after:left-0",
-        // A prose row keeps its lines: the small icon and the fact level with the first.
         one ? "row-wide:min-h-11 row-wide:py-1.5" : "row-wide:min-h-12 row-wide:items-start row-wide:py-2.5",
         X,
         className,
@@ -133,7 +118,6 @@ export function ListRow({
           role="cell"
           className={cn(
             "flex size-8 items-center justify-center touch:mt-0.5",
-            // On a wide list the mark shrinks to 24px, as Linear's row icons sit small beside the title.
             "row-wide:size-6 row-wide:[&>*]:size-6 row-wide:[&>*]:text-2xs row-wide:[&_svg]:size-3.5",
           )}
         >
@@ -146,7 +130,6 @@ export function ListRow({
           className={cn(
             "text-base font-medium break-words text-fg",
             titleLines !== "none" && cn(LINES[titleLines], DESK[titleLines], "@4xl/ws:line-clamp-1"),
-            // The title takes what it needs, up to two thirds of the line; the meta and gist the rest.
             one && "row-wide:block row-wide:max-w-[66%] row-wide:shrink-0 row-wide:truncate row-wide:text-sm",
             titleClassName,
           )}
@@ -154,9 +137,6 @@ export function ListRow({
           {title}
         </div>
         {(shown(secondary) || shown(gist)) && (
-          // One line, the meta then the gist, truncating; after the title on a wide list, under it in a column.
-          // Only a phone (under 40rem, below lg) gives the gist a line of its own under the meta, rather than the
-          // two truncating to a word apiece.
           <div
             className={cn(
               "mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-fg-muted max-lg:@max-[40rem]/ws:flex-col max-lg:@max-[40rem]/ws:items-stretch max-lg:@max-[40rem]/ws:gap-0",
@@ -192,7 +172,6 @@ export function ListRow({
         )}
       </div>
       {hasFact && (
-        // On touch it sits level with the title's first line.
         <div role="cell" className={cn("tabular flex items-center gap-2 pl-1 text-sm whitespace-nowrap text-fg-muted touch:pt-0.5", !one && "row-wide:pt-0.5")}>
           {fact}
         </div>
@@ -209,9 +188,6 @@ export function ListRow({
   );
 }
 
-// A group inside a list: a time band, an employer, a day. A tinted band across the list, as Linear's groups
-// are, its label in sentence case with the count beside it. A row, so it reads as one ("Your move 6"). It
-// sticks under the bar (`--group-top`, set by the Workspace).
 export function ListGroup({
   label,
   count,
@@ -222,8 +198,8 @@ export function ListGroup({
 }: {
   label: ReactNode;
   count?: number | undefined;
-  hint?: ReactNode; // after the count: "4 to review"
-  lead?: ReactNode; // <CompanyMark size="sm"> over an employer's roles
+  hint?: ReactNode;
+  lead?: ReactNode;
   sticky?: boolean;
   className?: string;
 }) {
@@ -246,7 +222,6 @@ export function ListGroup({
   );
 }
 
-// A one-line notice across the list, under the bar: "20 more wait on you in Pipeline →". Full bleed, no box.
 export function ListNotice({
   tone = "neutral",
   icon,
@@ -256,13 +231,12 @@ export function ListNotice({
   tone?: "neutral" | "warning";
   icon?: ReactNode;
   children: ReactNode;
-  action?: ReactNode; // a Button variant="link" size="sm"
+  action?: ReactNode;
 }) {
   return (
     <div
       role={tone === "warning" ? "alert" : "status"}
       className={cn(
-        // Too long for one line on a phone, the action wraps to the right of a line of its own.
         "flex min-h-10 flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-border py-2 text-sm text-fg [&>svg]:size-4 [&>svg]:shrink-0",
         tone === "warning" ? "[&>svg]:text-warning-text" : "[&>svg]:text-fg-subtle",
         X,
@@ -275,8 +249,6 @@ export function ListNotice({
   );
 }
 
-// The slim line under a list's rows: pagination, "Load older", "That's everything". From lg it sticks to
-// the bottom of the list's scroll.
 export function ListFooter({ center, className, ...props }: ComponentProps<"div"> & { center?: boolean }) {
   return (
     <div
@@ -291,7 +263,6 @@ export function ListFooter({ center, className, ...props }: ComponentProps<"div"
   );
 }
 
-// The one icon tile: 32px, a soft tone behind a glyph. Leads a row that has no employer.
 const TONES = {
   neutral: "bg-subtle text-fg-muted",
   accent: "bg-accent-soft text-accent-text",

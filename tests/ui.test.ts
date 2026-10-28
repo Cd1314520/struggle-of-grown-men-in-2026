@@ -16,7 +16,7 @@ describe("the web UI", () => {
     expect(res?.headers.get("content-type")).toStartWith("text/javascript");
     const js = (await res?.text()) ?? "";
     expect(js).toContain("/api/stream");
-    expect(js).not.toMatch(/^\s*import\s/m); // nothing left for the browser to fetch
+    expect(js).not.toMatch(/^\s*import\s/m);
     const css = await serveUi("/assets/app.css");
     expect(css?.headers.get("content-type")).toStartWith("text/css");
     expect(await css?.text()).toContain("--color-accent");

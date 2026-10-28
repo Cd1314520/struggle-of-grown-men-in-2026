@@ -1,6 +1,3 @@
-// The home page: what needs the owner, whether the machine is healthy, and whether it is working. One sheet:
-// the numbers in a band, what needs the owner, the charts; the system's state and what is coming up in a
-// rail beside them (after them, below xl).
 import { ListChecks, Plus, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -24,13 +21,11 @@ export function OverviewPage() {
   const [starting, setStarting] = useState(false);
   const waiting = s ? attentionRows(s).reduce((n, r) => n + r.count, 0) : 0;
   const scanning = !!s?.running.scan || starting;
-  // A new install has nothing to show yet: say where to begin instead of leaving empty charts to explain it.
   const fresh = !!s && s.setupRemaining > 0 && !Object.values(s.counts).some(Boolean);
   const hello = greeting(new Date().getHours()),
     meta = s && (waiting ? `${num(waiting)} ${waiting === 1 ? "thing needs" : "things need"} you` : "All clear, nothing is waiting on you");
   return (
     <Workspace
-      // On a phone the bar's one line greets the owner beside Scan now, rather than the button alone on it.
       className="max-lg:[&_div:has(>[data-lead])]:flex-1"
       bar={{
         title: hello,
@@ -43,7 +38,6 @@ export function OverviewPage() {
         ),
         actions: (
           <>
-            {/* A phone has Add in its top bar. */}
             <Button
               size="sm"
               className="max-sm:hidden"
@@ -68,7 +62,7 @@ export function OverviewPage() {
                       toast.success("Scan started");
                       return refreshAll();
                     },
-                    () => undefined, // the request already showed why it was refused
+                    () => undefined,
                   )
                   .finally(() => {
                     setStarting(false);
@@ -98,10 +92,8 @@ export function OverviewPage() {
     >
       <WorkspaceBody
         asideWidth="rail"
-        // A little wider than a rail, so its facts and what employers asked read whole.
         className="xl:[&>aside]:w-96 2xl:[&>aside]:w-104"
         aside={
-          // Its own container: the rows in it lay out for its width, not the page's.
           <div className="@container/ws">
             <Health summary={s} />
             <Upcoming />
@@ -109,7 +101,6 @@ export function OverviewPage() {
           </div>
         }
       >
-        {/* On a phone, what needs the owner comes first; with room, the numbers head the page. */}
         <div className="flex flex-col">
           <NeedsYou summary={s} />
           <Kpis summary={s} className="sm:order-first" />

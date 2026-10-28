@@ -1,4 +1,3 @@
-// Entry point of the web UI. Bundled for the browser by src/ui.ts and served as /assets/app.js.
 import "./styles.css";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode, useEffect } from "react";
@@ -14,7 +13,6 @@ function Routes() {
   const { page } = useRoute();
   const { data: s } = useSummary();
   useLiveUpdates();
-  // The tab title counts what waits on the user.
   useEffect(() => {
     const waiting = s ? s.attention.total : 0;
     document.title = `${waiting ? `(${waiting}) ` : ""}Auto Apply`;

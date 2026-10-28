@@ -1,5 +1,3 @@
-// What the workers share: how a prompt is rendered, where a worker without a job runs, and the
-// host tools more than one kind of worker is given.
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { addCompany, ATS, fetchCompany, isAts, isCampusBoard, type Posting } from "./ats";
@@ -11,8 +9,6 @@ import { fillTemplate } from "./template";
 
 export const readPrompt = (name: string) => readFileSync(join(PROMPTS, `${name}.md`), "utf8");
 
-// The phase line every prompt starts with. The targets file has a section per phase: practice for jobs
-// at employers that are not targets, real for target employers, which are applied to only when not held back.
 const phaseLine = () =>
   config.targets.holdBack
     ? "Application phase: PRACTICE (target employers are held back for later)"
@@ -21,7 +17,6 @@ const phaseLine = () =>
 export const render = (name: string, vars: Record<string, string | number | null>) =>
   `${phaseLine()}\n\n` + fillTemplate(readPrompt(name), vars, `prompts/${name}.md`);
 
-// What the fill and recheck agents may answer for the candidate without asking (prompts/low-stakes.md).
 export const lowStakesRule = () => readPrompt("low-stakes").trim();
 export const termsRule = () => readPrompt("terms").trim();
 
@@ -31,7 +26,6 @@ export const workDir = () => {
   return dir;
 };
 
-// `also` may add to the reply, given the board's postings.
 export const addCompanyTool = (also?: (postings: Posting[]) => string): HostTool => ({
   description: "Add a company job board to the watch list. Verifies the board exists.",
   parameters: schema({

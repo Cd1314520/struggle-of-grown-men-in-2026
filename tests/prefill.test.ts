@@ -39,7 +39,6 @@ const choice = (question: string, options: string[], kind: Field["kind"] = "radi
   required,
   options: options.map((o, i) => ({ tag: `1.${i}`, value: String(i), text: o })),
 });
-// The option a plan picks among a field's options.
 const picked = (field: Field) => {
   const plan = decide(field, facts);
   return plan && "choose" in plan ? (pick(field.options ?? [], plan)?.text ?? "(none)") : plan;
@@ -115,7 +114,6 @@ describe("prefill decides", () => {
     expect(picked(choice("Are you Hispanic/Latino?", ["Yes", "No", "Decline to self-identify"], "combobox"))).toBe("No");
     expect(picked(choice("Gender", ["Male", "Female"], "select"))).toBe("Male");
     expect(decide(choice("Gender", ["Male", "Female"], "select", false), facts)).toBeNull();
-    // A closed combobox has not shown its options yet: the plan declines.
     const closed = decide({ id: "1", kind: "combobox", question: "Gender", required: false }, facts);
     expect(closed && "choose" in closed && pick([{ text: "Male" }, { text: "Decline To Self Identify" }], closed)?.text).toBe("Decline To Self Identify");
   });

@@ -59,11 +59,8 @@ const tableNames = (db: Database) =>
     .all()
     .map(r => r.name);
 
-// SQLite stores a definition exactly as it was typed; indentation is not part of the schema.
 const flat = (sql: string | null | undefined) => sql?.replace(/\s+/g, " ").trim() ?? null;
 
-// Everything that defines how the database behaves, in a form two databases can be compared by.
-// jobs is compared by column rather than by its CREATE text: ADD COLUMN leaves different text behind.
 function shape(db: Database) {
   const tables = Object.fromEntries(
     tableNames(db).map(name => [
@@ -108,8 +105,6 @@ describe("schema migrations", () => {
     expect(tableNames(db)).toEqual(TABLES);
   });
 
-  // The whole schema as a new database gets it. A new migration changes this on purpose (update the
-  // snapshot with \`bun test -u\`); a change with no new migration means a shipped one was edited.
   it("produces exactly the recorded schema", () => {
     const db = memory();
     migrate(db);
@@ -147,7 +142,7 @@ describe("schema migrations", () => {
         )
         .run(id, kind, state);
     gate("a", "open");
-    expect(() => gate("b", "open")).toThrow(/UNIQUE/); // one open gate per job
+    expect(() => gate("b", "open")).toThrow(/UNIQUE/);
     gate("c", "closed");
     expect(() => gate("d", "parked")).toThrow(/CHECK/);
     expect(() => gate("e", "closed", "survey")).toThrow(/CHECK/);
@@ -158,7 +153,7 @@ describe("schema migrations", () => {
         )
         .run(id, state);
     delivery("one", "sending");
-    expect(() => delivery("two", "failed")).toThrow(/UNIQUE/); // one unsent delivery at a time
+    expect(() => delivery("two", "failed")).toThrow(/UNIQUE/);
     delivery("three", "sent");
   });
 
@@ -195,12 +190,11 @@ describe("schema migrations", () => {
     }
 
     it("leaves a database that already has everything untouched apart from the version", () => {
-      // Only the baseline adopts what it finds; every later migration runs on a known version.
       const baseline = MIGRATIONS.slice(0, 1);
       const db = memory();
       migrate(db, baseline);
       db.run("INSERT INTO jobs (id, url, source, company, title, fill_checkpoint) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'Engineer', '{}')");
-      db.run("PRAGMA user_version = 0"); // as the live database was the day versioning arrived
+      db.run("PRAGMA user_version = 0");
       const before = shape(db);
 
       expect(migrate(db, baseline).map(m => m.name)).toEqual(["baseline"]);
@@ -212,7 +206,6 @@ describe("schema migrations", () => {
   });
 
   describe("fill state (version 3)", () => {
-    // A database as version 2 left it, with the flags still in kv.
     const beforeFillState = () => {
       const db = memory();
       migrate(db, MIGRATIONS.slice(0, 2));
@@ -243,7 +236,6 @@ describe("schema migrations", () => {
         { job_id: 3, submitting: 0, verifying: 0, recovering: 1, slot: 0, manual_gate: null },
         { job_id: 12, submitting: 0, verifying: 0, recovering: 0, slot: 4, manual_gate: null },
       ]);
-      // What belonged to jobs is gone from kv (job 99 no longer exists); everything else stays.
       expect(db.query("SELECT key, value FROM kv ORDER BY key").all()).toEqual([
         { key: "count.fill.2026-10-12", value: "7" },
         { key: "feedback.1", value: "keep me" },
@@ -254,7 +246,7 @@ describe("schema migrations", () => {
 
     it("stops, changing nothing, on a state the app could never have meant", () => {
       const db = beforeFillState();
-      db.run("UPDATE kv SET value = '0' WHERE key = 'fill.submitting.2'"); // verifying without submitting
+      db.run("UPDATE kv SET value = '0' WHERE key = 'fill.submitting.2'");
       expect(() => migrate(db, MIGRATIONS.slice(0, 3))).toThrow(/Migration 3 \(fill state\) failed and was rolled back: CHECK constraint failed/);
       expect(schemaVersion(db)).toBe(2);
       expect(tableNames(db)).not.toContain("fill_state");
@@ -326,7 +318,7 @@ describe("schema migrations", () => {
         db.run(
           "INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, created_at) VALUES ('g4', 1, 'question', 'x', 'y', 'Acme', 't', '', '[]', 'open', 'f')",
         ),
-      ).toThrow(/UNIQUE/); // still one open gate per job
+      ).toThrow(/UNIQUE/);
     });
   });
 
@@ -345,7 +337,6 @@ describe("schema migrations", () => {
       expect(tableNames(copy)).not.toContain("fill_state");
       expect(copy.query("SELECT key, value FROM kv").all()).toEqual([{ key: "fill.submitting.7", value: "1" }]);
       expect(old.query("SELECT submitting FROM fill_state WHERE job_id = 7").all()).toEqual([{ submitting: 1 }]);
-      // One copy for the whole upgrade, not one per migration.
       for (let version = 2; version < SCHEMA_VERSION; version++) expect(existsSync(backupPath(path, version))).toBe(false);
     });
 
@@ -412,7 +403,6 @@ describe("schema migrations", () => {
         { id: 1, priority: 1 },
         { id: 2, priority: 0 },
       ]);
-      // Run again: a second ADD COLUMN would fail, so passing proves it was skipped.
       expect(migrate(db, [...MIGRATIONS, addPriority])).toEqual([]);
     });
 
@@ -532,7 +522,7 @@ describe("opening a database", () => {
     const reader = track(new Database(path, { create: true }));
     reader.run("CREATE TABLE t (x); INSERT INTO t VALUES (1)");
     reader.run("BEGIN");
-    reader.query("SELECT * FROM t").all(); // holds a read lock on the rollback-journal database
+    reader.query("SELECT * FROM t").all();
     const started = Date.now();
     expect(() => connectDatabase(path, "readwrite")).toThrow(/locked/);
     const waited = Date.now() - started;

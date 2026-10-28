@@ -1,4 +1,3 @@
-// Pieces the Activity tabs share: clock times, job links and folds, and the event log a page at a time.
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -9,14 +8,11 @@ import { clock, dateTime, parseAt } from "../../lib/format";
 import { href } from "../../lib/router";
 import type { FeedJob } from "./feed";
 
-// What every tab's bar holds: the page's title and tabs, and the Run menu at the far right.
 export interface ActivityHead {
   tabs: ReactNode;
   run: ReactNode;
 }
 
-// A tab's bar: the page's title, its tabs and Run, and whatever the tab adds (its search, filters,
-// segments). `hint` is the tab's one-line description, behind the bar's info button.
 export function activityBar(head: ActivityHead, own: Omit<WorkspaceBarProps, "title" | "tabs"> = {}): WorkspaceBarProps {
   return {
     title: "Activity",
@@ -32,7 +28,6 @@ export function activityBar(head: ActivityHead, own: Omit<WorkspaceBarProps, "ti
   };
 }
 
-// "4:18 AM", with the full date on hover. Its size and colour come from where it sits: a row's trail, a log cell.
 export function Clock({ at, className }: { at: string; className?: string }) {
   const ms = parseAt(at);
   return (
@@ -44,7 +39,6 @@ export function Clock({ at, className }: { at: string; className?: string }) {
   );
 }
 
-// A job a feed row or a folded run of blockers names: the employer, then the role.
 export function JobLink({ job, className }: { job: FeedJob; className?: string }) {
   return (
     <a href={href("job", job.id)} className={cn("group/job flex min-w-0 items-baseline gap-1.5 text-sm touch:-my-2 touch:py-2", className)}>
@@ -54,7 +48,6 @@ export function JobLink({ job, className }: { job: FeedJob; className?: string }
   );
 }
 
-// "15 jobs" or "23 boards", folding open to the list.
 export function Fold({ label, children }: { label: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
@@ -70,13 +63,11 @@ export function Fold({ label, children }: { label: string; children: ReactNode }
         {label}
         <ChevronRight className={cn("size-3.5 transition-transform", open && "rotate-90")} />
       </button>
-      {/* A row's secondary line may hold it, and that line is one line: the list wraps again. */}
       {open && <div className="mt-1.5 animate-in border-l border-border pl-3 whitespace-normal">{children}</div>}
     </div>
   );
 }
 
-// The event log, a page at a time. Every page loaded stays, and all of them refetch when something changes.
 export function useActivityPages(feed: "highlights" | "all", kinds: readonly string[]) {
   return useInfiniteQuery({
     queryKey: ["activity", feed, kinds],
@@ -86,7 +77,6 @@ export function useActivityPages(feed: "highlights" | "all", kinds: readonly str
   });
 }
 
-// The band under the feed and the log: a page more, or the end of it.
 export function LoadOlder({ more, loading, onLoad }: { more: boolean; loading: boolean; onLoad: () => void }) {
   return (
     <ListFooter center>
@@ -101,7 +91,6 @@ export function LoadOlder({ more, loading, onLoad }: { more: boolean; loading: b
   );
 }
 
-// Entries in runs of one day each, newest day first, as the server sends them.
 export function byDay<T>(items: readonly T[], dayOf: (item: T) => string) {
   const out: { day: string; items: T[] }[] = [];
   for (const item of items) {

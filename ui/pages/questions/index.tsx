@@ -1,5 +1,3 @@
-// Questions: what the filling agent could not answer from the profile, worked through one at a time.
-// The queue on the left, newest posting first; the question in focus on the right (full-screen on a phone).
 import { ArrowRight, CheckCheck, CircleAlert, PanelRight } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -15,22 +13,17 @@ import { FocusPane, type Answer } from "./focus";
 import { choices, drafts, elsewhere, isQuestion, matches, nextAfter } from "./model";
 import { Queue } from "./queue";
 
-// After a save moves on, picks are ignored this long: a second press meant for the last question must not answer the next.
 const HOLD_MS = 600;
 
 const open = (key: string | null) => {
   navigate(key ? `questions/${encodeURIComponent(key)}` : "questions", { replace: true });
 };
 
-// The other gates, counted, with the way to Pipeline where each is handled on its application: a line
-// under the bar, read as an alert.
 function Elsewhere({ groups }: { groups: readonly QuestionGroup[] }) {
   const { total, text } = elsewhere(groups);
   if (!total) return null;
   const detail = text.charAt(0).toUpperCase() + text.slice(1);
   return (
-    // The link rides in the text's line rather than as the notice's action, which a phone would push onto a
-    // line of its own: one line keeps the queue high. Which gates they are is on hover and in Pipeline's stages.
     <ListNotice tone="warning" icon={<CircleAlert />}>
       <span className="flex flex-wrap items-center justify-between gap-x-3">
         <span title={detail}>
@@ -76,11 +69,8 @@ export function QuestionsPage() {
   const groups = useMemo(() => (data ?? []).filter(isQuestion), [data]);
   const [search, setSearch] = useState("");
   const searchBox = useRef<HTMLInputElement>(null);
-  // What the queue shows and J/K walks: all of it, or what the search matches.
   const shown = useMemo(() => (search.trim() ? groups.filter(g => matches(g, search)) : groups), [groups, search]);
 
-  // The open question: the one in the URL, else the one at the place the last one was (it was answered or
-  // went away), else the first.
   const found = routeKey ? shown.findIndex(g => g.key === routeKey) : -1;
   const [lastIndex, setLastIndex] = useState(0);
   if (found >= 0 && found !== lastIndex) setLastIndex(found);
@@ -88,10 +78,9 @@ export function QuestionsPage() {
   const current = shown[index];
 
   const [sending, setSending] = useState<Answer["via"] | null>(null);
-  const [focusNext, setFocusNext] = useState<string | null>(null); // the question whose box gets the cursor when it opens
-  const [saves, setSaves] = useState(0); // remounts the form when the same question stays open after a save
+  const [focusNext, setFocusNext] = useState<string | null>(null);
+  const [saves, setSaves] = useState(0);
   const holdUntil = useRef(0);
-  // Side by side a question is always open, so only a phone's is closed.
   const { onListClick, close } = useRecordHistory({ isOpen: !!routeKey, closable: !wide, list: () => "questions", rows: "a[data-question]" });
 
   const move = (by: 1 | -1) => {
@@ -127,7 +116,6 @@ export function QuestionsPage() {
     const before = shown.map(g => g.key);
     setSending(a.via);
     try {
-      // Checked against the server's list, not the one rendered: it may have been answered elsewhere since.
       const latest = await queryClient.query({ queryKey: ["questions"], queryFn: api.questions, staleTime: 0 });
       if (!latest.some(g => g.jobs.some(j => j.gateId === a.gateId))) {
         void refreshAll();
@@ -140,17 +128,14 @@ export function QuestionsPage() {
       const left = (queryClient.getQueryData<QuestionGroup[]>(["questions"]) ?? []).filter(g => isQuestion(g) && matches(g, search));
       const next = nextAfter(group, before, left);
       const n = result.jobIds.length;
-      // A question found on the same page opens next instead of the application resuming.
       const followUp = next && !before.includes(next.key);
       const saved = n > 1 ? `Saved, ${n} applications queued` : followUp ? "Saved, it asks one more question" : "Saved, application queued";
       toast.success(a.scope === "bank" ? `${saved}; adding it to your answers` : saved);
       holdUntil.current = Date.now() + HOLD_MS;
-      // A typed question gets the cursor in its box; one with options leaves the keys free to pick.
       setFocusNext(next && !choices(next).length && matchMedia(WIDE).matches ? next.key : null);
       setSaves(s => s + 1);
       open(next?.key ?? null);
     } catch {
-      // The server's refusal was shown; show what is true now.
       void refreshAll();
     } finally {
       setSending(null);
@@ -215,8 +200,6 @@ export function QuestionsPage() {
       }
       empty={<EmptyState icon={<PanelRight />} title="No question open" description="Pick a question from the queue to answer it." className="h-full" />}
     >
-      {/* The count's own line is a tablet's: a phone's tab bar badge counts the questions, so the queue starts
-          right under the search and the notice. */}
       <Workspace
         frame="column"
         aria-label="Questions"

@@ -12,9 +12,9 @@ export default tseslint.config(
     languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
     linterOptions: { reportUnusedDisableDirectives: "error" },
     rules: {
-      // Numbers interpolate unambiguously; everything else must be converted explicitly.
+      "no-empty": ["error", { allowEmptyCatch: true }],
+      "@typescript-eslint/no-empty-function": ["error", { allow: ["arrowFunctions", "asyncMethods"] }],
       "@typescript-eslint/restrict-template-expressions": ["error", { allowNumber: true }],
-      // `text || fallback` deliberately treats "" as missing.
       "@typescript-eslint/prefer-nullish-coalescing": ["error", { ignorePrimitives: { string: true } }],
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" }],
     },

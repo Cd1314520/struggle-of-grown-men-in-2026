@@ -1,5 +1,3 @@
-// One job in the review queue: the employer's mark, the role, who posts it and where, and the fit at the
-// right. The age is the time band's over it.
 import { CircleCheck } from "lucide-react";
 import type { ListRow as Row } from "../../../src/api-types";
 import type { RowLink } from "../../components/list";
@@ -7,21 +5,9 @@ import { CompanyMark, ListRow, Tooltip } from "../../components/ui";
 import { place, plural, unent } from "../../lib/format";
 import { FitFact } from "../job/fit";
 
-export function QueueRow({
-  job,
-  threshold,
-  underCompany,
-  link,
-}: {
-  job: Row;
-  threshold: number | null;
-  underCompany: boolean; // listed under its employer's heading: the line under the title gives the place instead
-  link: RowLink;
-}) {
-  // The accent dot is the one sign of a fresh posting.
+export function QueueRow({ job, threshold, underCompany, link }: { job: Row; threshold: number | null; underCompany: boolean; link: RowLink }) {
   const fresh = job.group === "new";
   const where = !!job.location?.trim() && <span title={job.location}>{place(job.location)}</span>;
-  // Applied here before: a tick after the employer's name.
   const applied = job.appliedThere > 0 && (
     <Tooltip content={`You have applied here ${job.appliedThere === 1 ? "once" : `${job.appliedThere} times`}`}>
       <span role="img" aria-label={`Applied here ${plural(job.appliedThere, "time")}`} className="flex text-fg-subtle">
@@ -32,7 +18,6 @@ export function QueueRow({
   return (
     <ListRow
       {...link}
-      // Under an employer's heading the mark is the heading's, and the row's text lines up with its name.
       {...(underCompany ? { indent: true } : { lead: <CompanyMark name={job.company} /> })}
       title={
         <>
@@ -44,8 +29,6 @@ export function QueueRow({
           {unent(job.title)}
         </>
       }
-      // Under its employer the place is all the line needs; otherwise the employer, then how many of its
-      // roles wait here or, with one, where it is.
       secondary={
         underCompany ? (
           where

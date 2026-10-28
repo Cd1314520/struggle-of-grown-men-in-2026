@@ -1,4 +1,3 @@
-// Light, dark, or whatever the system says. The choice is remembered per browser.
 import { useSyncExternalStore } from "react";
 
 export type ThemeChoice = "light" | "dark" | "system";
@@ -24,9 +23,7 @@ export function setTheme(next: ThemeChoice) {
   choice = next;
   try {
     localStorage.setItem("theme", next);
-  } catch {
-    // remembered for this visit only
-  }
+  } catch {}
   apply();
 }
 export const useTheme = () =>
