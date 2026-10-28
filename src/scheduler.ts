@@ -35,6 +35,7 @@ import { runWorker, type RunWorker } from "./worker";
 import { needsJudgment, parsePracticeAssessment } from "./practice";
 import { prep } from "./prep";
 import { profileProblems } from "./profile";
+import { bankDue, fileKeptAnswers } from "./answer-bank";
 import { recheckDue, recheckOpenQuestions } from "./recheck";
 import {
   cancelJobGates,
@@ -310,9 +311,11 @@ export class Scheduler {
     return this.exclusive("track", () => trackMailbox(this.run));
   }
 
+  // Answers kept for the answer bank go into answers.md first, so the recheck answers what they now settle.
   recheck() {
     return this.exclusive("recheck", async () => {
-      await recheckOpenQuestions(this.run);
+      const filed = bankDue() && (await fileKeptAnswers(this.run));
+      if (filed || recheckDue()) await recheckOpenQuestions(this.run);
       this.pump();
     });
   }
@@ -536,7 +539,7 @@ export class Scheduler {
         kvSet("last.track.attempt", new Date().toISOString());
         void this.track();
       }
-      if (!this.isRunning("recheck") && !profileProblems().length && recheckDue()) void this.recheck();
+      if (!this.isRunning("recheck") && !profileProblems().length && (bankDue() || recheckDue())) void this.recheck();
       retryPassingHandoffs();
       this.pump();
     };

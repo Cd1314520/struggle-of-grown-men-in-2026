@@ -2,10 +2,10 @@
 
 <!-- Example: copied into profile/ the first time the app started. Replace every placeholder with your
 answer, and delete the questions that do not apply to you. The form filler answers from this file, and
-asks you (on the Questions page) about anything it does not cover. Answers you give there can be saved
-here as standing answers. -->
+asks you (on the Questions page) about anything it does not cover. Answers you give there are added to
+this file by an agent, which widens or corrects an entry, or adds one. -->
 
-Answers for application forms. New answers given in the app are appended at the bottom.
+Answers for application forms. Answers given in the app are added where they belong, or at the bottom.
 
 ## Legal and eligibility
 

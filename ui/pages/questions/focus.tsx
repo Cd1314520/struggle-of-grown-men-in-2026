@@ -2,23 +2,7 @@
 import { ArrowLeft, ArrowUpRight, ChevronDown, ChevronUp, Clock, CornerDownRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AnswerScope, QuestionGroup } from "../../../src/questions";
-import {
-  Button,
-  Checkbox,
-  CompanyMark,
-  ConfirmDialog,
-  Disclosure,
-  Kbd,
-  Linkified,
-  Properties,
-  Select,
-  Separator,
-  Spinner,
-  Subhead,
-  Textarea,
-  Time,
-  Tooltip,
-} from "../../components/ui";
+import { Button, Checkbox, CompanyMark, Disclosure, Kbd, Linkified, Select, Separator, Spinner, Subhead, Textarea, Time, Tooltip } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { plural } from "../../lib/format";
 import { combo, typing, useHotkeys } from "../../lib/hotkeys";
@@ -160,8 +144,7 @@ export function FocusPane({
 }) {
   const [draft, setDraft] = useState(() => drafts.get(group.key) ?? "");
   const [gateId, setGateId] = useState(group.jobs[0]?.gateId ?? "");
-  const [standing, setStanding] = useState(false); // opt-in per answer
-  const [confirming, setConfirming] = useState<Answer | null>(null);
+  const [keep, setKeep] = useState(group.kind === "question"); // on unless unticked for a one-off
   const box = useRef<HTMLTextAreaElement>(null);
   const opts = choices(group),
     keyed = opts.length <= MAX_KEYED,
@@ -182,9 +165,7 @@ export function FocusPane({
       box.current?.focus();
       return;
     }
-    const a: Answer = { gateId, answer: text, scope: standing ? "standing" : "application", via };
-    if (standing) setConfirming(a);
-    else onAnswer(a, group);
+    onAnswer({ gateId, answer: text, scope: keep ? "bank" : "application", via }, group);
   };
 
   useHotkeys([
@@ -362,19 +343,17 @@ export function FocusPane({
                 </Button>
               </div>
             </div>
-            {group.standingAllowed && job && (
+            {group.kind === "question" && (
               <label className="flex cursor-pointer items-start gap-2.5 px-0.5 pt-1 text-sm text-fg">
                 <Checkbox
                   className="mt-0.5"
-                  checked={standing}
+                  checked={keep}
                   disabled={busy}
                   onCheckedChange={v => {
-                    setStanding(v === true);
+                    setKeep(v === true);
                   }}
                 />
-                <span>
-                  {many ? `Use for all ${group.jobs.length} listed and future` : "Also use for future"} {job.company} applications asking exactly this
-                </span>
+                <span>{many ? `Answer all ${group.jobs.length} listed applications, and add` : "Also add"} it to your answers for future applications</span>
               </label>
             )}
           </div>
@@ -382,9 +361,10 @@ export function FocusPane({
           <Separator />
           <Disclosure id="questions-policy" summary="How answers are reused">
             <p className="max-w-prose">
-              An answer goes to the chosen application only, which then resumes. Ticking “Also use for future…” approves a standing answer: it is reused only
-              when the same employer asks the exact same prompt with the same context and options, never as a general profile answer. Cover letters, submit
-              confirmations and browser hand-offs are handled one application at a time, from Pipeline.
+              An answer goes to the chosen application, which then resumes. Ticked, it also goes to every listed application asking exactly this, and an agent
+              adds it to your answers (Profile, answers.md): it works out what the answer says beyond this form and widens an entry or adds one. Parked
+              questions your answers then settle, in any wording and at any employer, are answered for you. Untick it for an answer that holds only here. Cover
+              letters, submit confirmations and browser hand-offs are handled one application at a time, from Pipeline.
             </p>
           </Disclosure>
         </div>
@@ -421,31 +401,6 @@ export function FocusPane({
           Leave the box
         </span>
       </footer>
-
-      <ConfirmDialog
-        open={confirming !== null}
-        onOpenChange={o => {
-          if (!o) setConfirming(null);
-        }}
-        title="Approve a standing answer?"
-        confirm="Approve and save"
-        description={`This requeues ${
-          group.jobs.length === 1 ? "the matching open application" : `all ${group.jobs.length} matching open applications`
-        } and allows future reuse only for this exact employer/prompt/context/options scope.`}
-        onConfirm={() => {
-          if (confirming) onAnswer(confirming, group);
-        }}
-      >
-        {confirming && (
-          <Properties
-            className="mt-4 rounded-lg border border-border bg-subtle/60 p-4"
-            items={[
-              ["Answer", <span className="font-medium">{confirming.answer}</span>],
-              ["Scope", group.scopeLabel],
-            ]}
-          />
-        )}
-      </ConfirmDialog>
     </div>
   );
 }

@@ -107,7 +107,7 @@ export const api = {
   // Quiet: the caller shows a 409 as "already tracked" with a link rather than as an error.
   addPosting: (url: string) => post<{ id: number }>("/api/jobs", { url }, true),
   run: (what: "scan" | "track" | "discover" | "release_held" | "release_targets") => post("/api/run", { what }),
-  answer: (gateId: string, answer: string, scope: "application" | "standing") =>
+  answer: (gateId: string, answer: string, scope: "application" | "bank") =>
     post<AnswerResult>(`/api/questions/${encodeURIComponent(gateId)}/answer`, { answer, scope }),
   sendDigest: () => post<DigestResult>("/api/digest/send", {}),
   saveProfile: (file: string, text: string) => request<{ ok: true }>(`/api/profile/${file}`, { method: "PUT", body: text, raw: true }),

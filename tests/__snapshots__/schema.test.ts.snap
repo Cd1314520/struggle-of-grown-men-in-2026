@@ -1,7 +1,7 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
 exports[`schema migrations produces exactly the recorded schema 1`] = `
-"version 6
+"version 7
 
 CREATE TRIGGER jobs_blockers_forgotten AFTER DELETE ON jobs
 BEGIN
@@ -76,6 +76,19 @@ done_at TEXT,
 done_note TEXT,       -- the user's own note on doing it
 closed_at TEXT,
 CHECK (state != 'scheduled' OR scheduled_at IS NOT NULL)
+);
+
+CREATE TABLE banked_answers (
+id INTEGER PRIMARY KEY,
+job_id INTEGER,       -- the application it was asked on
+employer TEXT NOT NULL,
+title TEXT NOT NULL,
+question TEXT NOT NULL,
+context TEXT NOT NULL,
+options TEXT NOT NULL,
+answer TEXT NOT NULL,
+answered_at TEXT NOT NULL,
+filed_at TEXT         -- when the agent took it into answers.md; NULL while it waits
 );
 
 CREATE TABLE blockers (
@@ -156,7 +169,7 @@ delivery_id TEXT NOT NULL,
 sent_at TEXT NOT NULL
 );
 
-CREATE TABLE question_gates (
+CREATE TABLE "question_gates" (
 id TEXT PRIMARY KEY,
 job_id INTEGER NOT NULL,
 kind TEXT NOT NULL CHECK(kind IN ('question','cover_letter','confirm_submit','manual','submission_ambiguous')),
@@ -167,10 +180,9 @@ text TEXT NOT NULL,
 context TEXT NOT NULL,
 options TEXT NOT NULL,
 legacy INTEGER NOT NULL DEFAULT 0,
-standing_allowed INTEGER NOT NULL DEFAULT 0,
 state TEXT NOT NULL CHECK(state IN ('open','answered','closed')),
 answer TEXT,
-scope TEXT CHECK(scope IN ('application','standing')),
+scope TEXT CHECK(scope IN ('application','bank')),
 shot INTEGER,
 created_at TEXT NOT NULL,
 answered_at TEXT
@@ -184,17 +196,6 @@ context TEXT NOT NULL,
 options TEXT NOT NULL,
 queued_at TEXT NOT NULL,
 PRIMARY KEY (job_id, match_key)
-);
-
-CREATE TABLE standing_answers (
-match_key TEXT PRIMARY KEY,
-employer TEXT NOT NULL,
-question TEXT NOT NULL,
-context TEXT NOT NULL,
-options TEXT NOT NULL,
-answer TEXT NOT NULL,
-source_gate_id TEXT NOT NULL,
-answered_at TEXT NOT NULL
 );
 
 CREATE TABLE status_changes (

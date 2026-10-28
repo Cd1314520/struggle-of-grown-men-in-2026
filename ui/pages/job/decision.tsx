@@ -512,7 +512,7 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       why: [
         letter
           ? "The letter is stored for this application only and typed into the form as written."
-          : "Stored durably for this application, never added to your global answer bank. For explicitly scoped standing reuse, use Questions.",
+          : "Stored for this application only, not added to your answers. To add it to them as well, answer it from Questions.",
         ...checkpointWhy,
       ],
       evidence,

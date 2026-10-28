@@ -142,7 +142,8 @@ export function QuestionsPage() {
       const n = result.jobIds.length;
       // A question found on the same page opens next instead of the application resuming.
       const followUp = next && !before.includes(next.key);
-      toast.success(n > 1 ? `Saved, ${n} applications queued` : followUp ? "Saved, it asks one more question" : "Saved, application queued");
+      const saved = n > 1 ? `Saved, ${n} applications queued` : followUp ? "Saved, it asks one more question" : "Saved, application queued";
+      toast.success(a.scope === "bank" ? `${saved}; adding it to your answers` : saved);
       holdUntil.current = Date.now() + HOLD_MS;
       // A typed question gets the cursor in its box; one with options leaves the keys free to pick.
       setFocusNext(next && !choices(next).length && matchMedia(WIDE).matches ? next.key : null);

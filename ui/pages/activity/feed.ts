@@ -53,6 +53,7 @@ const LEADS: Record<string, string> = {
   Locate: "Looked for the employer's posting",
   Discover: "Looked for new companies",
   Recheck: "Rechecked open questions",
+  Answers: "Added to your answers",
 };
 
 // Long agent reports cut to what was decided; the full text stays in the full log and on the job.
@@ -64,8 +65,15 @@ const SHORTER: [RegExp, (m: RegExpExecArray) => Said][] = [
   [/^(Final|Automatic) submission authorized\b/, () => ({ text: "Auto apply authorized the final submit." })],
   [/^Found the employer's posting: (https?:\S+)$/, m => ({ text: "Found the employer's posting.", url: m[1] ?? null })],
   [
-    /^Answered question \((application|standing)\); queued applications/,
-    m => ({ text: m[1] === "standing" ? "You answered a question and kept it as a standing answer." : "You answered a question." }),
+    /^Answered question \((application|standing|bank)\); queued applications/,
+    m => ({
+      text:
+        m[1] === "bank"
+          ? "You answered a question and added it to your answers."
+          : m[1] === "standing"
+            ? "You answered a question and kept it as a standing answer."
+            : "You answered a question.",
+    }),
   ],
   [/^edited profile\/(.+)$/, m => ({ text: `You edited ${m[1] ?? "a profile file"}.` })],
 ];

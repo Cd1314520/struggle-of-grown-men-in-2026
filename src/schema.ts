@@ -334,6 +334,61 @@ function blockers(db: Database) {
   ]);
 }
 
+// Answers the candidate keeps go to the answer bank, profile/answers.md, which an agent edits to take
+// them in (see answer-bank.ts). They replace standing answers, which were reused only when the same
+// employer asked the exact same thing: each standing answer waits to be filed like a new one. A gate's
+// scope says which way it was answered; standing_allowed meant nothing else and goes.
+function answerBank(db: Database) {
+  runEach(db, [
+    `CREATE TABLE banked_answers (
+      id INTEGER PRIMARY KEY,
+      job_id INTEGER,       -- the application it was asked on
+      employer TEXT NOT NULL,
+      title TEXT NOT NULL,
+      question TEXT NOT NULL,
+      context TEXT NOT NULL,
+      options TEXT NOT NULL,
+      answer TEXT NOT NULL,
+      answered_at TEXT NOT NULL,
+      filed_at TEXT         -- when the agent took it into answers.md; NULL while it waits
+    )`,
+    `INSERT INTO banked_answers (job_id, employer, title, question, context, options, answer, answered_at)
+    SELECT g.job_id, s.employer, COALESCE(j.title, ''), s.question, s.context, s.options, s.answer, s.answered_at
+    FROM standing_answers s
+    LEFT JOIN question_gates g ON g.id = s.source_gate_id
+    LEFT JOIN jobs j ON j.id = g.job_id
+    ORDER BY s.answered_at`,
+    "DROP TABLE standing_answers",
+    `CREATE TABLE question_gates_new (
+      id TEXT PRIMARY KEY,
+      job_id INTEGER NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('question','cover_letter','confirm_submit','manual','submission_ambiguous')),
+      group_key TEXT NOT NULL,
+      match_key TEXT NOT NULL,
+      employer TEXT NOT NULL,
+      text TEXT NOT NULL,
+      context TEXT NOT NULL,
+      options TEXT NOT NULL,
+      legacy INTEGER NOT NULL DEFAULT 0,
+      state TEXT NOT NULL CHECK(state IN ('open','answered','closed')),
+      answer TEXT,
+      scope TEXT CHECK(scope IN ('application','bank')),
+      shot INTEGER,
+      created_at TEXT NOT NULL,
+      answered_at TEXT
+    )`,
+    `INSERT INTO question_gates_new (id, job_id, kind, group_key, match_key, employer, text, context, options, legacy, state, answer, scope, shot, created_at, answered_at)
+    SELECT id, job_id, kind, group_key, match_key, employer, text, context, options, legacy, state, answer,
+      CASE scope WHEN 'standing' THEN 'bank' ELSE scope END, shot, created_at, answered_at
+    FROM question_gates`,
+    "DROP TABLE question_gates",
+    "ALTER TABLE question_gates_new RENAME TO question_gates",
+    "CREATE UNIQUE INDEX question_gates_open_job ON question_gates(job_id) WHERE state = 'open'",
+    "CREATE INDEX question_gates_group ON question_gates(group_key, state)",
+    "CREATE INDEX question_gates_job ON question_gates(job_id, created_at)",
+  ]);
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: "baseline", up: baseline },
   { version: 2, name: "status history", up: statusHistory },
@@ -341,6 +396,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 4, name: "queued questions", up: queuedQuestions },
   { version: 5, name: "application steps", up: applicationSteps },
   { version: 6, name: "blockers", up: blockers },
+  { version: 7, name: "answer bank", up: answerBank },
 ];
 
 // The version this code reads and writes.

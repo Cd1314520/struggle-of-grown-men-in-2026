@@ -395,7 +395,7 @@ export function createHandler(scheduler: Scheduler) {
     if (answerMatch && req.method === "POST") {
       const { answer, scope } = await body();
       if (typeof answer !== "string" || !answer.trim()) return fail("answer text required");
-      if (scope !== "application" && scope !== "standing") return fail("scope must be application or standing");
+      if (scope !== "application" && scope !== "bank") return fail("scope must be application or bank");
       try {
         const { jobIds } = answerGate(decodeURIComponent(answerMatch[1] ?? ""), answer.trim(), scope);
         logEvent("user", `Answered question (${scope}); queued applications: ${jobIds.join(", ")}`);

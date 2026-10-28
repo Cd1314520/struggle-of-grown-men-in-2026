@@ -119,7 +119,7 @@ function plaintext(groups: QuestionGroup[], steps: DueStep[], deliveryId: string
         `Auto Apply: ${groups.length} new question group${groups.length === 1 ? "" : "s"} across ${totalJobs} application${totalJobs === 1 ? "" : "s"}.`,
         "",
         `Questions inbox: ${publicUrl()}/#questions`,
-        "Answer in the app. Application-only is the default; standing answers require explicit approval.",
+        "Answer in the app. Answers are added to your answers for future applications unless you untick it.",
         "",
       ]
     : [];

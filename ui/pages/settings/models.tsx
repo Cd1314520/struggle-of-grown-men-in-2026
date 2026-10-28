@@ -17,7 +17,12 @@ export const STAGES: readonly { stage: ModelStage; label: string; description: s
   { stage: "track", label: "Track mail", description: "Reads replies in the mailbox and records next steps and outcomes.", core: false },
   { stage: "discover", label: "Discover", description: "Searches the web for more companies and boards to watch.", core: false },
   { stage: "locate", label: "Locate", description: "Finds the employer's own posting for a LinkedIn or Indeed job.", core: false },
-  { stage: "recheck", label: "Recheck questions", description: "Answers parked questions once the profile settles them.", core: false },
+  {
+    stage: "recheck",
+    label: "Recheck questions",
+    description: "Adds the answers you keep to your answers, and answers parked questions once the profile settles them.",
+    core: false,
+  },
   { stage: "import", label: "Resume import", description: "Turns uploaded files into your Typst resume.", core: false },
 ];
 

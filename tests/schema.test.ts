@@ -21,6 +21,7 @@ const TABLES = [
   "accounts",
   "application_answers",
   "application_steps",
+  "banked_answers",
   "blockers",
   "events",
   "fill_state",
@@ -31,7 +32,6 @@ const TABLES = [
   "question_digest_notified",
   "question_gates",
   "queued_questions",
-  "standing_answers",
   "status_changes",
   "submit_approvals",
 ];
@@ -272,6 +272,61 @@ describe("schema migrations", () => {
       expect(() => db.run("INSERT INTO fill_state (job_id) VALUES (1)")).toThrow(/UNIQUE/);
       db.run("DELETE FROM jobs WHERE id = 1");
       expect(db.query("SELECT * FROM fill_state").all()).toEqual([]);
+    });
+  });
+
+  describe("answer bank (version 7)", () => {
+    it("queues each standing answer to be filed, and keeps every gate with its scope", () => {
+      const db = memory();
+      migrate(db, MIGRATIONS.slice(0, 6));
+      db.run(`
+        INSERT INTO jobs (id, url, source, company, title, status) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'Engineer', 'approved');
+        INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, standing_allowed, state, answer, scope, created_at, answered_at) VALUES
+          ('g1', 1, 'question', 'employer:m1', 'm1', 'Acme', 'Relocate?', 'Required', '["Yes","No"]', 1, 'answered', 'No', 'standing', 'a', 'b'),
+          ('g2', 1, 'question', 'job:1:m2', 'm2', 'Acme', 'Start date?', '', '[]', 0, 'answered', 'June', 'application', 'c', 'd'),
+          ('g3', 1, 'manual', 'job:1:m3', 'm3', 'Acme', 'Inspect', '', '[]', 0, 'open', NULL, NULL, 'e', NULL);
+        INSERT INTO standing_answers (match_key, employer, question, context, options, answer, source_gate_id, answered_at) VALUES
+          ('m1', 'Acme', 'Relocate?', 'Required', '["Yes","No"]', 'No', 'g1', 'b'),
+          ('m9', 'Gone Co', 'Clearance?', 'Required', '[]', 'None', 'missing', 'z');
+      `);
+      expect(migrate(db).map(m => m.name)).toEqual(["answer bank"]);
+      expect(
+        db.query("SELECT job_id, employer, title, question, context, options, answer, answered_at, filed_at FROM banked_answers ORDER BY id").all(),
+      ).toEqual([
+        {
+          job_id: 1,
+          employer: "Acme",
+          title: "Engineer",
+          question: "Relocate?",
+          context: "Required",
+          options: '["Yes","No"]',
+          answer: "No",
+          answered_at: "b",
+          filed_at: null,
+        },
+        {
+          job_id: null,
+          employer: "Gone Co",
+          title: "",
+          question: "Clearance?",
+          context: "Required",
+          options: "[]",
+          answer: "None",
+          answered_at: "z",
+          filed_at: null,
+        },
+      ]);
+      expect(db.query("SELECT id, state, scope FROM question_gates ORDER BY id").all()).toEqual([
+        { id: "g1", state: "answered", scope: "bank" },
+        { id: "g2", state: "answered", scope: "application" },
+        { id: "g3", state: "open", scope: null },
+      ]);
+      expect(() => db.run("UPDATE question_gates SET scope = 'standing' WHERE id = 'g2'")).toThrow(/CHECK/);
+      expect(() =>
+        db.run(
+          "INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, created_at) VALUES ('g4', 1, 'question', 'x', 'y', 'Acme', 't', '', '[]', 'open', 'f')",
+        ),
+      ).toThrow(/UNIQUE/); // still one open gate per job
     });
   });
 

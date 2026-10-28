@@ -9,7 +9,7 @@ const prelude = `
 import assert from "node:assert/strict";
 import { db, getJob, kvGet, kvSet, updateJob, onChange } from ${JSON.stringify(join(import.meta.dir, "../src/db.ts"))};
 import { authorizeSubmit, queueVerification, isSubmitting, isVerifying, isRecovering, manualLeaseGate } from ${JSON.stringify(join(import.meta.dir, "../src/fill-state.ts"))};
-import { parkGate, getGate, getOpenGate, findStoredAnswer, answerGate, listQuestionGroups, resumeContext, consumeSubmitApproval, returnManualControl, cancelJobGates, manualLeases, reserveManualLease, releaseManualLease, queueRecovery, resolveAmbiguous, resolveAmbiguityWithEvidence, recordCheckpoint, readCheckpoint, queueQuestion, nextQueuedQuestion, clearQueuedQuestions } from ${JSON.stringify(join(import.meta.dir, "../src/questions.ts"))};
+import { parkGate, getGate, getOpenGate, findStoredAnswer, answerGate, listQuestionGroups, resumeContext, consumeSubmitApproval, returnManualControl, cancelJobGates, manualLeases, reserveManualLease, releaseManualLease, queueRecovery, resolveAmbiguous, resolveAmbiguityWithEvidence, recordCheckpoint, readCheckpoint, queueQuestion, nextQueuedQuestion, clearQueuedQuestions, unfiledAnswers, markFiled } from ${JSON.stringify(join(import.meta.dir, "../src/questions.ts"))};
 const prompt = { kind: "question", text: "May we contact your current employer?", context: "Employer contact consent; applies to this hiring process", options: ["Yes", "No"] };
 const checkpoint = { version: 1, slot: 2, tabId: "draft-tab", url: "https://ats.example/draft/123", step: "contact consent", notes: "Inspect the existing draft", resumeSha: "frozen-sha", savedAt: "2026-10-10T01:00:00.000Z" };
 function job(id, company = "Acme, Inc.", title = "Engineer") {
@@ -86,8 +86,7 @@ describe("durable questions", () => {
     }
     const group = listQuestionGroups().find(g => g.key === a.groupKey);
     assert.deepEqual(group.jobs.map(j => j.id).sort(), [1, 2]);
-    assert.equal(group.standingAllowed, true);
-    for (const id of [8, 9]) assert.equal(listQuestionGroups().find(g => g.jobs.some(j => j.id === id)).standingAllowed, false);
+    for (const id of [8, 9]) assert.deepEqual(listQuestionGroups().find(g => g.jobs.some(j => j.id === id)).jobs.map(j => j.id), [id]);
     assert.equal(getJob(1).status, "needs_input");
     assert.equal(JSON.parse(getJob(1).pending).gateId, a.id);
   `);
@@ -107,7 +106,7 @@ describe("durable questions", () => {
     assert.equal(findStoredAnswer(1, { ...prompt, context: "" }), null);
     assert.deepEqual(resumeContext(1).answers, [{ kind: "question", question: prompt.text, context: prompt.context, options: prompt.options, answer: "No" }]);
     assert.deepEqual(readCheckpoint(1), checkpoint);
-    assert.throws(() => answerGate(a.id, "Yes", "standing"), /stale|answered/);
+    assert.throws(() => answerGate(a.id, "Yes", "bank"), /stale|answered/);
     assert.equal(findStoredAnswer(2, prompt), null);
   `);
   });
@@ -130,27 +129,25 @@ describe("durable questions", () => {
   `);
   });
 
-  it("fans out explicit standing answers only to current exact matches and supports future jobs", () => {
+  it("keeps an answer for the answer bank once, and answers only its exact group now", () => {
     scenario(`
     for (let id = 1; id <= 5; id++) job(id);
     const a = parkGate(1, prompt, checkpoint);
     parkGate(2, prompt, null);
     const changed = parkGate(3, { ...prompt, options: ["Yes", "No", "Ask later"] }, null);
     const unstructured = parkGate(4, { ...prompt, context: "" }, null);
-    assert.deepEqual(answerGate(a.id, "No", "standing"), { jobIds: [1, 2] });
-    assert.equal(getGate(a.id).scope, "standing");
+    assert.deepEqual(answerGate(a.id, "No", "bank"), { jobIds: [1, 2] });
+    assert.equal(getGate(a.id).scope, "bank");
+    // The rest wait for the answer bank to settle them (recheck.ts), as does a future application.
     assert.equal(getOpenGate(3).id, changed.id);
-    assert.equal(getOpenGate(4).id, unstructured.id);
-    assert.equal(findStoredAnswer(5, prompt), "No");
-    assert.equal(findStoredAnswer(5, { ...prompt, options: ["Yes", "No", "Ask later"] }), null);
-    assert.equal(findStoredAnswer(5, { ...prompt, context: "Another consent context" }), null);
-    assert.equal(findStoredAnswer(5, { ...prompt, context: "" }), null);
-    job(6, "Other Employer");
-    assert.equal(findStoredAnswer(6, prompt), null);
-    assert.throws(() => answerGate(unstructured.id, "No", "standing"), /structured/);
-    assert.equal(getOpenGate(4).id, unstructured.id);
-    parkGate(5, prompt, null);
-    assert.deepEqual(resumeContext(5).answers, [{ kind: "question", question: prompt.text, context: prompt.context, options: prompt.options, answer: "No" }]);
+    assert.equal(findStoredAnswer(5, prompt), null);
+    assert.deepEqual(unfiledAnswers(10).map(k => [k.employer, k.title, k.question, k.options, k.answer]), [["Acme, Inc.", "Engineer", prompt.text, ["Yes", "No"], "No"]]);
+    assert.deepEqual(answerGate(unstructured.id, "Yes", "bank"), { jobIds: [4] });
+    assert.equal(unfiledAnswers(10).length, 2);
+    markFiled(unfiledAnswers(10).map(k => k.id));
+    assert.deepEqual(unfiledAnswers(10), []);
+    assert.deepEqual(answerGate(changed.id, "Ask later", "application"), { jobIds: [3] });
+    assert.deepEqual(unfiledAnswers(10), []);
   `);
   });
 
@@ -206,21 +203,22 @@ describe("durable questions", () => {
   `);
   });
 
-  it("rolls back answers, standing authorization, and requeues as one transaction", () => {
+  it("rolls back answers, the answer kept for the bank, and requeues as one transaction", () => {
     scenario(`
     job(1); job(2);
     const a = parkGate(1, prompt, checkpoint), b = parkGate(2, prompt, null);
     const notifications = [];
     const unsubscribe = onChange(change => notifications.push(change));
     db.exec("CREATE TRIGGER fail_second_requeue BEFORE UPDATE OF status ON jobs WHEN NEW.id = 2 AND NEW.status = 'approved' BEGIN SELECT RAISE(ABORT, 'blocked requeue'); END");
-    assert.throws(() => answerGate(a.id, "No", "standing"), /blocked requeue/);
+    assert.throws(() => answerGate(a.id, "No", "bank"), /blocked requeue/);
     assert.equal(getOpenGate(1).id, a.id);
     assert.equal(getOpenGate(2).id, b.id);
     assert.equal(findStoredAnswer(1, prompt), null);
     assert.deepEqual(resumeContext(1).answers, []);
+    assert.deepEqual(unfiledAnswers(10), []);
     assert.deepEqual(notifications, []);
     db.exec("DROP TRIGGER fail_second_requeue");
-    assert.deepEqual(answerGate(a.id, "No", "standing"), { jobIds: [1, 2] });
+    assert.deepEqual(answerGate(a.id, "No", "bank"), { jobIds: [1, 2] });
     unsubscribe();
   `);
   });
@@ -231,7 +229,7 @@ describe("durable questions", () => {
     const confirmation = { kind: "confirm_submit", text: "Apply to Acme for Engineer with the frozen resume", context: "Final review", options: [] };
     const a = parkGate(1, confirmation, checkpoint), b = parkGate(2, confirmation, null);
     assert.notEqual(a.groupKey, b.groupKey);
-    assert.throws(() => answerGate(a.id, "approve", "standing"), /structured/);
+    assert.throws(() => answerGate(a.id, "approve", "bank"), /answer bank/);
     answerGate(a.id, "approve", "application");
     assert.equal(isSubmitting(1), false);
     assert.equal(resumeContext(1).approvedSummary, confirmation.text);
@@ -250,7 +248,7 @@ describe("durable questions", () => {
     answerGate(b.id, "Revise the cover letter", "application");
     assert.deepEqual(resumeContext(2).changeRequests, ["Revise the cover letter"]);
     const letter = parkGate(2, { kind: "cover_letter", text: "Letter draft", context: "Acme Engineer", options: [] }, null);
-    assert.throws(() => answerGate(letter.id, "Revised letter", "standing"), /structured/);
+    assert.throws(() => answerGate(letter.id, "Revised letter", "bank"), /answer bank/);
     answerGate(letter.id, "Revised letter", "application");
     assert.equal(findStoredAnswer(2, { kind: "cover_letter", text: "Letter draft", context: "Acme Engineer", options: [] }), "Revised letter");
     cancelJobGates(2);
@@ -264,7 +262,7 @@ describe("durable questions", () => {
       `
     job(1);
     const question = parkGate(1, prompt, checkpoint);
-    answerGate(question.id, "No", "standing");
+    answerGate(question.id, "No", "bank");
     const confirmation = parkGate(1, { kind: "confirm_submit", text: "Exact final submission summary" }, checkpoint);
     answerGate(confirmation.id, "approve", "application");
     const manual = parkGate(1, { kind: "manual", text: "Inspect the browser before continuing" }, checkpoint);
@@ -282,7 +280,9 @@ describe("durable questions", () => {
     assert.deepEqual(resumeContext(1), before);
     assert.equal(findStoredAnswer(1, prompt), "No");
     job(2);
-    assert.equal(findStoredAnswer(2, prompt), "No");
+    // Another application answers from the answer bank once the kept answer is filed there.
+    assert.equal(findStoredAnswer(2, prompt), null);
+    assert.deepEqual(unfiledAnswers(10).map(k => k.answer), ["No"]);
     assert.equal(isSubmitting(1), false);
     assert.deepEqual([...manualLeases()], []);
     assert.equal(consumeSubmitApproval(1, "Exact final submission summary"), true);
@@ -445,7 +445,7 @@ describe("durable questions", () => {
       `
     job(1); job(2); job(3); job(4); job(5); job(6);
     const answered = parkGate(1, prompt, checkpoint);
-    answerGate(answered.id, "No", "standing");
+    answerGate(answered.id, "No", "bank");
     parkGate(2, { ...prompt, context: "Separate consent" }, { ...checkpoint, slot: 4 });
     const final = parkGate(3, { kind: "confirm_submit", text: "Final exact summary" }, checkpoint);
     answerGate(final.id, "approve", "application");
@@ -469,7 +469,8 @@ describe("durable questions", () => {
     const group = listQuestionGroups().find(g => g.jobs.some(j => j.id === 2));
     assert.equal(group.key, getOpenGate(2).groupKey);
     job(7);
-    assert.equal(findStoredAnswer(7, prompt), "No");
+    assert.equal(findStoredAnswer(7, prompt), null);
+    assert.deepEqual(unfiledAnswers(10).map(k => k.answer), ["No"]);
     assert.equal(resumeContext(3).approvedSummary, "Final exact summary");
     assert.equal(consumeSubmitApproval(3, "Final exact summary"), true);
     assert.equal(consumeSubmitApproval(3, "Final exact summary"), false);

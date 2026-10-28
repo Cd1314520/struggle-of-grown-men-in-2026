@@ -33,7 +33,7 @@ Each feature file has an H1, one paragraph on the user-visible behaviour, then e
 
 - [Review queue (gate 1)](./review-queue.md): the queue, its filters and sort, approve, reject and undo, hold and Archive, ask for a different resume, keyboard.
 - [Fill gates](./fill-gates.md): what an approved application stops on in Pipeline: a question, the final-submit confirmation, a browser hand-off, a failure; how each is cleared; Blockers.
-- [Questions inbox](./questions-inbox.md): open questions one at a time beside their queue, answered for one application or as a standing answer.
+- [Questions inbox](./questions-inbox.md): open questions one at a time beside their queue, answered for one application and, by default, kept for the answer bank.
 - [Add a posting](./add-posting.md): hand-picking a job by URL from the sidebar, Settings or the palette.
 - [Applications: next steps](./applied-steps.md): the steps an employer asked for after an application was sent, marking them done or booked, the Applications segments, and recording an outcome.
 - [Profile and Settings](./profile-settings.md): editing profile files, the setup notice, the refused scan, and what Settings reports.

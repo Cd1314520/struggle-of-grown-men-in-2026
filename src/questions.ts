@@ -14,7 +14,8 @@ import {
 import { isSettled, to, type ParkedStatus } from "./status";
 
 export type GateKind = "question" | "cover_letter" | "confirm_submit" | "manual" | "submission_ambiguous";
-export type AnswerScope = "application" | "standing";
+// "bank": the candidate also keeps the answer for the answer bank, profile/answers.md (see answer-bank.ts).
+export type AnswerScope = "application" | "bank";
 export interface GateInput {
   kind: GateKind;
   text: string;
@@ -53,8 +54,6 @@ export interface QuestionGroup {
   text: string;
   context: string;
   options: string[];
-  scopeLabel: string;
-  standingAllowed: boolean;
   // askedAt: when this application asked. queuedAfter: questions it found on the same page that are still
   // unanswered, so answering this one opens the next instead of resuming the application.
   jobs: { id: number; company: string; title: string; gateId: string; askedAt: string; queuedAfter: number }[];
@@ -86,7 +85,6 @@ interface GateRow {
   text: string;
   context: string;
   options: string;
-  standing_allowed: number;
   state: Gate["state"];
   answer: string | null;
   scope: AnswerScope | null;
@@ -137,14 +135,15 @@ function identity(job: Job, input: GateInput) {
   const context = input.context ?? "",
     options = input.options ?? [];
   const structured = !!job.company.trim() && !!context.trim() && Array.isArray(input.options);
-  const standingAllowed = input.kind === "question" && structured;
+  // The same employer asking the same thing on several applications is one question to the candidate.
+  const shared = input.kind === "question" && structured;
   // The trailing false stood for gates imported from before gates were stored. Nothing creates those
   // any more, but it stays in the key so stored gates and answers keep matching.
   const matchKey = createHash("sha256")
     .update(JSON.stringify([job.company, input.kind, input.text, context, options, Array.isArray(input.options), false]))
     .digest("hex");
-  const groupKey = standingAllowed ? `employer:${matchKey}` : `job:${job.id}:${matchKey}`;
-  return { context, options, matchKey, groupKey, standingAllowed };
+  const groupKey = shared ? `employer:${matchKey}` : `job:${job.id}:${matchKey}`;
+  return { context, options, matchKey, groupKey };
 }
 function gate(row: GateRow): Gate {
   return {
@@ -262,8 +261,8 @@ function park(jobId: number, input: GateInput, checkpoint: FillCheckpoint | null
   };
   db.query(
     `
-      INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, standing_allowed, state, shot, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
+      INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, shot, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
   ).run(
     value.id,
     jobId,
@@ -274,7 +273,6 @@ function park(jobId: number, input: GateInput, checkpoint: FillCheckpoint | null
     input.text,
     key.context,
     JSON.stringify(key.options),
-    key.standingAllowed ? 1 : 0,
     value.shot,
     value.createdAt,
   );
@@ -294,9 +292,7 @@ export function findStoredAnswer(jobId: number, input: GateInput): string | null
   const local = db
     .query<{ answer: string }, [number, string]>("SELECT answer FROM application_answers WHERE job_id = ? AND match_key = ?")
     .get(jobId, key.matchKey);
-  if (local) return local.answer;
-  if (!key.standingAllowed) return null;
-  return db.query<{ answer: string }, [string]>("SELECT answer FROM standing_answers WHERE match_key = ?").get(key.matchKey)?.answer ?? null;
+  return local?.answer ?? null;
 }
 // ---- questions a worker found together. It queues every unknown question on a page and parks once,
 // on the first still unanswered; answering that one opens the next instead of starting a worker for it.
@@ -311,7 +307,7 @@ export function queueQuestion(jobId: number, input: GateInput) {
     now(),
   );
 }
-// The first queued question that neither this application nor a standing answer has answered yet.
+// The first queued question this application has not had answered yet.
 export function nextQueuedQuestion(jobId: number): GateInput | null {
   const rows = db
     .query<{ text: string; context: string; options: string }, [number]>(
@@ -363,8 +359,6 @@ export function listQuestionGroups(): QuestionGroup[] {
         text: row.text,
         context: row.context,
         options: JSON.parse(row.options) as string[],
-        scopeLabel: row.standing_allowed ? `Only ${row.employer}; exact prompt, context, and choices, including future applications` : "This application only",
-        standingAllowed: !!row.standing_allowed,
         jobs: [],
         createdAt: row.created_at,
         openedAt: 0,
@@ -411,22 +405,22 @@ export function answerGate(gateId: string, answer: string, scope: AnswerScope): 
       if (!row || !isCurrent(row, requireJob(row.job_id))) throw new Error("Gate is stale or already answered");
       if (row.kind === "manual" || row.kind === "submission_ambiguous" || isSubmitting(row.job_id))
         throw new Error("This gate requires explicit manual resolution");
-      if (scope === "standing" && !row.standing_allowed) throw new Error("Standing answers require a structured employer-scoped question");
+      if (scope === "bank" && row.kind !== "question") throw new Error("Only answers to questions go to the answer bank");
       const at = now(),
         affected: number[] = [];
-      if (scope === "standing")
+      // Kept for the answer bank: the agent that files it decides what it says beyond this application.
+      if (scope === "bank")
         db.query(
           `
-          INSERT INTO standing_answers (match_key, employer, question, context, options, answer, source_gate_id, answered_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(match_key) DO UPDATE SET answer = excluded.answer, source_gate_id = excluded.source_gate_id, answered_at = excluded.answered_at`,
-        ).run(row.match_key, row.employer, row.text, row.context, row.options, answer, row.id, at);
+          INSERT INTO banked_answers (job_id, employer, title, question, context, options, answer, answered_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(row.job_id, row.employer, requireJob(row.job_id).title, row.text, row.context, row.options, answer, at);
+      // Every application in its group asks exactly this, so the answer goes to all of them now; others
+      // asking it in other words wait for the answer bank to cover them (see recheck.ts).
       const targets =
         scope === "application"
           ? [row]
-          : db
-              .query<GateRow, [string]>("SELECT * FROM question_gates WHERE match_key = ? AND standing_allowed = 1 AND state = 'open' ORDER BY job_id")
-              .all(row.match_key);
+          : db.query<GateRow, [string]>("SELECT * FROM question_gates WHERE group_key = ? AND state = 'open' ORDER BY job_id").all(row.group_key);
       for (const target of targets) {
         const job = getJob(target.job_id);
         if (!job || !isCurrent(target, job) || isSubmitting(job.id)) continue;
@@ -439,12 +433,37 @@ export function answerGate(gateId: string, answer: string, scope: AnswerScope): 
   for (const jobId of jobIds) notifyJobChange(jobId);
   return { jobIds };
 }
+// ---- answers kept for the answer bank, waiting for answer-bank.ts to file them into answers.md.
+export interface BankedAnswer {
+  id: number;
+  employer: string;
+  title: string;
+  question: string;
+  context: string;
+  options: string[];
+  answer: string;
+  answeredAt: string;
+}
+export function unfiledAnswers(limit: number): BankedAnswer[] {
+  return db
+    .query<{ id: number; employer: string; title: string; question: string; context: string; options: string; answer: string; answered_at: string }, [number]>(
+      "SELECT id, employer, title, question, context, options, answer, answered_at FROM banked_answers WHERE filed_at IS NULL ORDER BY answered_at, id LIMIT ?",
+    )
+    .all(limit)
+    .map(r => ({ ...r, options: JSON.parse(r.options) as string[], answeredAt: r.answered_at }));
+}
+export function markFiled(ids: readonly number[]) {
+  const at = now();
+  db.transaction(() => {
+    for (const id of ids) db.query("UPDATE banked_answers SET filed_at = ? WHERE id = ?").run(at, id);
+  })();
+}
 export function resumeContext(jobId: number): ResumeContext {
-  const job = requireJob(jobId);
+  requireJob(jobId);
   const rows = db
-    .query<{ kind: GateKind; question: string; context: string; options: string; answer: string; match_key: string }, [number]>(
+    .query<{ kind: GateKind; question: string; context: string; options: string; answer: string }, [number]>(
       `
-      SELECT kind, question, context, options, answer, match_key
+      SELECT kind, question, context, options, answer
       FROM application_answers
       WHERE job_id = ?
       ORDER BY answered_at, match_key`,
@@ -457,22 +476,6 @@ export function resumeContext(jobId: number): ResumeContext {
     options: JSON.parse(row.options) as string[],
     answer: row.answer,
   }));
-  const localKeys = new Set(rows.map(row => row.match_key));
-  // Only standing rules observed on this application are relevant; don't inject unrelated employer facts.
-  const standing = db
-    .query<{ question: string; context: string; options: string; answer: string; match_key: string }, [number, string]>(
-      `
-      SELECT DISTINCT s.question, s.context, s.options, s.answer, s.match_key
-      FROM standing_answers s
-      JOIN question_gates g ON g.match_key = s.match_key
-      WHERE g.job_id = ? AND g.standing_allowed = 1 AND s.employer = ?
-      ORDER BY s.match_key`,
-    )
-    .all(jobId, job.company);
-  for (const row of standing) {
-    if (!localKeys.has(row.match_key))
-      answers.push({ kind: "question", question: row.question, context: row.context, options: JSON.parse(row.options) as string[], answer: row.answer });
-  }
   const approval = unconsumedApproval(jobId);
   const lastConfirmation = db
     .query<{ answer: string | null }, [number]>(
