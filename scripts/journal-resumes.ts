@@ -221,7 +221,7 @@ export function computeFingerprint(postingText: string, resumeText: string, note
 
 export function extractPdfText(pdfPath: string): { success: true; text: string } | { success: false; error: string } {
   try {
-    const proc = Bun.spawnSync(["/usr/bin/pdftotext", "-layout", pdfPath, "-"]);
+    const proc = Bun.spawnSync([process.platform === "win32" ? "pdftotext" : "/usr/bin/pdftotext", "-layout", pdfPath, "-"]);
     if (proc.exitCode !== 0) {
       return {
         success: false,

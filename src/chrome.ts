@@ -1,8 +1,11 @@
 // Long-lived, real (headed) Chromes, each on its own virtual display with a persistent profile.
 // omp attaches to one over CDP, so logins, cookies and half-filled tabs outlive any worker.
 // Every function takes the browser's number (see browserSlot in config.ts); 0 is the original.
-import { mkdirSync } from "node:fs";
+// On Windows there is no virtual display: each Chrome is an ordinary window on the desktop, taken
+// over by hand where it is, so Xvfb and the noVNC view are left out.
+import { existsSync, mkdirSync } from "node:fs";
 import { connect } from "node:net";
+import { join } from "node:path";
 import { browserSlot, config } from "./config";
 import { logEvent } from "./db";
 import { startCdpProxy, type CdpProxy } from "./cdp-proxy";
@@ -43,9 +46,22 @@ const displayAlive = (display: string) =>
     });
   });
 
+const WINDOWS = process.platform === "win32";
+
 const detached = (cmd: string[], env: Record<string, string | undefined>) => {
-  Bun.spawn(["setsid", ...cmd], { stdin: "ignore", stdout: "ignore", stderr: "ignore", env }).unref();
+  Bun.spawn(cmd, { stdin: "ignore", stdout: "ignore", stderr: "ignore", env, detached: true }).unref();
 };
+
+// Where Chrome's installers put it on Windows, machine-wide or for the user alone.
+export function chromeBinary(): string | null {
+  if (!WINDOWS) return Bun.which("google-chrome");
+  const roots = [process.env["PROGRAMFILES"], process.env["PROGRAMFILES(X86)"], process.env["LOCALAPPDATA"]];
+  for (const root of roots) {
+    const exe = root && join(root, "Google", "Chrome", "Application", "chrome.exe");
+    if (exe && existsSync(exe)) return exe;
+  }
+  return Bun.which("chrome");
+}
 
 const portOpen = (port: number) =>
   new Promise<boolean>(resolve => {
@@ -62,7 +78,7 @@ const portOpen = (port: number) =>
 // noVNC view of the virtual display, for taking over a tab by hand. Localhost only.
 async function ensureVnc(slot: number) {
   const { display, vncPort } = browserSlot(slot);
-  if (!vncPort || !(await displayAlive(display))) return;
+  if (WINDOWS || !vncPort || !(await displayAlive(display))) return;
   const rfb = vncPort - 180; // 6080 -> 5900
   if (!(await portOpen(rfb)))
     detached(["x11vnc", "-display", display, "-localhost", "-rfbport", String(rfb), "-forever", "-shared", "-nopw", "-quiet"], process.env);
@@ -73,15 +89,17 @@ export async function ensureChrome(slot = 0) {
   if (await cdpAlive(slot)) return ensureVnc(slot);
   const { window } = config.chrome;
   const { display, cdpPort, profile } = browserSlot(slot);
-  if (!(await displayAlive(display))) {
+  if (!WINDOWS && !(await displayAlive(display))) {
     detached(["Xvfb", display, "-screen", "0", `${window[0]}x${window[1]}x24`, "-nolisten", "tcp"], process.env);
     for (let i = 0; i < 20 && !(await displayAlive(display)); i++) await Bun.sleep(150);
     if (!(await displayAlive(display))) throw new Error(`Xvfb did not start on display ${display}`);
   }
+  const chrome = chromeBinary();
+  if (!chrome) throw new Error("Chrome is not installed");
   mkdirSync(profile, { recursive: true });
   detached(
     [
-      "google-chrome",
+      chrome,
       `--user-data-dir=${profile}`,
       `--remote-debugging-port=${cdpPort}`,
       "--remote-debugging-address=127.0.0.1",
@@ -94,17 +112,15 @@ export async function ensureChrome(slot = 0) {
       "--lang=en-US",
       // Vulkan reaches the machine's actual GPU through its render node (/dev/dri/renderD128),
       // providing genuine hardware WebGL and WebGL2 acceleration under Xvfb without spoofing.
-      "--use-gl=angle",
-      "--use-angle=vulkan",
-      "--enable-features=Vulkan",
-      "--ignore-gpu-blocklist",
+      // Windows Chrome already reaches the GPU through its default ANGLE backend (Direct3D).
+      ...(WINDOWS ? [] : ["--use-gl=angle", "--use-angle=vulkan", "--enable-features=Vulkan", "--ignore-gpu-blocklist"]),
       "about:blank",
     ],
     { ...process.env, DISPLAY: display },
   );
   for (let i = 0; i < 40; i++) {
     if (await cdpAlive(slot)) {
-      logEvent("system", `Chrome started on display ${display}, CDP port ${cdpPort}`);
+      logEvent("system", WINDOWS ? `Chrome started, CDP port ${cdpPort}` : `Chrome started on display ${display}, CDP port ${cdpPort}`);
       return ensureVnc(slot);
     }
     await Bun.sleep(250);

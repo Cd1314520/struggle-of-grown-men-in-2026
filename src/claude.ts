@@ -14,10 +14,15 @@ import { errorMessage } from "./errors";
 import type { CatalogModel } from "./models";
 import { CLAUDE_PREFIX, durationMs, type Builtin, type HostTool, type ToolArgs, type WorkerHandle, type WorkerOptions, type WorkerResult } from "./worker";
 
-// Overridable so a test can stand in a fake.
-const claude = () => process.env["AUTO_APPLY_CLAUDE"] ?? "claude";
-// Pinned: its tool names and options are what prompts/browser-claude.md describes.
-export const PLAYWRIGHT_MCP = ["npx", "-y", "@playwright/mcp@0.0.83"];
+// Overridable so a test can stand in a fake. A fake in TypeScript runs under Bun: Windows does not
+// start a script from its shebang.
+const claude = () => {
+  const bin = process.env["AUTO_APPLY_CLAUDE"] ?? "claude";
+  return bin.endsWith(".ts") ? [process.execPath, bin] : [bin];
+};
+// Pinned: its tool names and options are what prompts/browser-claude.md describes. On Windows npx is
+// a batch file, which Claude Code starts only through cmd.
+export const PLAYWRIGHT_MCP = [...(process.platform === "win32" ? ["cmd", "/c"] : []), "npx", "-y", "@playwright/mcp@0.0.83"];
 
 // omp's built-in tools as Claude Code's. `eval` has no counterpart: the fill worker gets a `prefill`
 // host tool in its place (src/fill.ts).
@@ -163,7 +168,7 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
   const servers: Record<string, unknown> = { host: host.config };
   if (opts.browser) servers["browser"] = browserServer(opts.cdpPort ?? config.chrome.proxyPort);
   const args = [
-    claude(),
+    ...claude(),
     "-p",
     "--output-format",
     "stream-json",
@@ -315,9 +320,9 @@ const ALIASES: { alias: string; name: string }[] = [
   { alias: "haiku", name: "Claude Haiku (latest)" },
 ];
 export async function claudeCatalog(): Promise<{ models: CatalogModel[]; error: string | null }> {
-  if (!Bun.which(claude())) return { models: [], error: "claude is not installed" };
+  if (!Bun.which(claude()[0] ?? "claude")) return { models: [], error: "claude is not installed" };
   try {
-    const proc = Bun.spawn([claude(), "auth", "status"], { stdout: "pipe", stderr: "pipe" });
+    const proc = Bun.spawn([...claude(), "auth", "status"], { stdout: "pipe", stderr: "pipe" });
     const timer = setTimeout(() => {
       proc.kill();
     }, 30_000);

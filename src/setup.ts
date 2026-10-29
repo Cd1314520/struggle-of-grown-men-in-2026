@@ -3,6 +3,7 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { loadCompanies } from "./ats";
+import { chromeBinary } from "./chrome";
 import { config, LOCAL_CONFIG, MODEL_STAGES, PROFILE } from "./config";
 import { kvGet } from "./db";
 import * as gmail from "./gmail";
@@ -35,20 +36,23 @@ export interface SetupResult {
 // Whether any stage's model runs on harness `h`.
 const onHarness = (h: HarnessId) => MODEL_STAGES.some(stage => harnessOf(config.models[stage] ?? null) === h);
 
-// The programs the app starts, as the service's PATH finds them.
-const PROGRAMS: { name: string; purpose: string; required: () => boolean }[] = [
+const WINDOWS = process.platform === "win32";
+
+// The programs the app starts, as the service's PATH finds them (Chrome also where Windows installs it).
+// Windows has no virtual displays: Chrome is a window on the desktop, with no live view to serve.
+const PROGRAMS: { name: string; purpose: string; required: () => boolean; found?: () => boolean }[] = [
   { name: "omp", purpose: "Runs the agents on omp's models", required: () => onHarness("omp") },
   { name: "claude", purpose: "Runs the agents on Claude Code's models (claude-code/…)", required: () => onHarness("claude-code") },
   { name: "npx", purpose: "Starts Playwright's browser tools for a Claude Code fill", required: () => harnessOf(config.models.fill) === "claude-code" },
   { name: "typst", purpose: "Compiles the stock and tailored resumes", required: () => true },
-  { name: "google-chrome", purpose: "The browsers applications are filled in", required: () => true },
-  { name: "Xvfb", purpose: "Virtual displays for the browsers", required: () => true },
+  { name: WINDOWS ? "chrome" : "google-chrome", purpose: "The browsers applications are filled in", required: () => true, found: () => !!chromeBinary() },
+  { name: "Xvfb", purpose: "Virtual displays for the browsers", required: () => !WINDOWS },
   { name: "pdfinfo", purpose: "Resume page counts (poppler-utils)", required: () => true },
   { name: "pdftoppm", purpose: "Resume previews (poppler-utils)", required: () => true },
   { name: "pdftotext", purpose: "Reading uploaded PDFs and the resume journal (poppler-utils)", required: () => true },
   { name: "git", purpose: "The resume diff on a job's page", required: () => true },
-  { name: "x11vnc", purpose: "The live view of a browser", required: () => config.chrome.vncPort > 0 },
-  { name: "websockify", purpose: "The live view of a browser, in a web page", required: () => config.chrome.vncPort > 0 },
+  { name: "x11vnc", purpose: "The live view of a browser", required: () => !WINDOWS && config.chrome.vncPort > 0 },
+  { name: "websockify", purpose: "The live view of a browser, in a web page", required: () => !WINDOWS && config.chrome.vncPort > 0 },
   { name: "tailscale", purpose: "Optional: publishing the app to your tailnet", required: () => false },
 ];
 
@@ -63,7 +67,7 @@ const step = (id: SetupStepId, checks: SetupCheck[], required = true): SetupStep
 function tools() {
   return step(
     "tools",
-    PROGRAMS.map(p => check(p.name, p.name, !!Bun.which(p.name), p.purpose, p.required())),
+    PROGRAMS.map(p => check(p.name, p.name, p.found ? p.found() : !!Bun.which(p.name), p.purpose, p.required())),
   );
 }
 

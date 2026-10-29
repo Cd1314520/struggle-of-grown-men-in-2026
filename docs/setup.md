@@ -61,9 +61,19 @@ What the app does check is where a request comes from (`refusal` in `src/server.
 
 If you reach the app under another name, set `publicUrl` to it.
 
+## Windows (native)
+
+The app also runs on Windows itself, without a service manager. Each Chrome is an ordinary window on the desktop instead of on a virtual display, so Xvfb, x11vnc and websockify are not needed and there is no noVNC view: take over a tab in the window itself.
+
+1. **Programs**: `winget install Oven-sh.Bun --version <.bun-version>`, `winget install Typst.Typst`, `winget install oschwartz10612.Poppler`, plus Chrome, Git and Node (for `npx`). Install Claude Code with its native installer (`claude.exe`): the app hands it a multi-line prompt that the npm package's `claude.cmd` would mangle. Open a new terminal afterwards so `PATH` has them.
+2. **Line endings**: `.gitattributes` keeps the checkout in LF, which the format check and the hooks need. A checkout made before it with `core.autocrlf` on needs `git rm -r --cached -q . && git reset --hard` once.
+3. **Run**: `bun install`, then `bun run start` from the repository. It stops when the terminal closes; start it again (or from a Task Scheduler task at log on) to keep it running.
+
+Chrome is found where its installer puts it (`Program Files`, or `%LOCALAPPDATA%` for a per-user install). It uses Windows Chrome's default GPU backend, so run the [browser audit](browser.md) before the first real application.
+
 ## Windows (WSL2)
 
-The app does not run on Windows itself (Xvfb, `setsid`, X11 sockets, systemd), but it runs in a WSL2 Linux distro with the steps above. Inside WSL, systemd still runs the app; a Windows scheduled task only keeps the distro up. Untested so far.
+The app also runs in a WSL2 Linux distro with the steps above, as on Linux. Inside WSL, systemd still runs the app; a Windows scheduled task only keeps the distro up. Untested so far.
 
 1. **Distro**: `wsl --install -d Ubuntu` in an elevated PowerShell, then open Ubuntu and create your user.
 2. **Repository**: clone it to `~/auto-apply` inside the distro, not under `/mnt/c`: the Windows drive is slow from WSL and its line endings and permissions break the hooks and `chmod`.

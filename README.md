@@ -12,7 +12,7 @@ systemctl --user status auto-apply
 
 | | |
 |---|---|
-| [docs/setup.md](docs/setup.md) | prerequisites, installing the service (Linux, or Windows through WSL2), the profile, Gmail, who can reach the app; the Setup page checks each step |
+| [docs/setup.md](docs/setup.md) | prerequisites, installing the service (Linux; Windows natively or through WSL2), the profile, Gmail, who can reach the app; the Setup page checks each step |
 | [docs/operations.md](docs/operations.md) | auto apply, parked applications and Questions, the daily digest, the observation journal, Workday recovery |
 | [docs/pipeline.md](docs/pipeline.md) | sources and scanning, duplicates, freshness, resumes |
 | [docs/browser.md](docs/browser.md) | the browsers, the pacing proxy, and the fingerprint audit |

@@ -19,5 +19,11 @@ for (const f of ["resume.typ", "main.example.typ"]) copyFileSync(join(resume, f)
 copyFileSync(join(resume, "main.example.typ"), join(dir, "resume", "main.typ"));
 process.env["AUTO_APPLY_RESUME_DIR"] = join(dir, "resume");
 afterAll(() => {
-  rmSync(dir, { recursive: true, force: true });
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch (err) {
+    // Windows will not remove the database that src/db.ts holds open until this process exits; the
+    // directory is left in the temp folder.
+    if (process.platform !== "win32") throw err;
+  }
 });

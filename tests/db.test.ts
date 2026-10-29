@@ -557,7 +557,8 @@ describe("postings, duplicates and sources", () => {
 
 describe("where SQL lives", () => {
   const root = join(import.meta.dir, "..");
-  const files = [...new Bun.Glob("{src,scripts}/**/*.ts").scanSync(root)].sort();
+  // Forward slashes on Windows too, as the sets below name them.
+  const files = [...new Bun.Glob("{src,scripts}/**/*.ts").scanSync(root)].map(f => f.replaceAll("\\", "/")).sort();
   const read = (file: string) => Bun.file(join(root, file)).text();
   // The modules that own tables. Everything else calls their functions.
   const owners = new Set([

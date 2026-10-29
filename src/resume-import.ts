@@ -84,7 +84,9 @@ function extractText(file: string) {
     if (/\.pdf$/i.test(file)) {
       Bun.spawnSync(["pdftotext", "-layout", file, `${file}.txt`]);
     } else if (/\.docx$/i.test(file)) {
-      const xml = Bun.spawnSync(["unzip", "-p", file, "word/document.xml"]).stdout.toString();
+      // Windows has no unzip; its own tar reads zip archives.
+      const unzip = process.platform === "win32" ? [join(process.env["SYSTEMROOT"] ?? "C:\\Windows", "System32", "tar.exe"), "-xOf"] : ["unzip", "-p"];
+      const xml = Bun.spawnSync([...unzip, file, "word/document.xml"]).stdout.toString();
       const text = xml
         .replace(/<\/w:p>/g, "\n")
         .replace(/<w:tab\/>/g, "\t")
