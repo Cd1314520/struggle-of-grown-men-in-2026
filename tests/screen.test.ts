@@ -34,7 +34,7 @@ describe("screening postings before triage", () => {
     ])
       expect(screenOut(title, "Remote - US")).toBeNull();
   });
-  it("drops hardware, embedded and FPGA titles", () => {
+  it("keeps hardware, embedded and FPGA titles: the candidate is an EE student", () => {
     for (const title of [
       "Embedded Software Engineer",
       "Embedded Systems Engineer",
@@ -45,7 +45,7 @@ describe("screening postings before triage", () => {
       "Electrical Engineer, Hardware Platform, 2+ years of experience",
       "Firmware Engineer, Manufacturing Test",
     ])
-      expect(screenOut(title, "Austin, TX")).toMatch(/hardware or embedded/);
+      expect(screenOut(title, "Austin, TX")).toBeNull();
   });
   it("keeps software and data titles that only mention hardware", () => {
     for (const title of [

@@ -1,6 +1,6 @@
 # Task: find new places to look
 
-Use web search to widen the candidate's job search. Look for both kinds of employer the targets describe: tech companies at scale with agent-native engineering (the real targets; look for concrete signs such as engineering blog posts on agent use, agentic products or internal agent platforms), and, in the practice phase, employers the real search rules out where the candidate is still a credible engineer. Two outputs:
+Use web search to widen the candidate's job search. Look for the employers and roles the targets below describe: the real targets, and, in the practice phase, employers the real search rules out where the candidate is still a credible engineer. Two outputs:
 
 1. Companies that plausibly hire for the target roles and publish jobs on one of the supported boards. For each, call `add_company` with the board type and its slug, taken from the board's URL:
 
