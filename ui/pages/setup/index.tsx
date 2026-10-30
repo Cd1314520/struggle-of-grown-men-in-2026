@@ -86,8 +86,9 @@ const STEPS: Record<SetupStepId, StepCopy> = {
         <p>On Debian or Ubuntu, most come from the package manager:</p>
         <Code>sudo apt install xvfb x11vnc websockify novnc poppler-utils git</Code>
         <p>
-          Install Google Chrome from its <Mono>.deb</Mono>, Typst from its releases (or <Mono>cargo install typst-cli</Mono>), and omp or Claude Code (or both),
-          so that <Mono>omp --version</Mono> or <Mono>claude --version</Mono> runs. Then restart the service so it sees them:
+          Install Google Chrome from its <Mono>.deb</Mono>, Typst from its releases (or <Mono>cargo install typst-cli</Mono>), and omp, Claude Code or Codex
+          (any of them), so that <Mono>omp --version</Mono>, <Mono>claude --version</Mono> or <Mono>codex --version</Mono> runs. On Windows the Codex desktop
+          app&apos;s own CLI is found without being on the PATH. Then restart the service so it sees them:
         </p>
         <Code>systemctl --user restart auto-apply</Code>
         <p>
@@ -98,15 +99,19 @@ const STEPS: Record<SetupStepId, StepCopy> = {
   },
   models: {
     title: "Connect a model provider",
-    description: "Every agent runs through omp or Claude Code. Sign in to at least one, then choose a model for each kind of work.",
+    description: "Every agent runs through omp, Claude Code or Codex. Sign in to at least one, then choose a model for each kind of work.",
     shown: c => !c.ok || c.key === "catalog",
     how: () => (
       <>
-        <p>In a terminal on this machine, log in to a provider through omp (a subscription or an API key), or sign in to Claude Code, then check again:</p>
+        <p>
+          In a terminal on this machine, log in to a provider through omp (a subscription or an API key), sign in to Claude Code, or sign in to Codex for this
+          app (its workers keep their own sign-in under <Mono>data/codex</Mono>, apart from your own Codex setup), then check again:
+        </p>
         <Code>omp login</Code>
         <Code>claude auth login</Code>
+        <Code>bun run codex:login</Code>
         <p>
-          A stage on a <Mono>claude-code/…</Mono> model runs through Claude Code; any other through omp.
+          A stage on a <Mono>claude-code/…</Mono> model runs through Claude Code, one on a <Mono>codex/…</Mono> model through Codex; any other through omp.
         </p>
         <p>
           A stage left on omp&apos;s default uses whatever model omp picks. Cheap, fast models suit triage and the screen; assessing, tailoring and filling

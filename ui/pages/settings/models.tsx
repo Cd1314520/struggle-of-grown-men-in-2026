@@ -31,6 +31,7 @@ const DEFAULT = "__default__";
 const HARNESSES: { id: keyof ModelCatalog["errors"]; label: string; login: string }[] = [
   { id: "omp", label: "omp", login: "omp login" },
   { id: "claude-code", label: "Claude Code", login: "claude auth login" },
+  { id: "codex", label: "Codex", login: "bun run codex:login" },
 ];
 const price = (n: number) => (n >= 10 ? n.toFixed(0) : n >= 1 ? n.toFixed(1).replace(/\.0$/, "") : n.toFixed(2));
 const option = (m: CatalogModel): ComboOption => ({
@@ -117,7 +118,7 @@ export function Models() {
     <SettingsPanel
       id="models"
       title="Models"
-      description="Which model each kind of agent work runs on. A claude-code model runs through Claude Code (claude -p) as signed in on this machine; any other through omp. The list is what the two can reach here."
+      description="Which model each kind of agent work runs on. A claude-code model runs through Claude Code (claude -p) as signed in on this machine, a codex model through Codex (codex exec) as signed in for this app; any other through omp. The list is what the three can reach here."
       actions={
         data && (
           <Button size="sm" variant="ghost" icon={<RefreshCw />} loading={refreshing} onClick={() => void refresh()} className="-mr-2.5 touch:-mr-3">

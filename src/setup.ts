@@ -10,7 +10,8 @@ import * as gmail from "./gmail";
 import type { ModelCatalog } from "./models";
 import { isExample, profileProblems } from "./profile";
 import { stockResume } from "./resume";
-import { harnessOf, type HarnessId } from "./worker";
+import { codexBinary } from "./codex";
+import { harnessOf, usesPlaywright, type HarnessId } from "./worker";
 
 export type SetupStepId = "tools" | "models" | "machine" | "resume" | "profile" | "gmail" | "scan";
 export interface SetupCheck {
@@ -43,7 +44,13 @@ const WINDOWS = process.platform === "win32";
 const PROGRAMS: { name: string; purpose: string; required: () => boolean; found?: () => boolean }[] = [
   { name: "omp", purpose: "Runs the agents on omp's models", required: () => onHarness("omp") },
   { name: "claude", purpose: "Runs the agents on Claude Code's models (claude-code/…)", required: () => onHarness("claude-code") },
-  { name: "npx", purpose: "Starts Playwright's browser tools for a Claude Code fill", required: () => harnessOf(config.models.fill) === "claude-code" },
+  {
+    name: "codex",
+    purpose: "Runs the agents on Codex's models (codex/…); the Codex desktop app's CLI also counts",
+    required: () => onHarness("codex"),
+    found: () => !!codexBinary(),
+  },
+  { name: "npx", purpose: "Starts Playwright's browser tools for a Claude Code or Codex fill", required: () => usesPlaywright(config.models.fill) },
   { name: "typst", purpose: "Compiles the stock and tailored resumes", required: () => true },
   { name: WINDOWS ? "chrome" : "google-chrome", purpose: "The browsers applications are filled in", required: () => true, found: () => !!chromeBinary() },
   { name: "Xvfb", purpose: "Virtual displays for the browsers", required: () => !WINDOWS },
@@ -72,10 +79,10 @@ function tools() {
 }
 
 // A stage's model is known when its harness lists it under that exact name. omp also matches names
-// loosely ("opus"), and Claude Code takes any full model name, so an unlisted name is a warning, not a
-// failure.
+// loosely ("opus"), and Claude Code and Codex take any full model name, so an unlisted name is a
+// warning, not a failure.
 function models(catalog: ModelCatalog | null) {
-  if (!catalog) return step("models", [check("catalog", "Model provider", false, "Checking what omp and Claude Code can reach…", false)]);
+  if (!catalog) return step("models", [check("catalog", "Model provider", false, "Checking what omp, Claude Code and Codex can reach…", false)]);
   const known = new Set(catalog.models.flatMap(m => [m.selector, m.selector.slice(m.provider.length + 1)]));
   const reachable = catalog.models.length > 0;
   const harness = (h: HarnessId, label: string) => {
@@ -90,13 +97,14 @@ function models(catalog: ModelCatalog | null) {
       reachable,
       reachable
         ? `${catalog.models.length} models from ${new Set(catalog.models.map(m => m.provider)).size} providers`
-        : Object.values(catalog.errors).join("; ") || "No models listed: log in to omp or Claude Code",
+        : Object.values(catalog.errors).join("; ") || "No models listed: log in to omp, Claude Code or Codex",
     ),
     harness("omp", "omp"),
     harness("claude-code", "Claude Code"),
+    harness("codex", "Codex"),
     ...MODEL_STAGES.map(stage => {
       const model = config.models[stage] ?? null;
-      const ok = model === null || !reachable || known.has(model) || harnessOf(model) === "claude-code";
+      const ok = model === null || !reachable || known.has(model) || harnessOf(model) !== "omp";
       return check(`stage.${stage}`, stage, ok, model === null ? "omp's default model" : ok ? model : `${model} is not in omp's list`, false);
     }),
   ]);

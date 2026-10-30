@@ -1,8 +1,9 @@
 // Agent workers, whichever harness runs them: one process per unit of work, given a prompt and the
 // app's "host tools". The agent calls back into those tools; that is the only channel through which a
 // worker changes application state. The stage's model picks the harness: `claude-code/<model>` runs
-// on Claude Code (src/claude.ts), anything else on omp (src/omp.ts).
+// on Claude Code (src/claude.ts), `codex/<model>` on Codex (src/codex.ts), anything else on omp (src/omp.ts).
 import { killClaudeWorkers, runClaude } from "./claude";
+import { killCodexWorkers, runCodex } from "./codex";
 import { killOmpWorkers, runOmp } from "./omp";
 
 // Whatever the agent sent: nothing about it is trusted until read through `arg`.
@@ -81,18 +82,25 @@ export interface WorkerHandle {
   abort: () => void;
 }
 
-export type HarnessId = "omp" | "claude-code";
+export type HarnessId = "omp" | "claude-code" | "codex";
 export const CLAUDE_PREFIX = "claude-code/";
+export const CODEX_PREFIX = "codex/";
 // null is omp's default model.
-export const harnessOf = (model: string | null | undefined): HarnessId => (model?.startsWith(CLAUDE_PREFIX) ? "claude-code" : "omp");
+export const harnessOf = (model: string | null | undefined): HarnessId =>
+  model?.startsWith(CLAUDE_PREFIX) ? "claude-code" : model?.startsWith(CODEX_PREFIX) ? "codex" : "omp";
+
+// Claude Code and Codex both reach the browser through Playwright's MCP server, not omp's browser tool.
+export const usesPlaywright = (model: string | null | undefined) => harnessOf(model) !== "omp";
 
 export function runWorker(opts: WorkerOptions): WorkerHandle {
-  return harnessOf(opts.model) === "claude-code" ? runClaude(opts) : runOmp(opts);
+  const harness = harnessOf(opts.model);
+  return harness === "claude-code" ? runClaude(opts) : harness === "codex" ? runCodex(opts) : runOmp(opts);
 }
 
 export const killAllWorkers = () => {
   killOmpWorkers();
   killClaudeWorkers();
+  killCodexWorkers();
 };
 
 // "20m", "24h", "90s" in milliseconds.

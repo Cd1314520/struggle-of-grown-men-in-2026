@@ -20,7 +20,7 @@ const claude = () => {
   const bin = process.env["AUTO_APPLY_CLAUDE"] ?? "claude";
   return bin.endsWith(".ts") ? [process.execPath, bin] : [bin];
 };
-// Pinned: its tool names and options are what prompts/browser-claude.md describes. On Windows npx is
+// Pinned: its tool names and options are what prompts/browser-playwright.md describes. On Windows npx is
 // a batch file, which Claude Code starts only through cmd.
 export const PLAYWRIGHT_MCP = [...(process.platform === "win32" ? ["cmd", "/c"] : []), "npx", "-y", "@playwright/mcp@0.0.83"];
 
@@ -44,7 +44,7 @@ interface Rpc {
 }
 
 // A minimal MCP server over streamable HTTP: plain JSON replies, no event stream, no sessions.
-function serveHostTools(tools: Record<string, HostTool>, log: (kind: string, message: string) => void) {
+export function serveHostTools(tools: Record<string, HostTool>, log: (kind: string, message: string) => void) {
   const token = randomUUID();
   const call = async (name: string, args: ToolArgs) => {
     log("tool", `${name} ${JSON.stringify(args).slice(0, 600)}`);
@@ -106,7 +106,7 @@ function serveHostTools(tools: Record<string, HostTool>, log: (kind: string, mes
   };
 }
 
-const browserServer = (cdpPort: number) => {
+export const browserServer = (cdpPort: number) => {
   mkdirSync(join(DATA, "screenshots"), { recursive: true });
   return {
     type: "stdio",

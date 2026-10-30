@@ -15,7 +15,7 @@ import { getOpenGate, parkGate, readCheckpoint, recordCheckpoint, resumeContext 
 import { freezeResume, frozenResume } from "./resume";
 import { isSettled, to, wasSent } from "./status";
 import { fillTemplate } from "./template";
-import { harnessOf } from "./worker";
+import { usesPlaywright } from "./worker";
 import { deadEnd } from "./screen";
 import { lowStakesRule, readPrompt, render, termsRule } from "./worker-tools";
 
@@ -135,12 +135,12 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     JSON.stringify(buildFacts((YAML.parse(readProfile("personal.yml")) ?? {}) as Record<string, unknown>, mailbox, frozen.pdf), null, 1),
   );
   // An omp worker drives omp's browser tool and runs the prefill script in its JavaScript session; a
-  // Claude Code one drives Playwright's MCP tools, and the app runs the prefill script for it.
-  const onClaude = harnessOf(config.models.fill) === "claude-code";
+  // Claude Code or Codex one drives Playwright's MCP tools, and the app runs the prefill script for it.
+  const onPlaywright = usesPlaywright(config.models.fill);
   const ctx = { job, session, mailbox, isVerification, jobBrowser };
   const tools = fillTools(rt, ctx);
-  if (onClaude) tools["prefill"] = prefillTool(rt, ctx, prefillFacts);
-  const guide = onClaude ? "browser-claude" : "browser-omp";
+  if (onPlaywright) tools["prefill"] = prefillTool(rt, ctx, prefillFacts);
+  const guide = onPlaywright ? "browser-playwright" : "browser-omp";
   const vars = {
     ...job,
     resumePdf: frozen.pdf,
@@ -165,7 +165,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   };
   session.handle = rt.runWorker({
     name: "fill",
-    builtins: onClaude ? ["read", "write"] : ["read", "write", "eval"],
+    builtins: onPlaywright ? ["read", "write"] : ["read", "write", "eval"],
     jobId: job.id,
     model: config.models.fill,
     cwd: dir,
