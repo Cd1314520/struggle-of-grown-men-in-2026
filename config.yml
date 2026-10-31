@@ -82,10 +82,6 @@ schedule:
 # than the targets want (an internship search, say). null: every title goes to triage.
 screen:
   titles: null
-  # Triaged jobs are assessed one at a time under limits.prepPerDay: those whose "title | location"
-  # matches more of these patterns (case-insensitive regular expressions) first, then the most recently
-  # opened. Empty: newest first.
-  first: []
 
 # Remote-job aggregators, read during a scan but no more often than `minutes` each (they ask for a
 # few requests a day). A role also listed on a company board is folded into that one job.

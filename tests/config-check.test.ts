@@ -40,8 +40,6 @@ describe("config.yml", () => {
     expect(withChange(c => (c["screen"] = { titles: String.raw`\b(intern|co-?op)\b` }))).toEqual([]);
     expect(withChange(c => (c["screen"] = { titles: null }))).toEqual([]);
     expect(withChange(c => (c["screen"] = { titles: "(intern" }))).toEqual(['screen.titles: expected a regular expression, got "(intern"']);
-    expect(withChange(c => (c["screen"] = { first: ["(TX|Texas)$", "embedded"] }))).toEqual([]);
-    expect(withChange(c => (c["screen"] = { first: ["(TX"] }))).toEqual(['screen.first[0]: expected a regular expression, got "(TX"']);
   });
 
   it("refuses values of the wrong kind, by path", () => {

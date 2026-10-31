@@ -12,7 +12,6 @@ import {
   kvGet,
   kvSet,
   logEvent,
-  nextToPrep,
   openedAt,
   notifyJobChange,
   pruneChatter,
@@ -34,6 +33,7 @@ import { locateEmployerPostings, locatePerDay } from "./locate";
 import { runWorker, type RunWorker } from "./worker";
 import { needsJudgment, parsePracticeAssessment } from "./practice";
 import { prep } from "./prep";
+import { nextToPrep } from "./priority";
 import { profileProblems } from "./profile";
 import { bankDue, fileKeptAnswers } from "./answer-bank";
 import { recheckDue, recheckOpenQuestions } from "./recheck";

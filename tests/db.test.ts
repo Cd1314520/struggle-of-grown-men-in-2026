@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { SCHEMA_VERSION, connectDatabase, openDatabase, schemaVersion } from "../src/schema";
@@ -158,24 +158,29 @@ describe("job queries", () => {
   `);
   });
 
-  it("assesses the jobs matching more screen.first patterns first, then the newest", () => {
-    scenario(`
-    const { config } = await import(${JSON.stringify(join(import.meta.dir, "../src/config.ts"))});
+  it("assesses the highest priority first, then the newest, and only the newest without priority.yml", () => {
+    const body = (expected: number[]) => `
+    const { nextToPrep } = await import(${JSON.stringify(join(import.meta.dir, "../src/priority.ts"))});
     job(1, { status: "triaged", title: "Software Intern", location: "Seattle, WA", found_at: "2026-10-03 00:00:00" });
     job(2, { status: "triaged", title: "Embedded Intern", location: "Boston, MA", found_at: "2026-10-01 00:00:00" });
     job(3, { status: "triaged", title: "Embedded Intern", location: "Houston, TX", found_at: "2026-10-01 00:00:00" });
     job(4, { status: "triaged", title: "Hardware Intern", location: "Austin, TX", found_at: "2026-10-02 00:00:00" });
     job(5, { status: "skipped", title: "Embedded Intern", location: "Dallas, TX", found_at: "2026-10-04 00:00:00" });
-
-    assert.equal(store.nextToPrep().id, 1, "no patterns: the most recently opened");
-    config.screen = { first: [", (TX|Texas)$", "embedded|hardware"] };
-    assert.equal(store.nextToPrep().id, 4, "both patterns, and newer than job 3");
-    store.updateJob(4, { status: "skipped" });
-    assert.equal(store.nextToPrep().id, 3);
-    store.updateJob(3, { status: "skipped" });
-    assert.equal(store.nextToPrep().id, 2, "one pattern beats none, however new");
-    assert.equal(Object.keys(store.nextToPrep()).length, Object.keys(store.getJob(2)).length, "the whole job");
-  `);
+    const order = [];
+    for (let next; (next = nextToPrep());) {
+      order.push(next.id);
+      assert.equal(next.title, store.getJob(next.id).title, "the whole job");
+      store.updateJob(next.id, { status: "skipped" });
+    }
+    assert.deepEqual(order, ${JSON.stringify(expected)});`;
+    scenario(body([1, 4, 2, 3]));
+    const rules = "tiers: [{ points: 30, title: 'embedded|hardware' }]\nplaces: [{ points: 25, match: ', TX$' }]\n";
+    scenario(body([4, 3, 2, 1]), {
+      before: dir => {
+        mkdirSync(join(dir, "profile"));
+        writeFileSync(join(dir, "profile", "priority.yml"), rules);
+      },
+    });
   });
 
   it("lists the board, counts and siblings the UI shows", () => {
