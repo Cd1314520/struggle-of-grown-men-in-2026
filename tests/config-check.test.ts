@@ -36,6 +36,12 @@ describe("config.yml", () => {
     ).toStartWith("autoApply.minscore: not a setting this app knows");
   });
 
+  it("takes screen.titles only as a regular expression that compiles, or null", () => {
+    expect(withChange(c => (c["screen"] = { titles: String.raw`\b(intern|co-?op)\b` }))).toEqual([]);
+    expect(withChange(c => (c["screen"] = { titles: null }))).toEqual([]);
+    expect(withChange(c => (c["screen"] = { titles: "(intern" }))).toEqual(['screen.titles: expected a regular expression, got "(intern"']);
+  });
+
   it("refuses values of the wrong kind, by path", () => {
     expect(
       withChange(c => {

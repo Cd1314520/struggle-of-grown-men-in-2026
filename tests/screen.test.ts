@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { config } from "../src/config";
 import { isCapacityError } from "../src/errors";
 import { screenOut } from "../src/screen";
 
@@ -7,6 +8,21 @@ describe("screening postings before triage", () => {
     expect(screenOut("Software Engineer", "Austin, TX", "https://www.paycomonline.net/v4/ats/web.php/portal/E1A0/jobs/3")).toMatch(/Paycom/);
     expect(screenOut("Software Engineer", "Austin, TX", "https://job-boards.greenhouse.io/acme/jobs/1")).toBeNull();
     expect(screenOut("Software Engineer", "Austin, TX", "not a url")).toBeNull();
+  });
+  it("drops titles outside screen.titles when it is set, and none when it is not", () => {
+    const saved = config.screen;
+    try {
+      config.screen = { titles: String.raw`\b(intern(ship)?s?|co-?op|apprentice(ship)?)\b` };
+      for (const title of ["Electrical Engineering Intern", "Summer 2027 Internship - Firmware", "Co-op, Hardware Test (Spring 2027)"])
+        expect(screenOut(title, "Houston, TX")).toBeNull();
+      for (const title of ["Embedded Software Engineer", "Internal Tools Engineer", "International Sales Engineer"])
+        expect(screenOut(title, "Houston, TX")).toMatch(/screen\.titles/);
+      config.screen = { titles: null };
+      expect(screenOut("Embedded Software Engineer", "Houston, TX")).toBeNull();
+    } finally {
+      if (saved) config.screen = saved;
+      else delete config.screen;
+    }
   });
   it("drops senior-level titles", () => {
     for (const title of [

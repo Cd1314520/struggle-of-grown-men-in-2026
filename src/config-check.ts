@@ -23,6 +23,15 @@ const port = check(v => typeof v === "number" && Number.isInteger(v) && v >= 1 &
 const matching = (pattern: RegExp, expected: string) => check(v => typeof v === "string" && pattern.test(v), expected);
 const oneOf = (...allowed: string[]) => check(v => typeof v === "string" && allowed.includes(v), `one of ${allowed.join(", ")}`);
 const url = check(v => typeof v === "string" && /^https?:\/\//.test(v) && URL.canParse(v), "an http(s) URL");
+const regex = check(v => {
+  if (typeof v !== "string" || !v.trim()) return false;
+  try {
+    new RegExp(v, "i");
+    return true;
+  } catch {
+    return false;
+  }
+}, "a regular expression");
 const anything: Check = () => undefined;
 const orNull =
   (inner: Check): Check =>
@@ -88,6 +97,7 @@ const CONFIG = shape(
     mailbox: orNull(matching(/^\S+@\S+$/, "an email address")),
     autoApply: shape({}, { minScore: amount(), allowConcerns: bool, perDay: count(), perEmployer: count() }),
     questionDigest: shape({}, { enabled: bool, time: matching(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:mm in 24-hour local time"), timeZone: text }),
+    screen: shape({}, { titles: orNull(regex) }),
     // Each feed and board takes its own extra parameters.
     feeds: shape({}, {}, shape({ minutes: amount() }, {}, anything)),
     boards: shape(

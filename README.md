@@ -29,7 +29,7 @@ Once an application is sent, each thing the employer asks for (a questionnaire, 
 
 Side exits: `needs_input` (agent asked a question), `needs_manual` (agent could not get past a CAPTCHA or block), `failed`, `skipped`, `rejected`.
 
-Triage first drops, without a model, postings abroad and senior-level titles (senior, staff, principal, lead, manager and above; `src/screen.ts`), then uses the model named in `models.triage`, up to 50 postings per call, in sequential batches until the found backlog is drained.
+Triage first drops, without a model, postings abroad, titles that do not match `screen.titles` when it is set (a regular expression in `config.yml`), and senior-level titles (senior, staff, principal, lead, manager and above; `src/screen.ts`), then uses the model named in `models.triage`, up to 50 postings per call, in sequential batches until the found backlog is drained.
 
 Before the full assessment, prep skips without a model a job whose employer already has `autoApply.perEmployer` applications (while `approval` is `auto`), then has the cheaper `models.screen` read the posting for the required statements in `rubric.yml` that it settles on its own (those not marked `screen: false`). A job is screened out only when it fails a requirement under every rubric that could decide it; anything else, or a screen that does not finish, goes on to the full assessment. Neither counts against `limits.prepPerDay`.
 

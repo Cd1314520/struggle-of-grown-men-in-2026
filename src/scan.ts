@@ -89,7 +89,8 @@ function screen(batch: Job[]): Job[] {
       dropped++;
     } else left.push(job);
   }
-  if (dropped) logEvent("system", `Triage: screened out ${dropped} of ${batch.length} abroad, senior-level, hardware or dead-end portals before reading`);
+  if (dropped)
+    logEvent("system", `Triage: screened out ${dropped} of ${batch.length} abroad, unwanted or senior-level titles, or dead-end portals before reading`);
   return left;
 }
 

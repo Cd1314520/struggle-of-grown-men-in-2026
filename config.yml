@@ -77,6 +77,12 @@ schedule:
   discoverMinutes: 0 # off: 1,800+ boards are watched already
   trackMinutes: 120
 
+# Titles a posting must match to be read at all, as a case-insensitive regular expression: the rest
+# are dropped before triage, at no cost, which matters when the watched boards list far more roles
+# than the targets want (an internship search, say). null: every title goes to triage.
+screen:
+  titles: null
+
 # Remote-job aggregators, read during a scan but no more often than `minutes` each (they ask for a
 # few requests a day). A role also listed on a company board is folded into that one job.
 feeds:
