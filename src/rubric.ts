@@ -65,11 +65,8 @@ const PHASES: Phase[] = ["practice", "real"];
 
 export const thresholds = (r = loadRubric()) => ({ practice: r.practice.threshold, real: r.real.threshold });
 
-// Every statement of both rubrics, less the ids in `answered` (settled by the screen).
-export function checklistText(r = loadRubric(), answered = new Set<string>()) {
-  return PHASES.flatMap(phase => r[phase].criteria.filter(c => !answered.has(`${phase}.${c.id}`)).map(c => `- \`${phase}.${c.id}\`: ${c.statement}`)).join(
-    "\n",
-  );
+export function checklistText(r = loadRubric()) {
+  return PHASES.flatMap(phase => r[phase].criteria.map(c => `- \`${phase}.${c.id}\`: ${c.statement}`)).join("\n");
 }
 
 // ---- the screen: a cheap read of the posting before the full assessment

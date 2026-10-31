@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { readProfile } from "../src/config";
+import { config, readProfile } from "../src/config";
 import type { Job } from "../src/db";
 import { employersText } from "../src/employers";
-import { TRIAGE_BATCH, TRIAGE_WAIT_HOURS, triageDue } from "../src/scan";
+import { triageBatch, triageDue } from "../src/scan";
 import { render } from "../src/worker-tools";
 
 // SQLite's datetime('now') format, `hours` ago.
@@ -22,14 +22,27 @@ describe("triage batches", () => {
   it("waits for a full batch while the postings are fresh", () => {
     expect(triageDue([], noFeedback)).toBe(false);
     expect(triageDue(waiting(1), noFeedback)).toBe(false);
-    expect(triageDue(waiting(TRIAGE_BATCH - 1), noFeedback)).toBe(false);
-    expect(triageDue(waiting(TRIAGE_BATCH), noFeedback)).toBe(true);
+    expect(triageDue(waiting(triageBatch() - 1), noFeedback)).toBe(false);
+    expect(triageDue(waiting(triageBatch()), noFeedback)).toBe(true);
   });
 
   it("sends a partial batch once its oldest posting has waited long enough, or one was picked by hand", () => {
-    expect(triageDue(waiting(1, TRIAGE_WAIT_HOURS + 0.1), noFeedback)).toBe(true);
-    expect(triageDue(waiting(1, TRIAGE_WAIT_HOURS - 0.5), noFeedback)).toBe(false);
+    expect(triageDue(waiting(1, 2.1), noFeedback)).toBe(true);
+    expect(triageDue(waiting(1, 1.5), noFeedback)).toBe(false);
     expect(triageDue(waiting(1), () => true)).toBe(true);
+  });
+
+  it("takes the batch size and the wait from triage in config.yml", () => {
+    const saved = config.triage;
+    try {
+      config.triage = { batch: 10, waitHours: 0.5 };
+      expect(triageDue(waiting(10), noFeedback)).toBe(true);
+      expect(triageDue(waiting(1, 0.6), noFeedback)).toBe(true);
+      expect(triageDue(waiting(1, 0.4), noFeedback)).toBe(false);
+    } finally {
+      if (saved) config.triage = saved;
+      else delete config.triage;
+    }
   });
 
   it("names only the listed employers in the batch", () => {

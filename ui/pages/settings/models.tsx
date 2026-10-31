@@ -13,10 +13,15 @@ export const STAGES: readonly { stage: ModelStage; label: string; description: s
   {
     stage: "triage",
     label: "Triage",
-    description: "Reads raw titles up to 100 at a time, once enough have gathered. A fast, cheap model is right.",
+    description: "Reads raw titles in batches (triage.batch, 100 by default), once enough have gathered. A fast, cheap model is right.",
     core: true,
   },
-  { stage: "screen", label: "Screen", description: "Reads each posting for plain dealbreakers before the full assessment. Cheap and quick.", core: true },
+  {
+    stage: "screen",
+    label: "Screen",
+    description: "Reads each posting for plain dealbreakers before the full assessment, when screen.readPostings is on. Cheap and quick.",
+    core: true,
+  },
   { stage: "prep", label: "Assess and tailor", description: "Scores each posting against the rubric and tailors the resume. Quality shows here.", core: true },
   { stage: "fill", label: "Fill", description: "Fills application forms in the browser. Needs a capable model that reads pages well.", core: true },
   { stage: "track", label: "Track mail", description: "Reads replies in the mailbox and records next steps and outcomes.", core: false },

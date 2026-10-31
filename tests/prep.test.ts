@@ -7,8 +7,12 @@ import { prep } from "../src/prep";
 import { checklistText, screenChecklistText, screenVerdict } from "../src/rubric";
 import { to } from "../src/status";
 
-const initial = { approval: config.approval, targets: { ...config.targets }, autoApply: { ...config.autoApply } };
-afterEach(() => Object.assign(config, { approval: initial.approval, targets: { ...initial.targets }, autoApply: { ...initial.autoApply } }));
+const initial = { approval: config.approval, targets: { ...config.targets }, autoApply: { ...config.autoApply }, screen: { ...config.screen } };
+afterEach(() =>
+  Object.assign(config, { approval: initial.approval, targets: { ...initial.targets }, autoApply: { ...initial.autoApply }, screen: { ...initial.screen } }),
+);
+// Most of these are about the screen, which is off in config.yml.
+const screenOn = () => (config.screen = { ...initial.screen, readPostings: true });
 
 // An answer for every statement the screen asks, "yes" unless overridden.
 function screenAnswers(overrides: Record<string, string> = {}, text = screenChecklistText(null)) {
@@ -87,6 +91,7 @@ describe("prep before the full assessment", () => {
   });
 
   it("skips a job the screen rules out, and gives back the day's count", async () => {
+    screenOn();
     config.targets.holdBack = true;
     const job = preppingJob("Screened Co");
     const before = usedToday("prep");
@@ -107,42 +112,34 @@ describe("prep before the full assessment", () => {
     expect(usedToday("prep")).toBe(before - 1);
   });
 
-  it("does not ask the full assessment again what the screen answered yes", async () => {
+  it("goes straight to the full assessment while the screen is off", async () => {
+    config.targets.holdBack = false;
+    const job = preppingJob("Unscreened Co");
+    const { run, started, prompts } = fakeRun();
+    await prep(job, run);
+    expect(started).toEqual(["prep"]);
+    // Names this employer only, not the whole of employers.yml.
+    expect(prompts[0]).toContain("(none of these employers)");
+  });
+
+  it("asks the full assessment every statement again, even those the screen answered yes", async () => {
+    screenOn();
     config.targets.holdBack = false;
     const job = preppingJob("Answered Co");
-    let reply = "";
     let asked: string[] = [];
-    const { run, started, prompts } = fakeRun(
-      report => report({ answers: screenAnswers({ "practice.applies_online": "unclear" }) }),
+    const { run, started } = fakeRun(
+      report => report({ answers: screenAnswers() }),
       undefined,
-      (report, prompt) => {
-        asked = [...prompt.matchAll(/^- `((?:practice|real)\.\w+)`:/gm)].map(([, id = ""]) => id);
-        const practice = { target: "no", employerEvidence: "A small insurer.", agentNative: "unclear", agentNativeEvidence: "" };
-        reply = String(report({ answers: asked.map(id => ({ id, answer: "yes", evidence: "full read" })), practice }));
-      },
+      (_, prompt) => (asked = [...prompt.matchAll(/^- `((?:practice|real)\.\w+)`:/gm)].map(([, id = ""]) => id)),
     );
     await prep(job, run);
     expect(started).toEqual(["screen", "prep"]);
-    const screened = screenChecklistText(null);
-    // Asked again: what the screen left unclear, and every statement it does not ask.
-    expect(asked).toContain("practice.applies_online");
-    expect(asked).toContain("practice.degree_fits");
-    expect(asked).not.toContain("practice.not_senior");
-    expect(asked).not.toContain("real.no_cover_letter");
-    expect(asked.length).toBe(checklistText().split("\n").length - (screened.split("\n").length - 1));
-    // Every statement still scored, with the screen's evidence for the ones it settled.
-    expect(reply).toMatch(/^Checklist recorded/);
-    const items = JSON.parse(getJob(job.id)?.checklist ?? "[]") as { key: string; evidence: string }[];
-    expect(items.length).toBe(checklistText().split("\n").length);
-    expect(items.find(i => i.key === "practice.not_senior")?.evidence).toBe("quote");
-    expect(items.find(i => i.key === "practice.applies_online")?.evidence).toBe("full read");
-    // The prompt is shorter by the screened statements, and names this employer only.
-    const saved = checklistText().length - (prompts[1]?.match(/^- `(?:practice|real)\.\w+`:.*$/gm) ?? []).join("\n").length;
-    expect(saved).toBeGreaterThan(1500);
-    expect(prompts[1]).toContain("(none of these employers)");
+    expect(asked.length).toBe(checklistText().split("\n").length);
+    expect(asked).toContain("practice.not_senior");
   });
 
   it("puts a job back in the queue when the provider refused the screen", async () => {
+    screenOn();
     config.targets.holdBack = true;
     const job = preppingJob("Busy Co");
     const { run, started } = fakeRun(undefined, "Codex is at capacity, please try again later");
@@ -162,6 +159,7 @@ function assessedJob(company: string, employerType: string) {
 
 describe("prep for an employer judged before", () => {
   it("holds a job at an employer judged a target after only the real screen", async () => {
+    screenOn();
     config.targets.holdBack = true;
     const earlier = assessedJob("Scaled Co", "tech_scaled");
     assessedJob("Scaled Co", "startup");
@@ -180,6 +178,7 @@ describe("prep for an employer judged before", () => {
   });
 
   it("still skips a job the real screen rules out", async () => {
+    screenOn();
     config.targets.holdBack = true;
     assessedJob("Scaled Senior Co", "tech_scaled");
     const job = preppingJob("Scaled Senior Co");
@@ -189,6 +188,7 @@ describe("prep for an employer judged before", () => {
   });
 
   it("gives a practice employer the full assessment", async () => {
+    screenOn();
     config.targets.holdBack = true;
     assessedJob("Insurer Co", "non_tech_enterprise");
     const job = preppingJob("Insurer Co");
@@ -208,6 +208,7 @@ describe("prep for an employer judged before", () => {
   });
 
   it("gives a target employer the full assessment when nothing is held back", async () => {
+    screenOn();
     config.targets.holdBack = false;
     assessedJob("Open Scaled Co", "tech_scaled");
     const job = preppingJob("Open Scaled Co");
@@ -217,6 +218,7 @@ describe("prep for an employer judged before", () => {
   });
 
   it("judges employers afresh once targets are described in other words", async () => {
+    screenOn();
     config.targets.holdBack = true;
     config.targets.describe = "A company that makes developer tools";
     assessedJob("Rephrased Co", "tech_scaled");

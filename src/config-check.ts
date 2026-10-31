@@ -99,8 +99,13 @@ const CONFIG = shape(
     questionDigest: shape({}, { enabled: bool, time: matching(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:mm in 24-hour local time"), timeZone: text }),
     screen: shape(
       {},
-      { titles: orNull(regex), terms: orNull(listOf(matching(/^(spring|summer|fall|autumn|winter)\s*(20)?\d{2}$/i, "a term such as Summer 2027"))) },
+      {
+        titles: orNull(regex),
+        readPostings: bool,
+        terms: orNull(listOf(matching(/^(spring|summer|fall|autumn|winter)\s*(20)?\d{2}$/i, "a term such as Summer 2027"))),
+      },
     ),
+    triage: shape({}, { batch: count(1), waitHours: amount() }),
     // Each feed and board takes its own extra parameters.
     feeds: shape({}, {}, shape({ minutes: amount() }, {}, anything)),
     boards: shape(

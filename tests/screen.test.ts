@@ -75,10 +75,14 @@ describe("screening postings before triage", () => {
       expect(screenOut(title, "Austin, TX")).toBeNull();
   });
   it("drops titles naming a term that is over, and keeps the terms still ahead", () => {
+    const saved = config.screen;
+    config.screen = { terms: null };
     for (const title of ["Software Engineering Intern - Summer 2026", "Co-op, Spring '26", "Winter 2025 Data Intern", "Fall 2025 Intern (Remote)"])
       expect(screenOut(title, "Austin, TX", undefined, null, OCT_2026)).toMatch(/term is over/);
     for (const title of ["Software Engineering Intern - Summer 2027", "Fall 2026 Intern", "Co-op, Winter 2027", "Software Engineer Intern"])
       expect(screenOut(title, "Austin, TX", undefined, null, OCT_2026)).toBeNull();
+    if (saved) config.screen = saved;
+    else delete config.screen;
   });
   it("drops titles naming a term outside screen.terms when it is set", () => {
     const saved = config.screen;

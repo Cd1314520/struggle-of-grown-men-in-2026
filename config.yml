@@ -84,7 +84,16 @@ screen:
   titles: null
   # Terms wanted ("Summer 2027"): a title naming another term is dropped too. A title naming a term that
   # is over is always dropped. null: every term not yet over goes to triage.
-  terms: null
+  terms: [Summer 2027]
+  # Whether models.screen reads each posting for plain dealbreakers before prep. It ruled out about one
+  # job in ten, and prep answers the same statements anyway, so it is off: prep reads every posting.
+  readPostings: false
+
+# Triage reads titles `batch` at a time. A smaller batch waits for later scans to fill it, until its
+# oldest posting was found `waitHours` ago; a job you picked by hand never waits.
+triage:
+  batch: 100
+  waitHours: 2
 
 # Remote-job aggregators, read during a scan but no more often than `minutes` each (they ask for a
 # few requests a day). A role also listed on a company board is folded into that one job.

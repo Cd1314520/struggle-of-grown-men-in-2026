@@ -15,12 +15,12 @@ import { addCompanyTool, render, workDir } from "./worker-tools";
 // Hosts read at once during a scan.
 const SCAN_LANES = 6;
 
-// Postings per triage call. The prompt around them (the targets, the employers named, the
-// instructions) costs the same for one posting as for a hundred, so a partial batch waits for more
-// scans to fill it, up to TRIAGE_WAIT_HOURS after its oldest posting was found. A job the candidate
+// Postings per triage call (`triage.batch`). The prompt around them (the targets, the employers named,
+// the instructions) costs the same for one posting as for a hundred, so a partial batch waits for more
+// scans to fill it, up to `triage.waitHours` after its oldest posting was found. A job the candidate
 // picked by hand never waits.
-export const TRIAGE_BATCH = 100;
-export const TRIAGE_WAIT_HOURS = 2;
+export const triageBatch = () => config.triage?.batch ?? 100;
+const triageWaitHours = () => config.triage?.waitHours ?? 2;
 
 // A board that is down would otherwise log the same error on every scan.
 const feedErrors = new Map<string, number>();
@@ -111,15 +111,15 @@ const hoursSince = (at: string) => (Date.now() - Date.parse(`${at.replace(" ", "
 // long enough, or one with a job picked by hand in it.
 export function triageDue(waiting: Job[], hasFeedback = (job: Job) => !!kvGet(`feedback.${job.id}`)) {
   if (!waiting.length) return false;
-  if (waiting.length >= TRIAGE_BATCH) return true;
-  return waiting.some(j => hoursSince(j.found_at) >= TRIAGE_WAIT_HOURS || hasFeedback(j));
+  if (waiting.length >= triageBatch()) return true;
+  return waiting.some(j => hoursSince(j.found_at) >= triageWaitHours() || hasFeedback(j));
 }
 
 async function triage(run: RunWorker) {
   for (;;) {
     const waiting = screen(jobsByStatus("found", 100_000));
     if (!triageDue(waiting)) return;
-    const batch = waiting.slice(0, TRIAGE_BATCH);
+    const batch = waiting.slice(0, triageBatch());
     const ids = new Set(batch.map(j => j.id));
     let kept = null as number[] | null; // set from the tool callback
     let held: number[] = [];
