@@ -18,6 +18,9 @@ mkdirSync(join(dir, "resume"));
 for (const f of ["resume.typ", "main.example.typ"]) copyFileSync(join(resume, f), join(dir, "resume", f));
 copyFileSync(join(resume, "main.example.typ"), join(dir, "resume", "main.typ"));
 process.env["AUTO_APPLY_RESUME_DIR"] = join(dir, "resume");
+// Never the owner's config.local.yml: the scenarios run in child processes, which read it (their own
+// feeds and boards would reach the network), and a test that saves a setting would write to it.
+process.env["AUTO_APPLY_LOCAL_CONFIG"] = join(dir, "config.local.yml");
 afterAll(() => {
   try {
     rmSync(dir, { recursive: true, force: true });

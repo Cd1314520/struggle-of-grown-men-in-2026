@@ -83,6 +83,8 @@ feeds:
   remotive: { minutes: 480, categories: [software-development, artificial-intelligence, data] }
   jobicy: { minutes: 360, geo: usa, industries: [dev, data-science], count: 50 }
   remoteok: { minutes: 360, tags: [python, ai, junior] }
+  # The SimplifyJobs internship list: open roles for these terms. Thousands at once, so off by default.
+  simplify: { minutes: 0, terms: [Summer 2027] }
 
 # LinkedIn and Indeed job search, read logged out with no account during a scan. They only say what is
 # open: each posting that passes triage is then looked up on the employer's own site (its public job

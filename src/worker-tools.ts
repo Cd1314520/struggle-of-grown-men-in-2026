@@ -2,7 +2,7 @@
 // host tools more than one kind of worker is given.
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { addCompany, ATS, fetchCompany, isAts, isCampusBoard, type Posting } from "./ats";
+import { addCompany, ATS, fetchCompany, isAts, type Posting } from "./ats";
 import { config, DATA, PROMPTS } from "./config";
 import { errorMessage } from "./errors";
 import * as gmail from "./gmail";
@@ -45,7 +45,6 @@ export const addCompanyTool = (also?: (postings: Posting[]) => string): HostTool
       slug = arg.str(args, "slug").trim();
     if (!isAts(ats)) return `ERROR: ats must be one of ${ATS.join(", ")}`;
     const company = { name, ats, slug };
-    if (isCampusBoard(company)) return "Not added: a campus board lists only internships and new-grad roles, which the targets rule out.";
     const postings = await fetchCompany(company).catch((err: unknown) => {
       throw new Error(`board ${ats}/${slug} not reachable (${errorMessage(err)}); check the slug`);
     });

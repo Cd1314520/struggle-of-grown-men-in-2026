@@ -1,0 +1,24 @@
+{
+ "requisitionList": [
+  {
+   "contestNo": "345716",
+   "column": [
+    "Analyste financier /Financial Analyst",
+    "[\"CA-Quebec-Mirabel\"]",
+    "10/29/2026"
+   ]
+  },
+  {
+   "contestNo": "345940",
+   "column": [
+    "Mfg Eng Resource Prgm III (Drive Systems Center)",
+    "[\"US-Texas-Fort Worth\"]",
+    "10/28/2026"
+   ]
+  }
+ ],
+ "pagingData": {
+  "pageSize": 25,
+  "totalCount": 2
+ }
+}

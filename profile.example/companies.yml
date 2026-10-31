@@ -4,7 +4,24 @@
 # or remove what you never want scanned. `ats` is one of: greenhouse, lever, ashby, workable, recruitee,
 # smartrecruiters, workday, and the others in src/ats.ts. The slug is the board's name in its URL
 # (boards.greenhouse.io/<slug>, jobs.lever.co/<slug>, jobs.ashbyhq.com/<slug>). A Workday slug is
-# <tenant>.<wdN>/<site>; an optional `search:` narrows a large employer to matching titles.
+# <tenant>.<wdN>/<site>; an optional `search:` narrows a large employer to matching titles (Workday,
+# Jibe, Taleo, Coveo, SuccessFactors, Radancy). The other slugs:
+#   lever (EU)      eu/<slug>                         jobs.eu.lever.co/<slug>
+#   oracle          <host>.oraclecloud.com/<site>     egay.fa.us6.oraclecloud.com/CX_4001
+#   adp             <cid> or <cid>/<ccId>             from workforcenow.adp.com ...?cid=...&ccId=...
+#   ukg             <host>/<tenant>/<board id>        recruiting2.ultipro.com/CRA1009CRWL/755fc3a5-...
+#   icims           <slug>                            careers-acme for careers-acme.icims.com
+#   eightfold       <host>/<company domain>           lockheedmartin.eightfold.ai/lockheedmartin.com
+#   breezy, jazzhr, bamboohr, recruitee               the subdomain
+#   clearcompany    <site id>                         the GUID after siteId= in the career page's script URL
+#   paycor          <clientId>                        from recruitingbypaycor.com ...?clientId=...
+#   jibe            <host>                            careers.kindermorgan.com (/careers-home/jobs)
+#   taleo           <host>/<section>/<portal>         textron.taleo.net/bell/20140753014 (REST search)
+#                   <host>/<section>                  epco.taleo.net/alljobs (older sections)
+#   avature         <search page without https://>    jobs.siemens-energy.com/en_US/jobs/SearchJobsUS
+#   coveo           <host>                            careers.slb.com
+#   successfactors  <host>                            careers.phillips66.com (/services/rss/job/)
+#   radancy         <host>                            careers.l3harris.com (/search-jobs)
 companies:
   - name: RoadRunner Recycling
     ats: greenhouse

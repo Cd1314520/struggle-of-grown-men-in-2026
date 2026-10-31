@@ -1,5 +1,6 @@
 // Public job-board feeds. No browser: these are the public endpoints the boards' own career pages
-// call, mostly JSON. iCIMS and JazzHR are read from their public sitemap and listing page.
+// call, mostly JSON. iCIMS, JazzHR, Avature, Radancy and older Taleo sections are read from their
+// public sitemap or listing pages, Paycor and SuccessFactors from their Atom and RSS feeds.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
@@ -21,6 +22,14 @@ export const ATS = [
   "breezy",
   "jazzhr",
   "bamboohr",
+  "clearcompany",
+  "paycor",
+  "jibe",
+  "taleo",
+  "avature",
+  "coveo",
+  "successfactors",
+  "radancy",
 ] as const;
 export type Ats = (typeof ATS)[number];
 export interface Company {
@@ -29,7 +38,7 @@ export interface Company {
   // Board id as it appears in the board's URL. Workday: "<tenant>.<wdN>/<site>", e.g. "acme.wd5/External".
   // The others are in the table in prompts/discover.md, and boardOf reads them from a posting's URL.
   slug: string;
-  // Workday only: keyword filter, for employers with thousands of openings.
+  // Keyword filter, for employers with thousands of openings: Workday, Jibe, Taleo (REST), SuccessFactors and Radancy.
   search?: string;
 }
 export interface Posting {
@@ -53,13 +62,11 @@ export function loadCompanies(): Company[] {
   }
 }
 
-// A board of only internships and new-grad programmes, which the targets rule out: never watched.
-const CAMPUS = /campus|(university|college)[\s_-]*(recruit|hiring)|early[\s_-]*careers?|internships?|\binterns?\b|new[\s_-]*grads?\b/i;
-export const isCampusBoard = (c: Pick<Company, "name" | "slug">) => CAMPUS.test(c.name) || CAMPUS.test(c.slug);
-
+// Campus and early-career boards (a Workday `Campus` site, a `universityrecruiting` Greenhouse board)
+// are watched like any other: internships and co-ops are what the search is for.
 export function addCompany(c: Company): boolean {
   const all = loadCompanies();
-  if (isCampusBoard(c) || all.some(sameBoard(c))) return false;
+  if (all.some(sameBoard(c))) return false;
   all.push(c);
   writeFileSync(companiesPath, YAML.stringify({ companies: all }));
   return true;
@@ -128,26 +135,41 @@ export const htmlToText = (html: string) =>
     .replace(/<li[^>]*>/gi, "- ")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ")
+    .replace(/&#(\d+|x[\da-f]+);/gi, (_, n: string) => String.fromCodePoint(/^x/i.test(n) ? parseInt(n.slice(1), 16) : Number(n)))
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
 // Identify ourselves honestly; these are public endpoints meant for programmatic use.
 const HEADERS = { accept: "application/json", "user-agent": "auto-apply/1.0 (personal job search)" };
-async function getJson(url: string, body?: unknown): Promise<unknown> {
+// A body is sent as JSON, or as a form when it is URLSearchParams.
+async function getJson(url: string, body?: unknown, headers: Record<string, string> = {}): Promise<unknown> {
+  const form = body instanceof URLSearchParams;
   const res = await fetch(url, {
     method: body ? "POST" : "GET",
-    headers: body ? { ...HEADERS, "content-type": "application/json" } : HEADERS,
-    ...(body ? { body: JSON.stringify(body) } : {}),
+    headers: { ...HEADERS, ...(body && !form ? { "content-type": "application/json" } : {}), ...headers },
+    ...(body ? { body: form ? body : JSON.stringify(body) } : {}),
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }
-async function getText(url: string): Promise<string> {
-  const res = await fetch(url, { headers: { ...HEADERS, accept: "text/html,application/xml;q=0.9,*/*;q=0.8" }, signal: AbortSignal.timeout(30_000) });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  return res.text();
+async function getText(url: string, init: Omit<RequestInit, "headers"> & { headers?: Record<string, string> } = {}): Promise<string> {
+  return (await getResponse(url, init)).text();
 }
+async function getResponse(url: string, init: Omit<RequestInit, "headers"> & { headers?: Record<string, string> } = {}): Promise<Response> {
+  const res = await fetch(url, {
+    ...init,
+    headers: { ...HEADERS, accept: "text/html,application/xml;q=0.9,*/*;q=0.8", ...init.headers },
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res;
+}
+// The text of the first <tag>…</tag> in a piece of XML, CDATA unwrapped and entities decoded.
+const xmlTag = (xml: string, tag: string) => {
+  const m = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`).exec(xml);
+  return m ? htmlToText((m[1] ?? "").replace(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/, "$1")) : "";
+};
 // A source's date field as an ISO time; a bare date stays a bare date.
 export const posted = (v: unknown): string | null => {
   if (v == null || v === "") return null;
@@ -161,6 +183,18 @@ const workdayPosted = (s: string | null | undefined): string | null => {
   if (!m) return null;
   const days = m[1] ? Number(m[1]) : /yesterday/i.test(m[0]) ? 1 : 0;
   return new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
+};
+// "10/29/2026" or "Oct 29, 2026", as Taleo writes the day a posting opened, as "2026-10-29".
+const usDay = (s: string | null | undefined): string | null => {
+  const t = Date.parse(`${s ?? ""} 12:00 GMT`);
+  return Number.isFinite(t) ? new Date(t).toISOString().slice(0, 10) : null;
+};
+const decodeUri = (s: string) => {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
 };
 const place = (...parts: (string | null | undefined | false)[]) => [...new Set(parts.filter(Boolean))].join(", ") || null;
 
@@ -192,13 +226,7 @@ function adp(c: Company) {
 }
 // "software-developer---ai-focus" -> "Software Developer - Ai Focus": iCIMS's sitemap has the title only in the URL.
 function icimsTitle(slug: string) {
-  let text = slug;
-  try {
-    text = decodeURIComponent(slug);
-  } catch {
-    // left as it is
-  }
-  return text
+  return decodeUri(slug)
     .replace(/---/g, " – ")
     .replace(/-/g, " ")
     .replace(/\s+/g, " ")
@@ -312,6 +340,47 @@ interface BambooBoard {
     atsLocation?: { city?: string | null; state?: string | null; country?: string | null } | null;
   }[];
 }
+interface ClearCompanyBoard {
+  results?: {
+    positionTitle: string;
+    applyLink: string;
+    description?: string | null;
+    location?: string | null;
+    postedDate?: string | null;
+    locations?: { city?: string | null; subdivision?: string | null; country?: string | null; isRemote?: boolean }[];
+  }[];
+}
+interface JibePage {
+  totalCount?: number;
+  jobs?: {
+    data: {
+      slug: string;
+      title: string;
+      description?: string | null;
+      responsibilities?: string | null;
+      qualifications?: string | null;
+      full_location?: string | null;
+      posted_date?: string | null;
+    };
+  }[];
+}
+interface TaleoPage {
+  requisitionList?: { contestNo: string; column: string[] }[];
+  pagingData?: { pageSize?: number; totalCount?: number };
+}
+interface CoveoResults {
+  results?: { clickUri: string; raw: { title?: string; city?: string | string[]; jobposteddate?: number } }[];
+}
+interface SimplifyListing {
+  company_name: string;
+  title: string;
+  url: string;
+  active?: boolean;
+  is_visible?: boolean;
+  terms?: string[];
+  locations?: string[];
+  date_posted?: number;
+}
 interface RemotiveFeed {
   jobs?: { url: string; title: string; company_name?: string | null; candidate_required_location?: string; description?: string; publication_date?: string }[];
 }
@@ -340,8 +409,10 @@ const fetchers: Record<Ats, (c: Company) => Promise<Posting[]>> = {
       posted: posted(j.first_published),
     }));
   },
+  // Slug: "<slug>", or "eu/<slug>" for a board on Lever's EU site (jobs.eu.lever.co/<slug>).
   async lever(c) {
-    const data = (await getJson(`https://api.lever.co/v0/postings/${c.slug}?mode=json`)) as LeverBoard;
+    const eu = c.slug.startsWith("eu/");
+    const data = (await getJson(`https://api${eu ? ".eu" : ""}.lever.co/v0/postings/${eu ? c.slug.slice(3) : c.slug}?mode=json`)) as LeverBoard;
     return (data ?? []).map(j => ({
       url: j.hostedUrl,
       source: "lever",
@@ -594,7 +665,258 @@ const fetchers: Record<Ats, (c: Company) => Promise<Posting[]>> = {
       posted: null,
     }));
   },
+  // ClearCompany career sites. Slug: the site id, a GUID in the page's careers-content.clearcompany.com script URL (`siteId=`).
+  async clearcompany(c) {
+    const data = (await getJson(`https://careers-api.clearcompany.com/v1/${c.slug}`)) as ClearCompanyBoard;
+    return (data.results ?? []).map(j => {
+      const at = j.locations?.[0];
+      return {
+        url: j.applyLink.replace(/\/apply\/?$/, ""),
+        source: "clearcompany",
+        company: c.name,
+        title: j.positionTitle,
+        location: j.location || place(at?.city, at?.subdivision, at?.country, at?.isRemote && "Remote"),
+        description: htmlToText(j.description ?? "") || null,
+        posted: posted(j.postedDate?.slice(0, 10)), // a day, written as a zoneless midnight
+      };
+    });
+  },
+  // Paycor (Newton) recruiting, from its Atom feed. Slug: the `clientId` in a recruitingbypaycor.com URL.
+  async paycor(c) {
+    const xml = await getText(`https://recruitingbypaycor.com/career/CareerAtomFeed.action?clientId=${encodeURIComponent(c.slug)}`);
+    return [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)].flatMap(([, e = ""]) => {
+      const url = /<link[^>]*href="([^"]+)"/.exec(e)?.[1];
+      return url
+        ? [
+            {
+              url: htmlToText(url),
+              source: "paycor",
+              company: c.name,
+              title: xmlTag(e, "title"),
+              location: xmlTag(e, "name") || null,
+              description: null,
+              posted: posted(xmlTag(e, "updated")),
+            },
+          ]
+        : [];
+    });
+  },
+  // iCIMS's Jibe career sites (<host>/careers-home/jobs). Slug: the host, e.g. "careers.kindermorgan.com".
+  async jibe(c) {
+    const out: Posting[] = [];
+    for (let page = 1; out.length < NEWEST_MAX; page++) {
+      const data = (await getJson(
+        `https://${c.slug}/api/jobs?keywords=${encodeURIComponent(c.search ?? "")}&page=${page}&limit=100&internal=false&sortBy=posted_date&descending=true`,
+      )) as JibePage;
+      const list = data.jobs ?? [];
+      for (const { data: j } of list)
+        out.push({
+          url: `https://${c.slug}/careers-home/jobs/${j.slug}`,
+          source: "jibe",
+          company: c.name,
+          title: j.title,
+          location: j.full_location ?? null,
+          description: htmlToText([j.description, j.responsibilities, j.qualifications].filter(Boolean).join("\n")) || null,
+          posted: posted(j.posted_date),
+        });
+      if (!list.length || page * 100 >= (data.totalCount ?? 0)) break;
+    }
+    return out;
+  },
+  // Taleo career sections. Slug: "<host>/<section>/<portal>" for a faceted section, read through its
+  // REST search (the portal number is in the page's searchjobs request), or "<host>/<section>" for an
+  // older one, read through its paged listing.
+  async taleo(c) {
+    const parts = c.slug.split("/");
+    if (parts.length === 2) return taleoLegacy(c);
+    const [host, section, portal] = slugParts(c, 3, "<host>/<section>/<portal>");
+    const out: Posting[] = [];
+    for (let page = 1; out.length < NEWEST_MAX; page++) {
+      const data = (await getJson(
+        `https://${host}/careersection/rest/jobboard/searchjobs?lang=en&portal=${portal}`,
+        {
+          multilineEnabled: false,
+          sortingSelection: { sortBySelectionParam: "3", ascendingSortingOrder: "false" },
+          fieldData: { fields: { KEYWORD: c.search ?? "", LOCATION: "", CATEGORY: "" }, valid: true },
+          filterSelectionParam: { searchFilterSelections: [] },
+          advancedSearchFiltersSelectionParam: { searchFilterSelections: [] },
+          pageNo: page,
+        },
+        { "x-requested-with": "XMLHttpRequest", tz: "GMT-06:00", tzname: "America/Chicago" },
+      )) as TaleoPage;
+      const list = data.requisitionList ?? [];
+      for (const j of list) {
+        const [title = "", where = "", day] = j.column;
+        let location: string | null = where || null;
+        try {
+          if (where.startsWith("[")) location = (JSON.parse(where) as string[]).join("; ") || null;
+        } catch {
+          // left as written
+        }
+        out.push({
+          url: `https://${host}/careersection/${section}/jobdetail.ftl?job=${j.contestNo}&lang=en`,
+          source: "taleo",
+          company: c.name,
+          title,
+          location,
+          description: null,
+          posted: usDay(day),
+        });
+      }
+      if (!list.length || page * (data.pagingData?.pageSize ?? 25) >= (data.pagingData?.totalCount ?? 0)) break;
+    }
+    return out;
+  },
+  // Avature career sites. Slug: the search page's address without "https://", e.g.
+  // "jobs.siemens-energy.com/en_US/jobs/SearchJobsUS". Its listing has titles only.
+  async avature(c) {
+    const out: Posting[] = [];
+    const seen = new Set<string>();
+    for (let offset = 0; offset < NEWEST_MAX; offset += 20) {
+      const html = await getText(
+        `https://${c.slug.replace(/\/$/, "")}/?jobRecordsPerPage=20&jobOffset=${offset}&folderRecordsPerPage=20&folderOffset=${offset}`,
+      );
+      let found = 0;
+      for (const [, url = "", id = "", title = ""] of html.matchAll(
+        /<a[^>]+href="(https:\/\/[^"]+\/(?:Folder|Job)Detail\/[^"]+\/(\d+))"[^>]*>\s*([^<]+?)\s*<\/a>/g,
+      )) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        found++;
+        out.push({ url: htmlToText(url), source: "avature", company: c.name, title: htmlToText(title), location: null, description: null, posted: null });
+      }
+      if (!found) break;
+    }
+    return out;
+  },
+  // Coveo for Sitecore career search, as SLB runs it, US postings only. Slug: the host, e.g. "careers.slb.com".
+  async coveo(c) {
+    const data = (await getJson(
+      `https://${c.slug}/coveo/rest/search/v2`,
+      new URLSearchParams({
+        q: c.search ?? "",
+        aq: '@source=="ATS_Jobs_Source - Prod" @country=="United States"',
+        numberOfResults: String(NEWEST_MAX),
+        sortCriteria: "@jobposteddate descending",
+        fieldsToInclude: '["title","city","country","jobposteddate","clickableuri"]',
+      }),
+    )) as CoveoResults;
+    return (data.results ?? []).map(j => ({
+      url: j.clickUri.split(" ")[0] ?? j.clickUri,
+      source: "coveo",
+      company: c.name,
+      title: j.raw.title ?? "",
+      location: place(...[j.raw.city ?? []].flat(), "US"),
+      description: null,
+      posted: posted(j.raw.jobposteddate),
+    }));
+  },
+  // SAP SuccessFactors career sites (Career Site Builder), from their RSS feed. Slug: the host, e.g. "careers.phillips66.com".
+  async successfactors(c) {
+    const xml = await getText(`https://${c.slug}/services/rss/job/?locale=en_US&keywords=${encodeURIComponent(c.search ?? "")}&rows=5000`);
+    return [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)]
+      .map(([, item = ""]) => {
+        // "Title (City, ST, US, 77001)"
+        const raw = xmlTag(item, "title");
+        const m = /^(.*?)\s*\(([^()]*)\)\s*$/.exec(raw);
+        return {
+          url: (xmlTag(item, "link").split("?")[0] ?? "").replace(/^http:/, "https:"),
+          source: "successfactors",
+          company: c.name,
+          title: m?.[1] ?? raw,
+          location: m?.[2] || null,
+          description: null,
+          posted: posted(xmlTag(item, "pubDate")),
+        };
+      })
+      .filter(p => p.url)
+      .sort((a, b) => (b.posted ?? "").localeCompare(a.posted ?? ""))
+      .slice(0, NEWEST_MAX);
+  },
+  // Radancy (TalentBrew) career sites. Slug: the host, e.g. "careers.l3harris.com".
+  async radancy(c) {
+    const out: Posting[] = [];
+    const seen = new Set<string>();
+    for (let page = 1, pages = 1; page <= pages && out.length < NEWEST_MAX; page++) {
+      const data = (await getJson(
+        `https://${c.slug}/search-jobs/results?ActiveFacetID=0&RecordsPerPage=100&Distance=50&RadiusUnitType=0&Keywords=${encodeURIComponent(c.search ?? "")}&Location=&ShowRadius=False&IsPagination=True&FacetFilters=&SearchResultsModuleName=Search+Results&SearchFiltersModuleName=Search+Filters&SortCriteria=0&SortDirection=0&SearchType=5&CurrentPage=${page}`,
+        undefined,
+        { "x-requested-with": "XMLHttpRequest" },
+      )) as { results?: string };
+      const html = data.results ?? "";
+      pages = Number(/data-total-pages="(\d+)"/.exec(html)?.[1] ?? 1);
+      for (const [, li = ""] of html.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/g)) {
+        const link = /<a href="([^"]+)"[^>]*data-job-id="(\d+)"/.exec(li);
+        const title = /<h2>([\s\S]*?)<\/h2>/.exec(li)?.[1];
+        if (!link?.[1] || !link[2] || !title || seen.has(link[2])) continue;
+        seen.add(link[2]);
+        const where = [...li.matchAll(/class="[^"]*job-location[^"]*">([\s\S]*?)<\/span>/g)].map(([, l = ""]) => htmlToText(l).replace(/\s+/g, " "));
+        out.push({
+          url: `https://${c.slug}${htmlToText(link[1])}`,
+          source: "radancy",
+          company: c.name,
+          title: htmlToText(title),
+          location: where.join("; ") || null,
+          description: null,
+          posted: null,
+        });
+      }
+    }
+    return out;
+  },
 };
+
+// An older Taleo career section (no REST search): the listing page carries a form whose fields the
+// paged listing wants back, with the session cookie it set. Rows come as "!|!"-separated fields.
+async function taleoLegacy(c: Company): Promise<Posting[]> {
+  const [host, section] = slugParts(c, 2, "<host>/<section>");
+  const page = `https://${host}/careersection/${section}/jobsearch.ftl?lang=en`;
+  const first = await getResponse(page);
+  const cookie = first.headers
+    .getSetCookie()
+    .map(s => s.split(";")[0])
+    .join("; ");
+  const html = await first.text();
+  const form = new URLSearchParams();
+  for (const [, name = "", value = ""] of html.matchAll(/<input type="hidden" name="([^"]+)" id="[^"]*" value="([^"]*)"/g))
+    form.set(htmlToText(name), htmlToText(value));
+  const total = Number(form.get("listRequisition.nbElements") ?? 0);
+  for (const [k, v] of Object.entries({
+    ftlinterfaceid: "requisitionListInterface",
+    ftlcompid: "rlPager",
+    jsfCmdId: "rlPager",
+    ftlcompclass: "PagerComponent",
+    ftlcallback: "ftlPager_processResponse",
+    ftlajaxid: "ftlx1",
+  }))
+    form.set(k, v);
+  const rows = new Map<string, Posting>();
+  // Page 1 too: the page itself lists its first rows in another order than the pager.
+  for (let n = 1; n <= 40 && rows.size < Math.min(total, NEWEST_MAX); n++) {
+    form.set("rlPager.currentPage", String(n));
+    const blob = await getText(`https://${host}/careersection/${section}/jobsearch.ajax`, {
+      method: "POST",
+      body: form,
+      headers: { referer: page, "x-requested-with": "XMLHttpRequest", ...(cookie ? { cookie } : {}) },
+    });
+    let found = 0;
+    for (const [, id = "", no = "", title = "", where = "", day = ""] of blob.matchAll(TALEO_ROW)) {
+      found++;
+      rows.set(id, {
+        url: `https://${host}/careersection/${section}/jobdetail.ftl?job=${no}&lang=en`,
+        source: "taleo",
+        company: c.name,
+        title: decodeUri(title.replace(/%5C/g, "")),
+        location: decodeUri(where) || null,
+        description: null,
+        posted: usDay(day),
+      });
+    }
+    if (!found) break;
+  }
+  return [...rows.values()];
+}
+const TALEO_ROW = /!\|!(\d+)!\|!([0-9A-Za-z]+)!\|!([^!]+)!\|!\1!\|!\3!\|!\1!\|!([^!]*)!\|!(?:[^!]*!\|!){5}([^!]*)!\|!Apply/g;
 
 // The board a posting's URL is on, as a company to watch, when it is one of the boards above.
 export function boardOf(url: string, name: string): Company | null {
@@ -610,6 +932,7 @@ export function boardOf(url: string, name: string): Company | null {
   const at = (ats: Ats, slug: string | null | undefined): Company | null => (slug ? { name, ats, slug } : null);
   if (/^(boards|job-boards)\.greenhouse\.io$/.test(host) && /^\/[\w-]+\/jobs\//.test(path) && first !== "embed") return at("greenhouse", first);
   if (host === "jobs.lever.co") return at("lever", first);
+  if (host === "jobs.eu.lever.co") return at("lever", first && `eu/${first}`);
   if (host === "jobs.ashbyhq.com") return at("ashby", first);
   if (host === "apply.workable.com" && first !== "api" && first !== "j") return at("workable", first); // /j/<id> is a short link
   if (host.endsWith(".recruitee.com")) return at("recruitee", host.split(".")[0]);
@@ -630,6 +953,8 @@ export function boardOf(url: string, name: string): Company | null {
   if (host.endsWith(".breezy.hr")) return at("breezy", host.split(".")[0]);
   if (host.endsWith(".applytojob.com")) return at("jazzhr", host.split(".")[0]);
   if (host.endsWith(".bamboohr.com") && first === "careers") return at("bamboohr", host.split(".")[0]);
+  if (host === "recruitingbypaycor.com") return at("paycor", u.searchParams.get("clientId"));
+  if (path.startsWith("/careers-home/jobs/")) return at("jibe", host);
   return null;
 }
 
@@ -649,9 +974,10 @@ export async function watchBoardOf(url: string, name: string): Promise<Company |
 // What a board is read from, so that boards on one host are read one at a time.
 export function boardHost(c: Company): string {
   if (c.ats === "workday") return c.slug.split("/")[0] ?? c.slug;
-  if (["oracle", "ukg", "eightfold"].includes(c.ats)) return c.slug.split("/")[0] ?? c.slug;
+  if (["oracle", "ukg", "eightfold", "taleo", "avature"].includes(c.ats)) return c.slug.split("/")[0] ?? c.slug;
+  if (["jibe", "coveo", "successfactors", "radancy"].includes(c.ats)) return c.slug;
   if (["icims", "breezy", "jazzhr", "bamboohr", "recruitee"].includes(c.ats)) return `${c.ats}:${c.slug}`;
-  return c.ats; // one shared API: Greenhouse, Lever, Ashby, Workable, SmartRecruiters, ADP
+  return c.ats; // one shared API: Greenhouse, Lever, Ashby, Workable, SmartRecruiters, ADP, ClearCompany, Paycor
 }
 
 // Boards that list without the body text: fetch it for one posting.
@@ -741,7 +1067,7 @@ export function jsonLdDescription(html: string): string | null {
   return null;
 }
 
-// ---- keyword feeds: remote-job aggregators with a public JSON API. They list any employer, so each
+// ---- keyword feeds: remote-job aggregators and internship lists with a public JSON file. They list any employer, so each
 // posting is matched against jobs already known (see findTwin in db.ts) and folded in when it is the
 // same role. Each has its own minimum interval, since they ask for a handful of requests a day.
 
@@ -813,6 +1139,36 @@ const feeds: Record<string, (f: Feed) => Promise<Posting[]>> = {
     }
     return out;
   },
+};
+
+// The Simplify internship list (SimplifyJobs/Summer2027-Internships on GitHub, the `url` option for
+// another year's), its open and listed roles only; `terms` keeps those for the named terms ("Summer
+// 2027"). Its links carry Simplify's own tracking, which is dropped.
+const SIMPLIFY = "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json";
+export function simplifyUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    for (const key of [...u.searchParams.keys()])
+      if ((/^utm_/i.test(key) || key === "ref") && /simplify/i.test(u.searchParams.get(key) ?? "")) u.searchParams.delete(key);
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+feeds["simplify"] = async f => {
+  const terms = new Set(list(f["terms"]).map(t => t.toLowerCase()));
+  const data = (await getJson(typeof f["url"] === "string" ? f["url"] : SIMPLIFY)) as SimplifyListing[];
+  return (Array.isArray(data) ? data : [])
+    .filter(j => j.active && j.is_visible !== false && j.url && (!terms.size || (j.terms ?? []).some(t => terms.has(t.toLowerCase()))))
+    .map(j => ({
+      url: simplifyUrl(j.url),
+      source: "simplify",
+      company: j.company_name.trim(),
+      title: j.title,
+      location: (j.locations ?? []).join("; ") || null,
+      description: null,
+      posted: posted(j.date_posted ? j.date_posted * 1000 : null),
+    }));
 };
 
 export const feedNames = () => {
