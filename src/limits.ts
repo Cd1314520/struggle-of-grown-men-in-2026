@@ -12,16 +12,19 @@ export const countOne = (what: Counted) => kvSet(`count.${what}.${today()}`, Str
 
 // While the model provider is at capacity no new agent work starts: every worker would fail the same
 // way. Each time it is found at capacity again the pause doubles, from 2 minutes up to an hour; one
-// worker that completes ends it.
+// worker that completes ends it. When the provider says when its limit resets, the pause never runs
+// past that moment, so work resumes as soon as the usage refreshes.
 const BACKOFF_MAX_MINUTES = 60;
+const AFTER_RESET_MS = 30_000;
 export const backoffUntil = () => Number(kvGet("backoff.until") ?? 0);
 export const backedOff = () => Date.now() < backoffUntil();
 // Returns when the pause ends, or null when one was already running.
-export function backOff(): number | null {
+export function backOff(resetsAt?: number): number | null {
   // Workers that fail together report one capacity refusal, not one each.
   if (backedOff()) return null;
   const level = Number(kvGet("backoff.level") ?? 0) + 1;
-  const until = Date.now() + Math.min(2 ** level, BACKOFF_MAX_MINUTES) * 60_000;
+  let until = Date.now() + Math.min(2 ** level, BACKOFF_MAX_MINUTES) * 60_000;
+  if (resetsAt && resetsAt > Date.now()) until = Math.min(until, resetsAt + AFTER_RESET_MS);
   kvSet("backoff.level", String(level));
   kvSet("backoff.until", String(until));
   return until;

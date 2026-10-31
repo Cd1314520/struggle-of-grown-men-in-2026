@@ -102,6 +102,24 @@ function employersWithOpenApplication(): Set<string> {
   return open;
 }
 
+// The reset moment a usage-limit error names, if any: Claude's "..., resets 2026-10-31T05:00:00.000Z)",
+// or Codex's "try again at 11:58 PM." (local time, the next one to come) or "try again at Nov 3rd, 2026 11:58 PM.".
+export function resetTime(error: string | null | undefined, now = new Date()): number | undefined {
+  const claude = Date.parse(/resets (\d{4}-\d\d-\d\dT[\d:.]+Z)/.exec(error ?? "")?.[1] ?? "");
+  if (!Number.isNaN(claude)) return claude;
+  const codex = /try again at (.+?(?:AM|PM))/i.exec(error ?? "")?.[1]?.replace(/(\d)(st|nd|rd|th),/, "$1,");
+  if (!codex) return undefined;
+  const clock = /^(\d{1,2}):(\d\d) ?(AM|PM)$/i.exec(codex);
+  if (!clock) {
+    const dated = Date.parse(codex);
+    return Number.isNaN(dated) ? undefined : dated;
+  }
+  const at = new Date(now);
+  at.setHours((Number(clock[1]) % 12) + (clock[3]?.toUpperCase() === "PM" ? 12 : 0), Number(clock[2]), 0, 0);
+  if (at.getTime() <= now.getTime()) at.setDate(at.getDate() + 1);
+  return at.getTime();
+}
+
 // Every worker's result says whether the model provider is taking work.
 function watchCapacity(run: RunWorker): RunWorker {
   return options => {
@@ -109,7 +127,7 @@ function watchCapacity(run: RunWorker): RunWorker {
     void handle.done.then(result => {
       if (result.status === "completed" && !result.error) clearBackoff();
       else if (isCapacityError(result.error)) {
-        const until = backOff();
+        const until = backOff(resetTime(result.error));
         if (until) logEvent("system", `Model provider at capacity (${options.name} worker): no new agent work until ${new Date(until).toISOString()}`);
       }
     });
