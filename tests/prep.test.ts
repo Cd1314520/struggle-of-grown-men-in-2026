@@ -4,7 +4,7 @@ import { getJob, insertJob, kvSet, updateJob } from "../src/db";
 import { countOne, usedToday } from "../src/limits";
 import type { RunWorker, ToolArgs, WorkerOptions } from "../src/worker";
 import { prep } from "../src/prep";
-import { screenChecklistText, screenVerdict } from "../src/rubric";
+import { checklistText, screenChecklistText, screenVerdict } from "../src/rubric";
 import { to } from "../src/status";
 
 const initial = { approval: config.approval, targets: { ...config.targets }, autoApply: { ...config.autoApply } };
@@ -41,14 +41,20 @@ describe("screen verdict", () => {
   });
 });
 
-// Records the workers prep starts and their prompts; `screen` answers the screen's tool the way a worker would.
-function fakeRun(screen?: (report: (args: ToolArgs) => unknown) => void, error?: string) {
+// Records the workers prep starts and their prompts; `screen` answers the screen's tool the way a worker
+// would, and `assess` the full assessment's submit_checklist (given its prompt).
+function fakeRun(
+  screen?: (report: (args: ToolArgs) => unknown) => void,
+  error?: string,
+  assess?: (report: (args: ToolArgs) => unknown, prompt: string) => void,
+) {
   const started: string[] = [];
   const prompts: string[] = [];
   const run: RunWorker = (opts: WorkerOptions) => {
     started.push(opts.name);
     prompts.push(opts.prompt);
     if (opts.name === "screen") screen?.(args => opts.tools["screen_result"]?.handler(args));
+    if (opts.name === "prep") assess?.(args => opts.tools["submit_checklist"]?.handler(args), opts.prompt);
     return { done: Promise.resolve({ status: error ? "error" : "completed", lastText: "", ...(error ? { error } : {}) }), abort: () => undefined };
   };
   return { run, started, prompts };
@@ -89,6 +95,51 @@ describe("prep before the full assessment", () => {
     expect(started).toEqual(["screen"]);
     expect(getJob(job.id)).toMatchObject({ status: "skipped", note: "screened out: failed practice requirement: not_senior; real requirement: not_senior" });
     expect(usedToday("prep")).toBe(before - 1);
+  });
+
+  it("skips a job whose description asks for 5 or more years, without starting a worker", async () => {
+    const job = preppingJob("Senior Years Co", "Requirements\n- 6+ years of professional software experience");
+    const before = usedToday("prep");
+    const { run, started } = fakeRun();
+    await prep(job, run);
+    expect(started).toEqual([]);
+    expect(getJob(job.id)).toMatchObject({ status: "skipped", note: "senior level: the posting asks for 6+ years of experience" });
+    expect(usedToday("prep")).toBe(before - 1);
+  });
+
+  it("does not ask the full assessment again what the screen answered yes", async () => {
+    config.targets.holdBack = false;
+    const job = preppingJob("Answered Co");
+    let reply = "";
+    let asked: string[] = [];
+    const { run, started, prompts } = fakeRun(
+      report => report({ answers: screenAnswers({ "practice.applies_online": "unclear" }) }),
+      undefined,
+      (report, prompt) => {
+        asked = [...prompt.matchAll(/^- `((?:practice|real)\.\w+)`:/gm)].map(([, id = ""]) => id);
+        const practice = { target: "no", employerEvidence: "A small insurer.", agentNative: "unclear", agentNativeEvidence: "" };
+        reply = String(report({ answers: asked.map(id => ({ id, answer: "yes", evidence: "full read" })), practice }));
+      },
+    );
+    await prep(job, run);
+    expect(started).toEqual(["screen", "prep"]);
+    const screened = screenChecklistText(null);
+    // Asked again: what the screen left unclear, and every statement it does not ask.
+    expect(asked).toContain("practice.applies_online");
+    expect(asked).toContain("practice.degree_fits");
+    expect(asked).not.toContain("practice.not_senior");
+    expect(asked).not.toContain("real.no_cover_letter");
+    expect(asked.length).toBe(checklistText().split("\n").length - (screened.split("\n").length - 1));
+    // Every statement still scored, with the screen's evidence for the ones it settled.
+    expect(reply).toMatch(/^Checklist recorded/);
+    const items = JSON.parse(getJob(job.id)?.checklist ?? "[]") as { key: string; evidence: string }[];
+    expect(items.length).toBe(checklistText().split("\n").length);
+    expect(items.find(i => i.key === "practice.not_senior")?.evidence).toBe("quote");
+    expect(items.find(i => i.key === "practice.applies_online")?.evidence).toBe("full read");
+    // The prompt is shorter by the screened statements, and names this employer only.
+    const saved = checklistText().length - (prompts[1]?.match(/^- `(?:practice|real)\.\w+`:.*$/gm) ?? []).join("\n").length;
+    expect(saved).toBeGreaterThan(1500);
+    expect(prompts[1]).toContain("(none of these employers)");
   });
 
   it("puts a job back in the queue when the provider refused the screen", async () => {

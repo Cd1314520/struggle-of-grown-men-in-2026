@@ -15,6 +15,13 @@ import { addCompanyTool, render, workDir } from "./worker-tools";
 // Hosts read at once during a scan.
 const SCAN_LANES = 6;
 
+// Postings per triage call. The prompt around them (the targets, the employers named, the
+// instructions) costs the same for one posting as for a hundred, so a partial batch waits for more
+// scans to fill it, up to TRIAGE_WAIT_HOURS after its oldest posting was found. A job the candidate
+// picked by hand never waits.
+export const TRIAGE_BATCH = 100;
+export const TRIAGE_WAIT_HOURS = 2;
+
 // A board that is down would otherwise log the same error on every scan.
 const feedErrors = new Map<string, number>();
 function feedError(key: string, err: unknown) {
@@ -83,34 +90,51 @@ function screen(batch: Job[]): Job[] {
   const left: Job[] = [];
   let dropped = 0;
   for (const job of batch) {
-    const reason = kvGet(`feedback.${job.id}`) ? null : screenOut(job.title, appliedLocation(job), job.url);
+    const reason = kvGet(`feedback.${job.id}`) ? null : screenOut(job.title, appliedLocation(job), job.url, job.description);
     if (reason) {
       updateJob(job.id, to.skipped(reason));
       dropped++;
     } else left.push(job);
   }
   if (dropped)
-    logEvent("system", `Triage: screened out ${dropped} of ${batch.length} abroad, unwanted or senior-level titles, or dead-end portals before reading`);
+    logEvent(
+      "system",
+      `Triage: screened out ${dropped} of ${batch.length} abroad, unwanted, past-term or senior-level postings, or dead-end portals before reading`,
+    );
   return left;
+}
+
+// SQLite's datetime('now'): UTC, with a space for the T.
+const hoursSince = (at: string) => (Date.now() - Date.parse(`${at.replace(" ", "T")}Z`)) / 3600_000;
+
+// Whether the postings left after the screen are worth a call now: a full batch, one that has waited
+// long enough, or one with a job picked by hand in it.
+export function triageDue(waiting: Job[], hasFeedback = (job: Job) => !!kvGet(`feedback.${job.id}`)) {
+  if (!waiting.length) return false;
+  if (waiting.length >= TRIAGE_BATCH) return true;
+  return waiting.some(j => hoursSince(j.found_at) >= TRIAGE_WAIT_HOURS || hasFeedback(j));
 }
 
 async function triage(run: RunWorker) {
   for (;;) {
-    const found = jobsByStatus("found", 50);
-    if (!found.length) return;
-    const batch = screen(found);
-    if (!batch.length) continue;
+    const waiting = screen(jobsByStatus("found", 100_000));
+    if (!triageDue(waiting)) return;
+    const batch = waiting.slice(0, TRIAGE_BATCH);
     const ids = new Set(batch.map(j => j.id));
     let kept = null as number[] | null; // set from the tool callback
     let held: number[] = [];
     const { done } = run({
       name: "triage",
-      builtins: ["read", "write"],
+      // Everything it needs is in the prompt; file tools would only add their definitions to every call.
+      builtins: [],
       model: config.models.triage,
       cwd: workDir(),
       maxTime: "10m",
       prompt: render("triage", {
-        employers: employersText(),
+        employers: employersText(
+          undefined,
+          batch.map(j => j.company),
+        ),
         targets: readProfile("targets.md"),
         postings: batch.map(j => `${j.id} | ${j.company} | ${j.title} | ${j.location ?? "?"}`).join("\n"),
       }),

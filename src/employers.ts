@@ -31,9 +31,12 @@ export function employerListing(company: string, lists = loadEmployers()): Liste
   return null;
 }
 
-// The lists as the triage, prep and discover prompts show them.
-export function employersText(lists = loadEmployers()) {
-  const line = (l: string[]) => (l.length ? l.join(", ") : "(none)");
+// The lists as the triage, prep and discover prompts show them. Given `companies`, only the listed
+// employers among them: triage and prep judge those alone, and the whole list would go with every call.
+export function employersText(lists = loadEmployers(), companies?: string[]) {
+  const keys = companies && new Set(companies.map(companyKey));
+  const only = (l: string[]) => (keys ? l.filter(n => keys.has(companyKey(n))) : l);
+  const line = (l: string[]) => (only(l).length ? only(l).join(", ") : keys ? "(none of these employers)" : "(none)");
   return `- Frontier (agent-native, at scale; real targets): ${line(lists.frontier)}\n- Practice (behind; fine to practise on): ${line(lists.practice)}`;
 }
 

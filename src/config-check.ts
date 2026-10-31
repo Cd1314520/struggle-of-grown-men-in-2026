@@ -97,7 +97,10 @@ const CONFIG = shape(
     mailbox: orNull(matching(/^\S+@\S+$/, "an email address")),
     autoApply: shape({}, { minScore: amount(), allowConcerns: bool, perDay: count(), perEmployer: count() }),
     questionDigest: shape({}, { enabled: bool, time: matching(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:mm in 24-hour local time"), timeZone: text }),
-    screen: shape({}, { titles: orNull(regex) }),
+    screen: shape(
+      {},
+      { titles: orNull(regex), terms: orNull(listOf(matching(/^(spring|summer|fall|autumn|winter)\s*(20)?\d{2}$/i, "a term such as Summer 2027"))) },
+    ),
     // Each feed and board takes its own extra parameters.
     feeds: shape({}, {}, shape({ minutes: amount() }, {}, anything)),
     boards: shape(

@@ -82,6 +82,9 @@ schedule:
 # than the targets want (an internship search, say). null: every title goes to triage.
 screen:
   titles: null
+  # Terms wanted ("Summer 2027"): a title naming another term is dropped too. A title naming a term that
+  # is over is always dropped. null: every term not yet over goes to triage.
+  terms: null
 
 # Remote-job aggregators, read during a scan but no more often than `minutes` each (they ask for a
 # few requests a day). A role also listed on a company board is folded into that one job.

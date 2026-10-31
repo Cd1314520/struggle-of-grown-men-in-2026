@@ -35,8 +35,9 @@ export interface Config {
   schedule: { scanMinutes: number; discoverMinutes: number; trackMinutes: number };
   questionDigest?: { enabled: boolean; time: string; timeZone: string };
   // A case-insensitive regular expression every title must match to be read at all; the rest are dropped
-  // before triage, at no cost. null or absent: every title goes to triage.
-  screen?: { titles?: string | null };
+  // before triage, at no cost. null or absent: every title goes to triage. `terms` ("Summer 2027"): a
+  // title naming any other term is dropped too. null or absent: only terms that are over.
+  screen?: { titles?: string | null; terms?: string[] | null };
   feeds?: Record<string, { minutes: number; [param: string]: unknown }>;
   boards?: import("./boards").Boards;
   concurrency: { prep: number; fill?: number };

@@ -254,7 +254,7 @@ export { companyKey };
 // on its own: two titles naming different terms are different openings, such as an internship and the
 // co-op after it.
 const TERM = /\b(spring|summer|fall|autumn|winter)\b[\s,'’-]*(?:20)?(\d{2})\b/gi;
-function termOf(title: string): string | null {
+export function termOf(title: string): string | null {
   const m = new RegExp(TERM.source, "i").exec(title);
   return m ? `${(m[1] ?? "").toLowerCase().replace("autumn", "fall")} ${m[2]}` : null;
 }

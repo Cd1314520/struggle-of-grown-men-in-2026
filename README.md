@@ -29,18 +29,18 @@ Once an application is sent, each thing the employer asks for (a questionnaire, 
 
 Side exits: `needs_input` (agent asked a question), `needs_manual` (agent could not get past a CAPTCHA or block), `failed`, `skipped`, `rejected`.
 
-Triage first drops, without a model, postings abroad, titles that do not match `screen.titles` when it is set (a regular expression in `config.yml`), and senior-level titles (senior, staff, principal, lead, manager and above; `src/screen.ts`), then uses the model named in `models.triage`, up to 50 postings per call, in sequential batches until the found backlog is drained.
+Triage first drops, without a model, postings abroad, titles that do not match `screen.titles` when it is set (a regular expression in `config.yml`), titles naming a term that is over or, when `screen.terms` is set, not one of those terms, senior-level titles (senior, staff, principal, lead, manager and above), and descriptions that ask for 5 or more years of experience outside a "preferred" section (`src/screen.ts`). It then uses the model named in `models.triage`, up to 100 postings per call. A smaller batch waits for later scans to fill it, until its oldest posting was found 2 hours ago (`TRIAGE_BATCH` and `TRIAGE_WAIT_HOURS` in `src/scan.ts`); a job you picked by hand never waits. The prompt names only the employers from `profile/employers.yml` that are in the batch.
 
-Before the full assessment, prep skips without a model a job whose employer already has `autoApply.perEmployer` applications (while `approval` is `auto`), then has the cheaper `models.screen` read the posting for the required statements in `rubric.yml` that it settles on its own (those not marked `screen: false`). A job is screened out only when it fails a requirement under every rubric that could decide it; anything else, or a screen that does not finish, goes on to the full assessment. Neither counts against `limits.prepPerDay`.
+Before the full assessment, prep skips without a model a job listed abroad, one whose description asks for 5 or more years, and one whose employer already has `autoApply.perEmployer` applications (while `approval` is `auto`). It then has the cheaper `models.screen` read the posting for the required statements in `rubric.yml` that it settles on its own (those not marked `screen: false`). A job is screened out only when it fails a requirement under every rubric that could decide it; anything else, or a screen that does not finish, goes on to the full assessment. The statements the screen answered `yes` are carried into the full assessment with their evidence instead of being asked again; an `unclear` is asked again. None of this counts against `limits.prepPerDay`.
 
 An employer is judged once against the description of a target employer (`targets.describe`). While targets are held back, a job at an employer an earlier full assessment judged a target (or on the frontier list in `profile/employers.yml`) only gets the screen for the real rubric's plain requirements, then is held without a full assessment. `rememberedEmployer` in `src/employers.ts` reads the earlier judgments made against the current description; one target judgment outranks the rest, and the lists in `profile/employers.yml` outrank them all. A job you pick out by hand is always assessed in full.
 
 | Worker | Built-in tools (omp's names; [harnesses](docs/harnesses.md)) | Host tools |
 |---|---|---|
-| triage | read, write | `triage_result` |
-| discover | + web_search | `add_company`, `save_job` |
+| triage | none | `triage_result` |
+| discover | read, write, web_search | `add_company`, `save_job` |
 | screen | none | `screen_result` |
-| prep | + edit, bash (typst) | `submit_checklist`, `finish_prep` |
+| prep | read, write, edit, bash (typst) | `submit_checklist`, `finish_prep` |
 | fill | read, write, eval (browser) | `prefill` (Claude Code only), `get_account`, `gmail_*`, `ask_user`, `confirm_submit`, `need_manual`, `verify_status`, `report_result` |
 | track | read, write | `gmail_*`, `add_step`, `update_step`, `record_outcome`, `note` |
 | import | read, write, edit, bash (typst) | `finish_import` |

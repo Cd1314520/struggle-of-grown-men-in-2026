@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { config } from "../src/config";
 import { isCapacityError } from "../src/errors";
-import { screenOut } from "../src/screen";
+import { screenOut, yearsAsked } from "../src/screen";
+
+const OCT_2026 = new Date("2026-10-31T12:00:00Z");
 
 describe("screening postings before triage", () => {
   it("drops applications on portals that never let this machine through", () => {
@@ -14,7 +16,7 @@ describe("screening postings before triage", () => {
     try {
       config.screen = { titles: String.raw`\b(intern(ship)?s?|co-?op|apprentice(ship)?)\b` };
       for (const title of ["Electrical Engineering Intern", "Summer 2027 Internship - Firmware", "Co-op, Hardware Test (Spring 2027)"])
-        expect(screenOut(title, "Houston, TX")).toBeNull();
+        expect(screenOut(title, "Houston, TX", undefined, null, OCT_2026)).toBeNull();
       for (const title of ["Embedded Software Engineer", "Internal Tools Engineer", "International Sales Engineer"])
         expect(screenOut(title, "Houston, TX")).toMatch(/screen\.titles/);
       config.screen = { titles: null };
@@ -71,6 +73,54 @@ describe("screening postings before triage", () => {
       "Embedded AI Engineer, On-Device Models",
     ])
       expect(screenOut(title, "Austin, TX")).toBeNull();
+  });
+  it("drops titles naming a term that is over, and keeps the terms still ahead", () => {
+    for (const title of ["Software Engineering Intern - Summer 2026", "Co-op, Spring '26", "Winter 2025 Data Intern", "Fall 2025 Intern (Remote)"])
+      expect(screenOut(title, "Austin, TX", undefined, null, OCT_2026)).toMatch(/term is over/);
+    for (const title of ["Software Engineering Intern - Summer 2027", "Fall 2026 Intern", "Co-op, Winter 2027", "Software Engineer Intern"])
+      expect(screenOut(title, "Austin, TX", undefined, null, OCT_2026)).toBeNull();
+  });
+  it("drops titles naming a term outside screen.terms when it is set", () => {
+    const saved = config.screen;
+    try {
+      config.screen = { terms: ["Summer 2027"] };
+      expect(screenOut("Software Intern, Summer '27", "Austin, TX", undefined, null, OCT_2026)).toBeNull();
+      expect(screenOut("Software Intern, Fall 2027", "Austin, TX", undefined, null, OCT_2026)).toMatch(/not one of screen\.terms/);
+      // A title that names no term is left to triage.
+      expect(screenOut("Software Intern", "Austin, TX", undefined, null, OCT_2026)).toBeNull();
+    } finally {
+      if (saved) config.screen = saved;
+      else delete config.screen;
+    }
+  });
+  it("drops descriptions that ask for 5 or more years", () => {
+    for (const description of [
+      "Requirements:\n- 5+ years of experience building backend services\n- Python",
+      "You have at least 7 years' professional software engineering experience.",
+      "Minimum qualifications\n- BS in CS and 6 or more years of industry experience",
+      "We are hiring.\n- 5-8 years of experience with distributed systems",
+    ])
+      expect(screenOut("Software Engineer", "Austin, TX", undefined, description)).toMatch(/asks for \d+\+ years/);
+  });
+  it("keeps descriptions that ask for fewer years, prefer more, or speak of the employer's own", () => {
+    for (const description of [
+      "- 0-5 years of experience",
+      "- 2+ years of experience in Python",
+      "- 3 to 5 years of experience",
+      "- BS and 5+ years of experience, or MS and 3+ years of experience",
+      "- 5+ years of experience preferred",
+      "- 5+ years of experience is a plus",
+      "Preferred qualifications\n- 6+ years of experience with Kubernetes\nBenefits\n- 401k",
+      "Nice to have:\n- 8 years of experience",
+      "With over 30 years of experience serving clients, Acme leads the market.",
+      "Our team brings 10+ years of experience in fintech.",
+      "Join a company founded 12 years ago. Health insurance after 1 year.",
+      "- 5 years of Python",
+      null,
+    ])
+      expect(screenOut("Software Engineer", "Austin, TX", undefined, description)).toBeNull();
+    // Required years come back after a preferred section ends.
+    expect(yearsAsked("Nice to have\n- 8 years of experience\nRequirements\n- 5+ years of experience")).toBe(5);
   });
   it("drops listings abroad and keeps US or unstated ones", () => {
     expect(screenOut("Software Engineer", "Bengaluru")).toMatch(/outside the United States/);
