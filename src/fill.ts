@@ -100,7 +100,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   session.checkpoint = { ...session.checkpoint, slot, resumeSha: frozen.sha };
   updateJob(job.id, { resume_sha: frozen.sha, resume_frozen_at: job.resume_frozen_at ?? new Date().toISOString() });
   recordCheckpoint(job.id, session.checkpoint);
-  const mailbox = gmail.gmailStatus().address ?? "";
+  const mailbox = gmail.applicationMailbox();
   for (const answer of context.answers) {
     if (answer.kind === "cover_letter") writeFileSync(join(dir, "cover_letter.txt"), answer.answer + "\n");
   }

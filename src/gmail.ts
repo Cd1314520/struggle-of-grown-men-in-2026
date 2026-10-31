@@ -87,6 +87,9 @@ export async function exchangeCode(code: string) {
 }
 
 export const gmailStatus = () => ({ connected: !!kvGet("gmail.refresh"), address: kvGet("gmail.address") });
+// The address application forms and portal accounts use: the connected Gmail, or before it is
+// connected the configured mailbox (codes sent there then wait for the candidate).
+export const applicationMailbox = () => gmailStatus().address ?? config.mailbox?.trim() ?? "";
 
 async function accessToken() {
   const cached = JSON.parse(kvGet("gmail.access") ?? "null") as { token: string; exp: number } | null;

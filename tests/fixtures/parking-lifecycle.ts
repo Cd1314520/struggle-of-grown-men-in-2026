@@ -146,6 +146,7 @@ const browser: Browser = {
 };
 await mock.module("../../src/gmail", () => ({
   gmailStatus: () => ({ connected: false, address: null }),
+  applicationMailbox: () => "",
   search: () => {
     throw new Error("mail forbidden in fixture");
   },
