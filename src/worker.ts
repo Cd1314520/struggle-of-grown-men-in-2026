@@ -4,6 +4,10 @@
 // on Claude Code (src/claude.ts), `codex/<model>` on Codex (src/codex.ts), anything else on omp (src/omp.ts).
 import { killClaudeWorkers, runClaude } from "./claude";
 import { killCodexWorkers, runCodex } from "./codex";
+import { config, MODEL_STAGES, type ModelStage } from "./config";
+import { logEvent } from "./db";
+import { isUsageLimit } from "./errors";
+import { isLimited } from "./limits";
 import { killOmpWorkers, runOmp } from "./omp";
 
 // Whatever the agent sent: nothing about it is trusted until read through `arg`.
@@ -65,6 +69,7 @@ export type Builtin = "read" | "write" | "edit" | "bash" | "eval" | "web_search"
 
 export interface WorkerOptions {
   name: string; // e.g. "prep", "fill"
+  stage?: ModelStage; // whose `models.<stage>` it runs on, when that is not its name
   prompt: string;
   cwd: string;
   tools: Record<string, HostTool>;
@@ -95,6 +100,97 @@ export const usesPlaywright = (model: string | null | undefined) => harnessOf(mo
 export function runWorker(opts: WorkerOptions): WorkerHandle {
   const harness = harnessOf(opts.model);
   return harness === "claude-code" ? runClaude(opts) : harness === "codex" ? runCodex(opts) : runOmp(opts);
+}
+
+export const stageOf = (opts: Pick<WorkerOptions, "name" | "stage">): ModelStage | null => opts.stage ?? MODEL_STAGES.find(s => s === opts.name) ?? null;
+
+// The models a stage may run on, in order: its own, then each of `models.fallback.<stage>` once.
+export function modelChain(stage: ModelStage): (string | null)[] {
+  const listed = config.models.fallback?.[stage];
+  const fallbacks = listed === undefined ? [] : Array.isArray(listed) ? listed : [listed];
+  return [...new Set([config.models[stage] ?? null, ...fallbacks])];
+}
+
+// The first model in the chain from index `from` on whose account is not at its usage limit, or
+// undefined when there is none.
+function firstFree(chain: (string | null)[], from: number): string | null | undefined {
+  const at = chain.findIndex((m, i) => i >= from && !isLimited(m));
+  return at < 0 ? undefined : chain[at];
+}
+
+// The model to move to after `model` ended on a usage limit: the next one in the chain not at its
+// own limit, or null when none is left.
+export function nextFallback(stage: ModelStage | null, model: string | null | undefined): string | null {
+  if (!stage) return null;
+  const chain = modelChain(stage);
+  const at = chain.indexOf(model ?? null);
+  return at < 0 ? null : (firstFree(chain, at + 1) ?? null);
+}
+
+// The model new work of a stage starts on instead of `model`: `model` itself, or, while it is at its
+// usage limit, the first fallback after it that is not. When every one is limited, `model`.
+export function availableModel(stage: ModelStage | null, model: string | null | undefined): string | null {
+  if (!stage) return model ?? null;
+  const chain = modelChain(stage);
+  const at = chain.indexOf(model ?? null);
+  const free = at < 0 ? undefined : firstFree(chain, at);
+  return free === undefined ? (model ?? null) : free;
+}
+
+// A worker that ends on a usage limit runs again at once on its stage's next fallback model, instead
+// of the work waiting hours for the limit to reset. A browser worker is left to its caller: it may
+// have filled half a form, and the fill resumes that draft with a prompt that says so (src/fill.ts).
+// So is a worker that called a host tool before the limit: it has changed something (a prep may have
+// handed in its resume already), and a rerun would act on that again. Its caller handles the refusal
+// as before, and the next worker of that stage starts on the fallback. While a model is at its limit
+// (src/limits.ts), new work starts on the first fallback that is not, and goes back to the stage's own
+// model once that one's limit resets.
+export function withFallback(run: RunWorker): RunWorker {
+  return opts => {
+    const stage = stageOf(opts);
+    if (opts.browser || !stage) return run(opts);
+    let acted = false as boolean; // set from the tool handlers
+    const tools = Object.fromEntries(
+      Object.entries(opts.tools).map(([name, tool]) => [
+        name,
+        {
+          ...tool,
+          handler: (args: ToolArgs) => {
+            acted = true;
+            return tool.handler(args);
+          },
+        },
+      ]),
+    );
+    let model = availableModel(stage, opts.model);
+    if (model !== (opts.model ?? null))
+      logEvent(
+        "system",
+        `${opts.name} worker runs on ${model ?? "omp's default"}: ${opts.model ?? "omp's default"} is at its usage limit`,
+        opts.jobId,
+        opts.name,
+      );
+    let current = run({ ...opts, model, tools });
+    let aborted = false as boolean;
+    const done = (async () => {
+      let result = await current.done;
+      for (;;) {
+        const next = aborted || acted || result.status !== "error" || !isUsageLimit(result.error) ? null : nextFallback(stage, model);
+        if (!next) return result;
+        logEvent("system", `${opts.name} worker hit a usage limit on ${model ?? "omp's default"}: running it again on ${next}`, opts.jobId, opts.name);
+        model = next;
+        current = run({ ...opts, model, tools });
+        result = await current.done;
+      }
+    })();
+    return {
+      done,
+      abort: () => {
+        aborted = true;
+        current.abort();
+      },
+    };
+  };
 }
 
 export const killAllWorkers = () => {

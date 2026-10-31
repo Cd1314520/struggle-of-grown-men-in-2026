@@ -2,6 +2,11 @@
 // Stands in for `codex exec --json`: the prompt's last line is a JSON plan of what to do. It records
 // its arguments and CODEX_HOME, calls the app's host-tool MCP server the way Codex would, and prints
 // Codex's JSONL events. Subcommands `login status` and `debug models` answer as a signed-in Codex.
+// Like Codex, it lists the skills on the host (in CODEX_HOME/skills and ~/.agents/skills) in the
+// prompt unless `skills.include_instructions` is false, and records the ones it listed.
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+
 interface Plan {
   tool?: string;
   args?: Record<string, unknown>;
@@ -18,7 +23,6 @@ if (argv[0] === "debug") {
 }
 const input = await new Response(Bun.stdin.stream()).text();
 const plan = JSON.parse(input.trim().split("\n").at(-1) ?? "{}") as Plan;
-await Bun.write(process.env["FAKE_CODEX_ARGS"] ?? "/dev/null", JSON.stringify({ argv, home: process.env["CODEX_HOME"], prompt: input }));
 // Each `-c key=value`, its value parsed as JSON (the TOML subset the client sends).
 const settings: Record<string, unknown> = {};
 argv.forEach((a, i) => {
@@ -27,6 +31,10 @@ argv.forEach((a, i) => {
   const eq = kv.indexOf("=");
   settings[kv.slice(0, eq)] = JSON.parse(kv.slice(eq + 1));
 });
+const userHome = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
+const roots = settings["skills.include_instructions"] === false ? [] : [join(process.env["CODEX_HOME"] ?? "", "skills"), join(userHome, ".agents", "skills")];
+const skills = roots.flatMap(root => (existsSync(root) ? readdirSync(root).filter(name => existsSync(join(root, name, "SKILL.md"))) : []));
+await Bun.write(process.env["FAKE_CODEX_ARGS"] ?? "/dev/null", JSON.stringify({ argv, home: process.env["CODEX_HOME"], prompt: input, skills }));
 const out = (event: unknown) => process.stdout.write(JSON.stringify(event) + "\n");
 if (plan.failServer) {
   console.error(`Error: thread/start failed: required MCP servers failed to initialize: ${plan.failServer}: handshaking failed`);
@@ -59,5 +67,3 @@ if (plan.limited) {
   out({ type: "error", message: "You've hit your usage limit. Try again in 2 hours." });
   out({ type: "turn.failed", error: { message: "You've hit your usage limit. Try again in 2 hours." } });
 } else out({ type: "turn.completed", usage: { input_tokens: 10, output_tokens: 2 } });
-
-export {};

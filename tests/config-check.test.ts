@@ -36,6 +36,17 @@ describe("config.yml", () => {
     ).toStartWith("autoApply.minscore: not a setting this app knows");
   });
 
+  it("takes a fallback per stage as one model or a list of them", () => {
+    expect(withChange(c => ((c["models"] ??= {})["fallback"] = { fill: "codex/gpt-6-sol", prep: ["claude-code/sonnet", "codex/gpt-6-luna"] }))).toEqual([]);
+    expect(withChange(c => ((c["models"] ??= {})["fallback"] = { fil: "codex/gpt-6-sol" }))[0]).toStartWith(
+      "models.fallback.fil: not a setting this app knows",
+    );
+    expect(withChange(c => ((c["models"] ??= {})["fallback"] = { fill: ["codex/gpt-6-sol", ""] }))).toEqual([
+      'models.fallback.fill[1]: expected non-empty text, got ""',
+    ]);
+    expect(withChange(c => ((c["models"] ??= {})["fallback"] = { fill: 3 }))).toEqual(["models.fallback.fill: expected a model or a list of models, got 3"]);
+  });
+
   it("takes screen.titles only as a regular expression that compiles, or null", () => {
     expect(withChange(c => (c["screen"] = { titles: String.raw`\b(intern|co-?op)\b` }))).toEqual([]);
     expect(withChange(c => (c["screen"] = { titles: null }))).toEqual([]);

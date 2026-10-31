@@ -76,6 +76,12 @@ const shape =
   };
 
 const model = orNull(text);
+// One fallback model, or several to try in order.
+const fallbacks: Check = (value, path, problems) => {
+  if (Array.isArray(value)) listOf(text)(value, path, problems);
+  else check(v => typeof v === "string" && !!v.trim(), "a model or a list of models")(value, path, problems);
+};
+const STAGES = ["triage", "discover", "locate", "screen", "prep", "fill", "track", "recheck", "import"];
 
 const CONFIG = shape(
   {
@@ -83,7 +89,10 @@ const CONFIG = shape(
     approval: oneOf("auto", "gated"),
     targets: shape({ holdBack: bool }, { describe: orNull(words) }),
     // import was added later: a config.yml from before it still loads, and the resume import uses omp's default.
-    models: shape({ triage: model, discover: model, locate: model, screen: model, prep: model, fill: model, track: model, recheck: model }, { import: model }),
+    models: shape(
+      { triage: model, discover: model, locate: model, screen: model, prep: model, fill: model, track: model, recheck: model },
+      { import: model, fallback: shape({}, Object.fromEntries(STAGES.map(stage => [stage, fallbacks]))) },
+    ),
     schedule: shape({ scanMinutes: amount(), discoverMinutes: amount(), trackMinutes: amount() }),
     concurrency: shape({ prep: count() }, { fill: count(1) }),
     limits: shape({ prepPerDay: count(), applyPerDay: count() }, { locatePerDay: count(), applySpreadHours: amount() }),

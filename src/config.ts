@@ -25,7 +25,8 @@ export interface Config {
   // Employers saved for later: the frontier list in profile/employers.yml, plus any the assessment
   // judges to fit `describe`. While holdBack is on their jobs are held instead of applied to.
   targets: { holdBack: boolean; describe?: string | null };
-  models: Record<Exclude<ModelStage, "import">, string | null> & { import?: string | null };
+  // `fallback`: models a stage moves to, in order, when a worker ends on a usage limit (src/worker.ts).
+  models: Record<Exclude<ModelStage, "import">, string | null> & { import?: string | null; fallback?: Partial<Record<ModelStage, string | string[]>> };
   autoApply?: {
     minScore?: number;
     allowConcerns?: boolean;

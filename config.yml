@@ -57,6 +57,15 @@ models:
   track: claude-code/sonnet
   recheck: claude-code/opus # adds kept answers to answers.md, and answers parked questions the profile now settles
   import: claude-code/opus # turns uploaded resume files into the Typst resume (Resume page)
+  # Where a stage's work goes when its model's account hits a usage limit (Claude Code's "usage limit
+  # reached", Codex's "You've hit your usage limit"), instead of everything waiting for the limit to
+  # reset: one model or a list, each tried once, in order. A fill resumes its draft on the fallback.
+  # New work skips a limited model until its reset, then goes back to it; with every model limited the
+  # app waits for the first reset. Only usage limits move work; an overload or a 429 still pauses as
+  # before. Set in config.local.yml:
+  #   fallback:
+  #     fill: codex/gpt-6-sol
+  #     prep: [codex/gpt-6-luna, claude-code/haiku]
 
 # Scoring weights and thresholds live in profile/rubric.yml.
 

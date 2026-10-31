@@ -3,7 +3,9 @@
 //
 // Host tools reach it as the same MCP server Claude Code gets ("host", src/claude.ts), and a browser
 // worker the same Playwright server. Its own home keeps the owner's Codex setup out: no AGENTS.md,
-// config, skills, memories, plugins or hooks, which `--ignore-user-config` alone does not skip.
+// config, skills, memories, plugins or hooks, which `--ignore-user-config` alone does not skip. Skills
+// are also found outside CODEX_HOME, in ~/.agents/skills (the home directory, which CODEX_HOME does not
+// move), so host skill discovery is turned off as well.
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { browserServer, serveHostTools, stepOf } from "./claude";
@@ -129,6 +131,10 @@ export function runCodex(opts: WorkerOptions): WorkerHandle {
     "-s",
     writes ? "workspace-write" : "read-only",
     ...set("approval_policy", "never"),
+    // Codex lists the skills in CODEX_HOME/skills, ~/.agents/skills and its own bundled set in the
+    // prompt. A worker gets none. (`features.skip_host_skill_discovery` does not stop the
+    // ~/.agents/skills search in codex-cli 0.164, and warns that it is unstable.)
+    ...set("skills.include_instructions", false),
     // Codex's shell always runs in its sandbox; its writable root is the working directory alone.
     ...set("sandbox_workspace_write.exclude_tmpdir_env_var", true),
     ...set("sandbox_workspace_write.exclude_slash_tmp", true),

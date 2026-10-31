@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { codexCatalog, runCodex, unwrapShell } from "../src/codex";
@@ -28,7 +28,7 @@ const run = (plan: object, opts: Partial<WorkerOptions> = {}) =>
     tools: {},
     ...opts,
   });
-const given = () => JSON.parse(readFileSync(argsFile, "utf8")) as { argv: string[]; home: string; prompt: string };
+const given = () => JSON.parse(readFileSync(argsFile, "utf8")) as { argv: string[]; home: string; prompt: string; skills: string[] };
 const flag = (args: string[], name: string) => args[args.indexOf(name) + 1];
 // Each `-c key=value` the worker was started with, values as JSON.
 const settings = (args: string[]) =>
@@ -91,6 +91,29 @@ describe("a Codex worker", () => {
     expect(c["mcp_servers.browser.command"]).toBeUndefined();
     expect(prompt.startsWith("You are a worker")).toBe(true);
     expect(prompt).toContain('"host" MCP server');
+  });
+
+  it("loads no skills from the owner's home or its own", async () => {
+    const userHome = join(dir, "user-home");
+    for (const root of [join(userHome, ".agents", "skills", "owner-skill"), join(home, "skills", "home-skill")]) {
+      mkdirSync(root, { recursive: true });
+      writeFileSync(join(root, "SKILL.md"), "---\nname: x\ndescription: x\n---\n");
+    }
+    // The fake lists both when nothing turns the listing off, as Codex does.
+    const bare = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures", "fake-codex.ts"), "exec"], {
+      env: { ...process.env, HOME: userHome, USERPROFILE: userHome, CODEX_HOME: home },
+      stdin: new Blob(["{}"]),
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    await bare.exited;
+    expect(given().skills.sort()).toEqual(["home-skill", "owner-skill"]);
+
+    await run({ tool: "report_result", args: {} }, { tools: report, env: { HOME: userHome, USERPROFILE: userHome } }).done;
+    const c = settings(given().argv);
+    expect(c["features.skip_host_skill_discovery"]).toBeUndefined();
+    expect(c["skills.include_instructions"]).toBe(false);
+    expect(given().skills).toEqual([]);
   });
 
   it("may write in its working directory, and search, only when given those tools", async () => {

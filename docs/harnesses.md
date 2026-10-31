@@ -12,6 +12,27 @@ Each stage picks its own, so filling can stay on omp while assessing runs on Cla
 
 The Codex binary is `AUTO_APPLY_CODEX` if set, else `codex` on the PATH, else (on Windows) the Codex desktop app's own CLI, found once through `Get-AppxPackage OpenAI.Codex`.
 
+## Fallback on a usage limit
+
+A stage can name models to move to when its own model's account runs out of its allowance, under `models.fallback.<stage>` (one model, or a list tried in order, each once):
+
+```yaml
+models:
+  fill: claude-code/opus
+  fallback:
+    fill: codex/gpt-6-sol
+    prep: [codex/gpt-6-luna, claude-code/haiku]
+```
+
+Only a usage limit moves work (`isUsageLimit` in `src/errors.ts`: Claude Code's "Claude usage limit reached (five_hour, resets …)", from its rejected `rate_limit_event`, and Codex's "You've hit your usage limit"), since it lasts hours. An overload or a 429 still pauses all agent work for a few minutes, as before (`backOff` in `src/limits.ts`).
+
+- **Limited models.** A worker that ends on a usage limit marks its model limited (`limited.<model>` in kv, `src/limits.ts`) until the reset the provider names: Claude Code's `resets` time, or Codex's "Try again in 2 hours". A limit that names no reset in a form read there (`limitResetsAt` in `src/errors.ts`; a clock time such as "try again at 3:05 PM" has no time zone) is taken to last an hour, after which the model is tried again. While a model is limited, new work of its stage starts on the first model after it in the chain that is not (`availableModel` in `src/worker.ts`), and goes back to the stage's own model once that one's limit has passed.
+- **Most stages.** `withFallback` (`src/worker.ts`) runs a worker that ended on a usage limit again at once, with the same prompt and host tools, on the next model in the chain that is not limited, unless it called a host tool before the limit: it may have changed something already (a prep that handed in its resume), so its caller handles the refusal as before, and the next worker of that stage starts on the fallback. A worker named after no stage says which one it runs for (`stage`: the answer bank runs on `models.recheck`).
+- **Fill.** A browser worker may have filled half a form, so it is not rerun in place. The fill stops as it does on any capacity refusal (the same draft goes back in the fill queue), and resumes on the first model of `models.fill`'s chain that is not limited, with the resuming brief, the prompt and tools of that model's harness (omp's browser or Playwright's), and the checkpoint the first worker saved.
+- **Pausing.** While some model in the stage's chain is not limited, a usage limit does not pause the app. When every one is, all agent work waits until the first of them resets, instead of the doubling pause of up to an hour that an overload gets. The pause covers every stage, as it did before fallbacks.
+
+Settings → Models does not show fallbacks: they are set in `config.local.yml` (or `config.yml`). Setup counts the fallback models when it checks which harnesses and tools are needed.
+
 ## What each harness is given
 
 | | omp | Claude Code | Codex |
@@ -23,7 +44,7 @@ The Codex binary is `AUTO_APPLY_CODEX` if set, else `codex` on the PATH, else (o
 | `eval` | its JavaScript session | none (see the fill worker below) | none, as for Claude Code |
 | Browser | omp's browser tool over CDP | Playwright's MCP server (`@playwright/mcp`, pinned in `src/claude.ts`), started with `--cdp-endpoint`, `--no-webmcp` and `--caps vision` | the same server, through `-c mcp_servers.browser.*` |
 | Permissions | `approvalMode: yolo` | `--permission-mode bypassPermissions` | `approval_policy = "never"` inside the sandbox above; on Windows `windows.sandbox = "elevated"` (without it every command is refused) |
-| Isolation | `--no-extensions --no-rules --no-skills --no-lsp` | `--setting-sources ""` (no CLAUDE.md, settings, hooks or plugins), `--strict-mcp-config`, `--disable-slash-commands`, `--no-chrome` | its own `CODEX_HOME` (`data/codex`), because `--ignore-user-config` still loads the owner's `~/.codex/AGENTS.md`; plus `--ignore-user-config --ignore-rules --ephemeral` |
+| Isolation | `--no-extensions --no-rules --no-skills --no-lsp` | `--setting-sources ""` (no CLAUDE.md, settings, hooks or plugins), `--strict-mcp-config`, `--disable-slash-commands`, `--no-chrome` | its own `CODEX_HOME` (`data/codex`), because `--ignore-user-config` still loads the owner's `~/.codex/AGENTS.md`; plus `--ignore-user-config --ignore-rules --ephemeral`; and no skills: Codex also finds them in `~/.agents/skills`, under the home directory rather than `CODEX_HOME`, so `skills.include_instructions = false` keeps every skill out of the prompt (checked with `codex debug prompt-input` on codex-cli 0.164; `features.skip_host_skill_discovery` does not stop that search and only adds an unstable-feature warning) |
 | System prompt | `prompts/system.md` appended | the same, plus a line naming the `mcp__host__` prefix | `prompts/system.md` and a line about the "host" server, ahead of the task on stdin |
 | Time limit | `--max-time` | a timer in the client that stops the process | the same |
 | Abort | an `abort` frame, then a kill after 3 s | SIGTERM, then SIGKILL after 3 s | the same |

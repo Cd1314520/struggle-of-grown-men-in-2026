@@ -20,6 +20,10 @@ config.fillPauseSeconds = [0, 0];
 config.schedule = { scanMinutes: 0, discoverMinutes: 0, trackMinutes: 0 };
 config.limits.applyPerDay = 50;
 config.limits.applySpreadHours = 0;
+if (scenario === "usage-limit") {
+  config.models.fill = "claude-code/opus";
+  config.models.fallback = { fill: "codex/gpt-6-sol" };
+}
 
 if (scenario === "target-isolation") {
   await import("./cdp-isolation"); // Deliberately load real proxy before any worker/browser mocks.
@@ -166,7 +170,7 @@ const { db, getJob, kvSet, updateJob } = await import("../../src/db");
 const { authorizeSubmit, isSubmitting, isVerifying, isRecovering } = await import("../../src/fill-state");
 const core = await import("../../src/questions");
 const { jobBlockers } = await import("../../src/blockers");
-const { backedOff, usedToday } = await import("../../src/limits");
+const { backedOff, backoffUntil, usedToday } = await import("../../src/limits");
 const { Scheduler, retryPassingHandoffs } = await import("../../src/scheduler");
 const scheduler = new Scheduler({ runWorker, browser });
 
@@ -473,6 +477,39 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(workerAt(1).options.jobId, 1, "the same draft resumes");
   assert.equal(jobRow(1).resume_sha, initialSha);
   assert.equal(usedToday("fill"), 1, "resuming is not a new application");
+} else if (scenario === "usage-limit") {
+  assert.equal(first.options.model, "claude-code/opus");
+  await call(first, "checkpoint", navigation);
+  const claudeResets = Date.now() + 3 * 3_600_000;
+  first.fail(`Claude usage limit reached (five_hour, resets ${new Date(claudeResets).toISOString()}): limit reached`);
+  // Nothing pauses, so the draft goes straight back to a browser.
+  scheduler.pump();
+  await until(() => workers.length === 2);
+  assert.equal(backedOff(), false, "a usage limit with a fallback left does not pause the app");
+  assert.equal(core.getOpenGate(1), null, "not parked for a person");
+  const second = workerAt(1);
+  assert.equal(second.options.jobId, 1, "the same draft resumes");
+  assert.equal(second.options.model, "codex/gpt-6-sol", "on the fallback model");
+  assert.match(second.options.prompt, /RESUMING an application/);
+  assert.equal(jobRow(1).resume_sha, initialSha);
+  assert.equal(usedToday("fill"), 1, "resuming is not a new application");
+  // The fallback runs out too: nothing is left to move to, so the app waits for the first of the two
+  // to reset (Codex's, in 2 hours), not the doubling pause.
+  await call(second, "checkpoint", navigation);
+  const codexResets = Date.now() + 2 * 3_600_000;
+  second.fail("You've hit your usage limit. Try again in 2 hours.");
+  await until(() => !scheduler.activeFillSession(1));
+  assert.equal(backedOff(), true);
+  assert.ok(Math.abs(backoffUntil() - codexResets) < 60_000, `paused until Codex resets, not ${new Date(backoffUntil()).toISOString()}`);
+  scheduler.pump();
+  assert.equal(workers.length, 2, "nothing starts before then");
+  // Once Codex's limit has lifted, the draft resumes on it; Claude's is still running.
+  kvSet("limited.codex/gpt-6-sol", "0");
+  kvSet("backoff.until", "0");
+  scheduler.pump();
+  await until(() => workers.length === 3);
+  assert.equal(workerAt(2).options.model, "codex/gpt-6-sol");
+  assert.ok(claudeResets > Date.now());
 } else if (scenario === "retry-browser" || scenario === "retry-site-down") {
   const cause = scenario === "retry-browser" ? "browser" : "site_down";
   const parking = call(first, "need_manual", { ...navigation, cause, reason: "Clicks time out; reads work" });

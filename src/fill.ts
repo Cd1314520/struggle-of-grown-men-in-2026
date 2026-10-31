@@ -4,7 +4,7 @@ import { join } from "node:path";
 import YAML from "yaml";
 import { checkAutoApprovedPractice } from "./auto";
 import { browserSlot, config, jobDir, readProfile } from "./config";
-import { isCapacityError } from "./errors";
+import { isCapacityError, isUsageLimit } from "./errors";
 import { jobsWithCheckpoint, logEvent, updateJob, type Job } from "./db";
 import { endVerification, isSubmitting, isVerifying, queueDraftRecovery, rememberSlot } from "./fill-state";
 import { endSession, ownsFill, stopFailedFill, type FillRuntime, type FillSession } from "./fill-session";
@@ -15,7 +15,7 @@ import { getOpenGate, parkGate, readCheckpoint, recordCheckpoint, resumeContext 
 import { freezeResume, frozenResume } from "./resume";
 import { isSettled, to, wasSent } from "./status";
 import { fillTemplate } from "./template";
-import { usesPlaywright } from "./worker";
+import { availableModel, nextFallback, usesPlaywright } from "./worker";
 import { deadEnd } from "./screen";
 import { lowStakesRule, readPrompt, render, termsRule } from "./worker-tools";
 
@@ -62,6 +62,10 @@ export function tabPlan(slot: number, jobId: number, limit = PARKED_TABS) {
   for (const tabId of keep) closing.delete(tabId); // two checkpoints on one tab: keeping wins
   return { keep, closing, others };
 }
+
+// The model a fill runs on: models.fill, or while that one is at its usage limit, the first fallback
+// that is not (src/limits.ts). A draft a usage limit stopped resumes on that fallback.
+export const fillModel = () => availableModel("fill", config.models.fill);
 
 export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   const { slot } = session;
@@ -136,7 +140,8 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   );
   // An omp worker drives omp's browser tool and runs the prefill script in its JavaScript session; a
   // Claude Code or Codex one drives Playwright's MCP tools, and the app runs the prefill script for it.
-  const onPlaywright = usesPlaywright(config.models.fill);
+  const model = fillModel();
+  const onPlaywright = usesPlaywright(model);
   const ctx = { job, session, mailbox, isVerification, jobBrowser };
   const tools = fillTools(rt, ctx);
   if (onPlaywright) tools["prefill"] = prefillTool(rt, ctx, prefillFacts);
@@ -167,7 +172,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     name: "fill",
     builtins: onPlaywright ? ["read", "write"] : ["read", "write", "eval"],
     jobId: job.id,
-    model: config.models.fill,
+    model,
     cwd: dir,
     browser: true,
     cdpPort: session.browser.port,
@@ -177,6 +182,8 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     tools,
   });
   const result = await session.handle.done;
+  const fallback = isUsageLimit(result.error) ? nextFallback("fill", model) : null;
+  if (fallback) logEvent("system", `Fill hit a usage limit on ${model ?? "omp's default"}: the same draft resumes on ${fallback}`, job.id, "fill");
   // The provider stopped the worker, not the site: the next worker picks up the same draft.
   const capacity = isCapacityError(result.error);
   if (isVerification) {

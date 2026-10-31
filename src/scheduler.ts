@@ -24,14 +24,14 @@ import { autoApply, checkAutoApprovedPractice, employerCapNote } from "./auto";
 import { jobBlockers, type BlockerCause } from "./blockers";
 import { forgetDeferredApproval, pumpDeferredApprovals } from "./deferred-approvals";
 import { tickQuestionDigest } from "./digest";
-import { errorMessage, isCapacityError } from "./errors";
+import { errorMessage, isCapacityError, isUsageLimit, limitResetsAt } from "./errors";
 import { fill } from "./fill";
 import { defaultCheckpoint, endSession, ownsFill, stopFailedFill, type Browser, type FillRuntime, type FillSession } from "./fill-session";
 import { beginAttempt, dropManualLease, endVerification, isRecovering, isSubmitting, isVerifying, lastSlot, manualLeaseGate } from "./fill-state";
-import { backedOff, backOff, clearBackoff, countOne, due, usedToday } from "./limits";
+import { backedOff, backOff, clearBackoff, countOne, due, isLimited, limitedUntil, limitModel, usedToday } from "./limits";
 import { preferUsListings } from "./listings";
 import { locateEmployerPostings, locatePerDay } from "./locate";
-import { runWorker, type RunWorker } from "./worker";
+import { modelChain, runWorker, stageOf, withFallback, type RunWorker } from "./worker";
 import { needsJudgment, parsePracticeAssessment } from "./practice";
 import { prep } from "./prep";
 import { profileProblems } from "./profile";
@@ -102,13 +102,25 @@ function employersWithOpenApplication(): Set<string> {
   return open;
 }
 
-// Every worker's result says whether the model provider is taking work.
+// Every worker's result says whether the model provider is taking work. A usage limit marks its model
+// limited until the reset the provider names; while a model in the stage's chain is not limited it
+// is no pause, since the work moves to that model (withFallback, src/fill.ts). When every one is, the
+// app waits for the first of them to reset rather than retrying sooner.
 function watchCapacity(run: RunWorker): RunWorker {
   return options => {
     const handle = run(options);
     void handle.done.then(result => {
       if (result.status === "completed" && !result.error) clearBackoff();
-      else if (isCapacityError(result.error)) {
+      else if (isUsageLimit(result.error)) {
+        const model = options.model ?? null;
+        limitModel(model, limitResetsAt(result.error));
+        const stage = stageOf(options);
+        const chain = stage ? modelChain(stage) : [model];
+        if (chain.some(m => !isLimited(m))) return;
+        const until = backOff(Math.min(...chain.map(limitedUntil)));
+        if (until)
+          logEvent("system", `Every model for the ${options.name} worker is at its usage limit: no new agent work until ${new Date(until).toISOString()}`);
+      } else if (isCapacityError(result.error)) {
         const until = backOff();
         if (until) logEvent("system", `Model provider at capacity (${options.name} worker): no new agent work until ${new Date(until).toISOString()}`);
       }
@@ -270,7 +282,7 @@ export class Scheduler {
   private importRun: ImportRun | null = null;
 
   constructor(deps: Partial<SchedulerDeps> = {}) {
-    this.run = watchCapacity(deps.runWorker ?? runWorker);
+    this.run = withFallback(watchCapacity(deps.runWorker ?? runWorker));
     this.rt = { sessions: new Map(), runWorker: this.run, browser: deps.browser ?? chrome };
     this.filling = Array.from({ length: browserCount() }, () => null);
     this.restUntil = this.filling.map((_, slot) => Number(kvGet(`fill.rest.${slot}`) ?? 0));
