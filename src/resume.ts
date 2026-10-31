@@ -37,6 +37,13 @@ export function stockPages(): number | null {
 
 export const stockPdf = () => join(DATA, "stock", PDF_NAME);
 
+// Compile a job's tailored copy in its working directory on the host, for workers whose sandbox
+// cannot run typst. Returns typst's error, or null once the PDF is written.
+export function compileWorking(dir: string): string | null {
+  const res = Bun.spawnSync(["typst", "compile", "--root", dir, join(dir, MAIN), join(dir, PDF_NAME)]);
+  return res.exitCode === 0 ? null : res.stderr.toString().slice(0, 1500) || `typst exited with ${res.exitCode}`;
+}
+
 // The stock resume as the Resume page shows it, compiled once per change to the project's files.
 export interface StockResume {
   exists: boolean;

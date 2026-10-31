@@ -10,7 +10,7 @@ import { arg, S, schema, type RunWorker } from "./worker";
 import { employerListing, employersText, rememberedEmployer } from "./employers";
 import { isCapacityError } from "./errors";
 import { assessPractice, targetsKey, type PracticeAssessment } from "./practice";
-import { changedTemplateFiles, MAIN, pageCount, PDF_NAME, stageResume, stockPages, workingPdf } from "./resume";
+import { changedTemplateFiles, compileWorking, MAIN, pageCount, PDF_NAME, stageResume, stockPages, workingPdf } from "./resume";
 import { checklistText, evaluate, screenChecklistText, screenVerdict, type Verdict } from "./rubric";
 import { to } from "./status";
 import { render } from "./worker-tools";
@@ -184,9 +184,11 @@ export async function prep(job: Job, run: RunWorker) {
           if (!stillPrepping()) return WITHDRAWN;
           if (!verdict) return "ERROR: call submit_checklist first.";
           if (reported) return "ERROR: this job was already closed by the checklist; nothing more to do.";
+          // Compiled here, not trusted from the worker: its sandbox may not run typst, and the PDF must match MAIN.
+          const failed = compileWorking(dir);
+          if (failed) return `ERROR: ${MAIN} does not compile. Fix it, then call finish_prep again. typst said:\n${failed}`;
           const pdf = workingPdf(job.id);
-          if (!existsSync(pdf))
-            return `ERROR: ${PDF_NAME} is missing in the working directory. Run \`typst compile ${MAIN} ${PDF_NAME}\`, then call finish_prep again.`;
+          if (!existsSync(pdf)) return `ERROR: ${PDF_NAME} was not written; call finish_prep again.`;
           const touched = changedTemplateFiles(dir);
           if (touched.length)
             return `ERROR: template file(s) ${touched.join(", ")} were modified. Restore them exactly, edit only ${MAIN}, recompile, then call finish_prep again.`;
