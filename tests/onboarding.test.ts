@@ -18,6 +18,7 @@ describe("the example profile", () => {
       "companies.yml",
       "employers.yml",
       "personal.yml",
+      "referral.yml",
       "resume-notes.md",
       "rubric.yml",
       "targets.md",
@@ -37,7 +38,7 @@ describe("the example profile", () => {
   it("holds the app back only where a choice is the owner's to make", () => {
     // The placeholder check in src/profile.ts is what stops the app acting on a template.
     const marked = readdirSync(EXAMPLES).filter(f => example(f).includes(PLACEHOLDER));
-    expect(marked.sort()).toEqual(["answers.md", "personal.yml", "targets.md"]);
+    expect(marked.sort()).toEqual(["answers.md", "personal.yml", "referral.yml", "targets.md"]);
     // Nothing that may be left as it is mentions the marker, or the file could never pass.
     for (const f of ["rubric.yml", "resume-notes.md", "companies.yml", "employers.yml"]) expect(example(f)).not.toContain(PLACEHOLDER);
   });

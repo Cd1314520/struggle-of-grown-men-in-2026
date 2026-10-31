@@ -13,6 +13,8 @@ import type {
   ListView,
   ModelsResult,
   ModelStage,
+  ReferralImportResult,
+  ReferralsState,
   ResumeState,
   SettingsResult,
   SetupResult,
@@ -98,6 +100,7 @@ export const api = {
   models: (refresh = false) => request<ModelsResult>(`/api/models${refresh ? "?refresh" : ""}`),
   resume: () => request<ResumeState>("/api/resume"),
   settings: () => request<SettingsResult>("/api/settings"),
+  referrals: () => request<ReferralsState>("/api/referrals"),
 
   // ---- writes. Each shows the server's refusal as a toast and rethrows it.
   jobAction: (id: number, body: { action: string; text?: string; gateId?: string | undefined }) => post(`/api/jobs/${id}/action`, { text: "", ...body }),
@@ -126,6 +129,16 @@ export const api = {
   discardImport: () => post("/api/resume/import/discard", {}),
   cancelImport: () => post("/api/resume/import/cancel", {}),
   exampleResume: () => post("/api/resume/example", {}),
+  // Referral outreach: nothing here sends a message; the owner records what they sent.
+  addContact: (body: Record<string, unknown>) => post<{ id: number }>("/api/referrals/contacts", body),
+  changeContact: (id: number, body: Record<string, unknown>) => post(`/api/referrals/contacts/${id}`, body),
+  checkReferralMail: () => post<{ checked: number; updates: number }>("/api/referrals/mail", {}),
+  importLinkedInExport: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("modified", String(file.lastModified));
+    return request<ReferralImportResult>("/api/referrals/import", { method: "POST", body: form, raw: true });
+  },
 };
 
 export const queryClient = new QueryClient({
@@ -157,6 +170,7 @@ export const useSetup = () => useQuery({ queryKey: ["setup"], queryFn: () => api
 export const useSettings = () => useQuery({ queryKey: ["settings"], queryFn: api.settings });
 export const useModels = () => useQuery({ queryKey: ["models"], queryFn: () => api.models() });
 export const useResume = () => useQuery({ queryKey: ["resume"], queryFn: api.resume });
+export const useReferrals = () => useQuery({ queryKey: ["referrals"], queryFn: api.referrals });
 export const useQuestions = () => useQuery({ queryKey: ["questions"], queryFn: api.questions });
 export const useBlockers = () => useQuery({ queryKey: ["blockers"], queryFn: api.blockers });
 export const useProfileFile = (file: string | null) =>

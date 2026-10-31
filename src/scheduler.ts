@@ -54,6 +54,8 @@ import { interruptedImport, runImport, type ImportRun } from "./resume-import";
 import { scanSources } from "./scan";
 import { FILL_STAGE, PARKED, to } from "./status";
 import { trackMailbox } from "./track";
+import { gmailStatus } from "./gmail";
+import { syncReferralMail } from "./outreach";
 
 // The outside world a scheduler acts on. The defaults are the real agent runner and the real browsers.
 export interface SchedulerDeps {
@@ -75,6 +77,7 @@ interface FillStart {
 
 const employerOf = (job: Job) => job.company_key ?? job.company;
 
+const REFERRAL_MAIL_MINUTES = 120;
 // New applications are spread over limits.applySpreadHours instead of all starting when the daily
 // cap resets: a posting found mid-day is applied to within the gap, and no site sees a burst.
 // Resumes and verifications are not paced, and neither is a posting opened within FRESH_MS: the first
@@ -520,7 +523,8 @@ export class Scheduler {
     reviewStandingApprovals();
     trimEmployerApprovals();
     // A digest that keeps failing the same way is logged once, not once a tick; Settings shows its last error.
-    let digestError: string | null = null;
+    let digestError: string | null = null,
+      referralError: string | null = null;
     const tick = () => {
       pruneOldChatter();
       void tickQuestionDigest().then(
@@ -540,6 +544,18 @@ export class Scheduler {
         void this.track();
       }
       if (!this.isRunning("recheck") && !profileProblems().length && (bankDue() || recheckDue())) void this.recheck();
+      // Referral contacts: their news in the mailbox, read only, every two hours.
+      if (gmailStatus().connected && due("last.referralMail", REFERRAL_MAIL_MINUTES)) {
+        kvSet("last.referralMail", new Date().toISOString());
+        void syncReferralMail().then(
+          () => (referralError = null),
+          (err: unknown) => {
+            const msg = `Referral mail check: ${errorMessage(err)}`;
+            if (msg !== referralError) logEvent("error", msg);
+            referralError = msg;
+          },
+        );
+      }
       retryPassingHandoffs();
       this.pump();
     };

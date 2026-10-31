@@ -1,0 +1,53 @@
+# Example: copied into profile/ the first time the app started. Optional: only the Referrals page reads it.
+#
+# What the referral drafts are built from, and how the daily "who to contact" list is chosen. Every
+# message is put together from the lines below and nothing else, so write only what is true. The app
+# never sends anything and never visits LinkedIn: you copy a draft and send it yourself.
+# Drafts stay hidden until every placeholder below is replaced.
+
+me:
+  short: TODO-FILL # finishes "I'm a ...": e.g. "CS senior at Example University"
+  shortLocal: # optional, for managers and recruiters: may add a city, e.g. "CS senior at Example University in Austin"
+  alumniIntro: # optional, to alumni: e.g. "fellow Example University alum here (CS senior)"
+  opener: TODO-FILL # the first line once they accept: e.g. "I'm a CS senior at Example University."
+  about: TODO-FILL # one line for the referral packet: e.g. "First Last, B.S. Computer Science, Example University (May 2027)."
+
+interest: TODO-FILL # what you want where there is no opening yet, e.g. "new grad software roles" or "Summer 2027 internships"
+
+# The facts each kind of role draws on. A job uses the first area whose `titles` match its title; an area
+# without `titles` takes the rest. A contact can be pointed at another area on the Referrals page.
+areas:
+  - name: Software
+    titles: software|backend|frontend|full.?stack|developer # a regular expression, case ignored
+    hook: TODO-FILL # fits in a 200-character note and starts with "have" or "am", e.g. "have built a scheduling app used by 300 students"
+    fact: TODO-FILL # one or two sentences about a real project, for the message after they accept
+    resume: resume.pdf # the file the referral packet says is attached
+
+linkedin:
+  school: # your school's LinkedIn page, linkedin.com/school/<this>: adds an alumni search link
+  schoolName: # e.g. "Example University", for the search links
+  notesPerMonth: 3 # personalized invitation notes your account gets a month (a free account: a few)
+  noteLimit: 200 # characters in one
+
+# The daily list. Places are where outreach is worth it, in order; with none, anywhere counts.
+daily:
+  places: []
+  # - name: Austin
+  #   match: austin|round rock|cedar park # a regular expression over the job's location
+  #   perDay: 2 # new employers a day here
+  companies: 3 # new employers a day when no places are set
+  people: 3 # connections you already know at employers you are applying to, listed first
+  prep: 2 # employers you are interviewing with: talk to someone on the team first
+  minFit: 75 # a job still waiting for your approval counts from this fit score
+  preferTitles: # connections whose position matches come first, e.g. "backend|platform|infrastructure"
+
+# Employers to reach out to even without an opening you are applying to.
+watchlist: []
+# - name: Example Corp
+#   place: Austin
+#   careers: https://example.com/careers
+
+followUpDays: 7 # one follow-up this many days after your message, then stop
+inviteStaleDays: 21 # an invite not accepted after this long: try someone else there
+resuggestDays: 7 # an employer or person is not suggested again within this many days
+exportEveryDays: 30 # how old your last LinkedIn export may get before the page asks for a new one

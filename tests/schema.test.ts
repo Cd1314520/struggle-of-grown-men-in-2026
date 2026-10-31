@@ -32,6 +32,10 @@ const TABLES = [
   "question_digest_notified",
   "question_gates",
   "queued_questions",
+  "referral_connections",
+  "referral_contacts",
+  "referral_imports",
+  "referral_suggestions",
   "status_changes",
   "submit_approvals",
 ];
@@ -275,6 +279,21 @@ describe("schema migrations", () => {
     });
   });
 
+  describe("referrals (version 8)", () => {
+    it("holds contacts to their stages and keeps a contact when its application is folded away", () => {
+      const db = memory();
+      migrate(db);
+      db.run("INSERT INTO jobs (id, url, source, company, title) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'One')");
+      db.run(
+        "INSERT INTO referral_contacts (id, name, company, company_key, relation, job_id, added_on) VALUES (1, 'Ana', 'Acme', 'acme', 'engineer', 1, '2026-10-01')",
+      );
+      expect(() => db.run("UPDATE referral_contacts SET stage = 'ghosted' WHERE id = 1")).toThrow(/CHECK/);
+      expect(() => db.run("UPDATE referral_contacts SET relation = 'friend' WHERE id = 1")).toThrow(/CHECK/);
+      db.run("DELETE FROM jobs WHERE id = 1");
+      expect(db.query("SELECT id, job_id FROM referral_contacts").all()).toEqual([{ id: 1, job_id: null }]);
+    });
+  });
+
   describe("answer bank (version 7)", () => {
     it("queues each standing answer to be filed, and keeps every gate with its scope", () => {
       const db = memory();
@@ -289,7 +308,7 @@ describe("schema migrations", () => {
           ('m1', 'Acme', 'Relocate?', 'Required', '["Yes","No"]', 'No', 'g1', 'b'),
           ('m9', 'Gone Co', 'Clearance?', 'Required', '[]', 'None', 'missing', 'z');
       `);
-      expect(migrate(db).map(m => m.name)).toEqual(["answer bank"]);
+      expect(migrate(db, MIGRATIONS.slice(0, 7)).map(m => m.name)).toEqual(["answer bank"]);
       expect(
         db.query("SELECT job_id, employer, title, question, context, options, answer, answered_at, filed_at FROM banked_answers ORDER BY id").all(),
       ).toEqual([

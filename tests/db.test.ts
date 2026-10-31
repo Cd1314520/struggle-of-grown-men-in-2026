@@ -570,6 +570,7 @@ describe("where SQL lives", () => {
     "src/digest.ts",
     "src/steps.ts",
     "src/blockers.ts",
+    "src/referrals.ts",
     "src/stats.ts", // reads only: the Overview's aggregates across jobs and status_changes
   ]);
   // Standalone tools that read a database by path rather than through the app's connection.
@@ -579,6 +580,7 @@ describe("where SQL lives", () => {
     "scripts/reassess-backlog.ts",
     "scripts/migrate.ts",
     "scripts/watch-known-boards.ts",
+    "scripts/import-internscouter-outreach.ts", // reads jobs only, to tie old contacts to applications; writes through referrals.ts
   ]);
   it("keeps statements in the modules that own the tables", async () => {
     expect(files.length).toBeGreaterThan(20);

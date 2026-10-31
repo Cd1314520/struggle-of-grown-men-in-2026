@@ -12,6 +12,7 @@ export const PROFILE_DESC: Record<string, string> = {
   "personal.yml": "Contact details and the fields every application form asks for.",
   "companies.yml": "The companies whose job boards each scan reads.",
   "employers.yml": "Employers you have settled by hand: the ones you most want, and the ones that are fine to practise on.",
+  "referral.yml": "The true facts referral messages are drafted from, and how the daily list of who to contact is chosen. Only the Referrals page reads it.",
 };
 // The same, in a few words, for the list of files.
 export const PROFILE_GIST: Record<string, string> = {
@@ -23,6 +24,7 @@ export const PROFILE_GIST: Record<string, string> = {
   "personal.yml": "Contact details and form fields",
   "companies.yml": "Boards each scan reads",
   "employers.yml": "Employers settled by hand",
+  "referral.yml": "Facts for referral messages",
 };
 export const PLACEHOLDER = "TODO-FILL"; // as src/profile.ts: the shipped templates carry it until filled in
 

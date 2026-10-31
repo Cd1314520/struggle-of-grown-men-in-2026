@@ -52,8 +52,9 @@ import { addStep, changeStep, jobSteps, nextStepOf, nextSteps, recordOutcome, re
 import { serveUi } from "./ui";
 import { isListView, listJobs } from "./listing";
 import { stats } from "./stats";
+import { addContact, changeContact, importLinkedInExport, jobOptions, referralsState, syncReferralMail } from "./outreach";
 
-const PROFILE_FILES = ["targets.md", "rubric.yml", MAIN, "resume-notes.md", "answers.md", "personal.yml", "companies.yml", "employers.yml"];
+const PROFILE_FILES = ["targets.md", "rubric.yml", MAIN, "resume-notes.md", "answers.md", "personal.yml", "companies.yml", "employers.yml", "referral.yml"];
 const safeThresholds = () => {
   try {
     return thresholds();
@@ -63,6 +64,8 @@ const safeThresholds = () => {
 };
 // The resume content file lives in the resume project, everything else in profile/.
 const profilePath = (name: string) => (name === MAIN ? STOCK_MAIN : join(PROFILE, name));
+// A full LinkedIn export with messages runs to tens of megabytes; Connections.csv alone is far smaller.
+const REFERRAL_EXPORT_BYTES = 200 * 1024 * 1024;
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const fail = (message: string, status = 400) => json({ error: message }, status);
 
@@ -650,6 +653,40 @@ export function createHandler(scheduler: Scheduler) {
       else if (op === "cancel") err = scheduler.cancelImport() ? null : "no import is running";
       else return fail("not found", 404);
       return err ? fail(err, 409) : json({ ok: true });
+    }
+
+    // Referral outreach (src/outreach.ts). Nothing here sends a message or reaches LinkedIn.
+    if (path === "/api/referrals" && req.method === "GET") return json(referralsState());
+    if (path === "/api/referrals/jobs" && req.method === "GET") return json({ jobs: jobOptions(url.searchParams.get("company") ?? "") });
+    if (path === "/api/referrals/contacts" && req.method === "POST") {
+      const added = addContact(await body());
+      return typeof added === "string" ? fail(added, 409) : json(added);
+    }
+    const contactMatch = /^\/api\/referrals\/contacts\/(\d+)$/.exec(path);
+    if (contactMatch && req.method === "POST") {
+      const err = changeContact(Number(contactMatch[1]), await body());
+      return err ? fail(err, err === "no such contact" ? 404 : 409) : json({ ok: true });
+    }
+    if (path === "/api/referrals/import" && req.method === "POST") {
+      // Only the app's own pages may post here (refusal), and the size is checked before the body is read.
+      if (Number(req.headers.get("content-length") ?? Infinity) > REFERRAL_EXPORT_BYTES) return fail("the file is too large", 413);
+      // eslint-disable-next-line @typescript-eslint/no-deprecated -- the body is bounded above and comes from the app's own page
+      const form = await req.formData().catch(() => null);
+      const file = form?.get("file");
+      if (!file || typeof file === "string" || !file.size) return fail("send the export as a form with one file");
+      const modified = Number(form?.get("modified"));
+      try {
+        return json(importLinkedInExport(file.name, new Uint8Array(await file.arrayBuffer()), Number.isFinite(modified) && modified > 0 ? modified : null));
+      } catch (err) {
+        return fail(errorMessage(err), 422);
+      }
+    }
+    if (path === "/api/referrals/mail" && req.method === "POST") {
+      try {
+        return json(await syncReferralMail());
+      } catch (err) {
+        return fail(errorMessage(err), 502);
+      }
     }
 
     const profileMatch = /^\/api\/profile\/([\w.-]+)$/.exec(path);

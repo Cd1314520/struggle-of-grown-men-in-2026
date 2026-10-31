@@ -8,6 +8,7 @@ import { OverviewPage } from "./overview";
 import { PipelinePage } from "./pipeline";
 import { ProfilePage } from "./profile";
 import { QuestionsPage } from "./questions";
+import { ReferralsPage } from "./referrals";
 import { ResumePage } from "./resume";
 import { ReviewPage } from "./review";
 import { SettingsPage } from "./settings";
@@ -19,6 +20,7 @@ export const PAGE_COMPONENTS: Record<Page, ComponentType> = {
   questions: QuestionsPage,
   pipeline: PipelinePage,
   applications: ApplicationsPage,
+  referrals: ReferralsPage,
   archive: ArchivePage,
   activity: ActivityPage,
   resume: ResumePage,

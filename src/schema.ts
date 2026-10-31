@@ -389,6 +389,72 @@ function answerBank(db: Database) {
   ]);
 }
 
+// Referral outreach (see referrals.ts): the people the owner contacts about an application, where each
+// conversation stands, the owner's LinkedIn connections read from a data export they downloaded, the
+// companies and people the daily list suggested on which day, and each file read. Nothing here is ever
+// sent anywhere: the owner sends every message by hand.
+function referrals(db: Database) {
+  runEach(db, [
+    `CREATE TABLE referral_contacts (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',   -- their position, as the owner pasted it
+      company TEXT NOT NULL,
+      company_key TEXT NOT NULL,
+      profile_url TEXT,
+      email TEXT,                       -- a work address the owner found; drafts then include an email
+      relation TEXT NOT NULL CHECK (relation IN ('manager', 'alumni', 'engineer', 'recruiter', 'connection')),
+      stage TEXT NOT NULL DEFAULT 'drafted' CHECK (stage IN ('drafted', 'requested', 'connected', 'messaged', 'followed_up', 'replied', 'referred', 'declined', 'no_response', 'closed')),
+      job_id INTEGER,                   -- the application it is about; NULL for interest in the employer
+      job_title TEXT,                   -- without a job: the role as an older tracker named it
+      job_url TEXT,
+      area TEXT,                        -- which facts of referral.yml to draft from; NULL picks by the job's title
+      with_note INTEGER NOT NULL DEFAULT 0 CHECK (with_note IN (0, 1)),   -- the invite used one of the month's notes
+      notes TEXT NOT NULL DEFAULT '',
+      added_on TEXT NOT NULL,           -- days, YYYY-MM-DD, in the owner's time zone
+      requested_on TEXT,
+      connected_on TEXT,
+      messaged_on TEXT,
+      followed_up_on TEXT,
+      replied_on TEXT,
+      referred_on TEXT,
+      closed_on TEXT,
+      legacy_id TEXT UNIQUE,            -- its id in InternScouter's outreach.json, when imported from there
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    "CREATE INDEX referral_contacts_company ON referral_contacts(company_key)",
+    `CREATE TABLE referral_connections (
+      key TEXT PRIMARY KEY,             -- the LinkedIn profile id, or 'name:<name>' when the export has no URL
+      name TEXT NOT NULL,
+      url TEXT,
+      company TEXT NOT NULL DEFAULT '',
+      company_key TEXT NOT NULL DEFAULT '',
+      position TEXT NOT NULL DEFAULT '',
+      connected_on TEXT
+    )`,
+    "CREATE INDEX referral_connections_company ON referral_connections(company_key)",
+    // A company ('<company key>') or a person ('bridge:<key>') the daily list named, and the day it last did.
+    "CREATE TABLE referral_suggestions (key TEXT PRIMARY KEY, day TEXT NOT NULL)",
+    `CREATE TABLE referral_imports (
+      id INTEGER PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('export', 'internscouter')),
+      file TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,        -- sha256 of the bytes read
+      exported_on TEXT,                 -- the day the export was made, when known
+      connections INTEGER NOT NULL DEFAULT 0,
+      updates INTEGER NOT NULL DEFAULT 0,   -- contacts moved on, or brought in
+      at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    // The same outreach.json is brought in once.
+    "CREATE UNIQUE INDEX referral_imports_once ON referral_imports(fingerprint) WHERE kind = 'internscouter'",
+    `CREATE TRIGGER jobs_referrals_forgotten AFTER DELETE ON jobs
+    BEGIN
+      UPDATE referral_contacts SET job_id = NULL WHERE job_id = OLD.id;
+    END`,
+  ]);
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: "baseline", up: baseline },
   { version: 2, name: "status history", up: statusHistory },
@@ -397,6 +463,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 5, name: "application steps", up: applicationSteps },
   { version: 6, name: "blockers", up: blockers },
   { version: 7, name: "answer bank", up: answerBank },
+  { version: 8, name: "referrals", up: referrals },
 ];
 
 // The version this code reads and writes.

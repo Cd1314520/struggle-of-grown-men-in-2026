@@ -2,12 +2,13 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { DATA } from "./config";
 import { placeOf } from "./location";
+import { companyKey, squash } from "./company-key";
 import { connectDatabase, migrate } from "./schema";
 import { AWAITING_OUTCOME, NOT_STARTED, OFF_BOARD, to, UNASSESSED, type Status } from "./status";
 
 // SQL lives with the module that owns the table: jobs, job_sources, status_changes, events and kv here,
 // accounts in accounts.ts, gates and answers in questions.ts, fill_state in fill-state.ts, application_steps
-// in steps.ts, the digest ledger in digest.ts. The tables themselves are defined in schema.ts.
+// in steps.ts, the digest ledger in digest.ts, referral_* in referrals.ts. The tables themselves are defined in schema.ts.
 // `bun test` sets NODE_ENV=test. Opening the database migrates it, so a test process must say where
 // its throwaway state is (tests/setup.ts does) rather than fall through to the live data directory.
 export function refuseLiveDataUnderTest(env: Record<string, string | undefined> = process.env) {
@@ -220,23 +221,6 @@ export const jobSources = (jobId: number) =>
 // (ignoring word order, abbreviations, punctuation and tags like "(Remote)" or a requisition id) or
 // the titles are close and the description text is nearly identical.
 
-const COMPANY_NOISE = new Set([
-  "inc",
-  "incorporated",
-  "llc",
-  "ltd",
-  "limited",
-  "corp",
-  "corporation",
-  "co",
-  "company",
-  "gmbh",
-  "plc",
-  "holdings",
-  "group",
-  "the",
-  "and",
-]);
 const TITLE_STOP = new Set(["and", "the", "of", "for", "a", "an", "in", "at", "to", "with", "or"]);
 const TITLE_SYNONYMS: Record<string, string> = {
   sr: "senior",
@@ -265,20 +249,7 @@ const TITLE_SYNONYMS: Record<string, string> = {
 // What separates two genuinely different openings with otherwise similar titles.
 const LEVEL = new Set(["1", "2", "3", "4", "5", "senior", "junior", "staff", "principal", "lead", "manager", "intern", "associate", "director"]);
 const TITLE_TAGS = /[([][^)\]]*\b(remote|hybrid|onsite|on-site|usa?|united states|contract|full[- ]time|part[- ]time|req|r-?\d+|jr\d+|\d{4,})\b[^)\]]*[)\]]/gi;
-const squash = (t: string) =>
-  t
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9+#]+/g, " ")
-    .trim();
-
-export const companyKey = (company: string) =>
-  squash(company)
-    .split(" ")
-    .filter(w => w && !COMPANY_NOISE.has(w))
-    .join("") || squash(company).replace(/ /g, "");
+export { companyKey };
 
 export function titleTokens(title: string) {
   const words = squash(title.replace(TITLE_TAGS, " "))
