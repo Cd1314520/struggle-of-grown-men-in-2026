@@ -250,9 +250,17 @@ const TITLE_SYNONYMS: Record<string, string> = {
 const LEVEL = new Set(["1", "2", "3", "4", "5", "senior", "junior", "staff", "principal", "lead", "manager", "intern", "associate", "director"]);
 const TITLE_TAGS = /[([][^)\]]*\b(remote|hybrid|onsite|on-site|usa?|united states|contract|full[- ]time|part[- ]time|req|r-?\d+|jr\d+|\d{4,})\b[^)\]]*[)\]]/gi;
 export { companyKey };
+// The term a title names ("Summer 2027", "Fall '27"). It is left out of the title's words and compared
+// on its own: two titles naming different terms are different openings, such as an internship and the
+// co-op after it.
+const TERM = /\b(spring|summer|fall|autumn|winter)\b[\s,'’-]*(?:20)?(\d{2})\b/gi;
+function termOf(title: string): string | null {
+  const m = new RegExp(TERM.source, "i").exec(title);
+  return m ? `${(m[1] ?? "").toLowerCase().replace("autumn", "fall")} ${m[2]}` : null;
+}
 
 export function titleTokens(title: string) {
-  const words = squash(title.replace(TITLE_TAGS, " "))
+  const words = squash(title.replace(TITLE_TAGS, " ").replace(TERM, " "))
     .split(" ")
     .flatMap(w => (TITLE_SYNONYMS[w] ?? w).split(" "));
   return [...new Set(words.filter(w => w && !TITLE_STOP.has(w)))].sort();
@@ -277,6 +285,7 @@ type Twinnable = Pick<Job, "company" | "title" | "description">;
 export const UNTITLED = "(untitled posting)";
 export function findTwin(j: Twinnable, candidates?: Job[]): Job | null {
   if (j.title === UNTITLED) return null;
+  const term = termOf(j.title);
   const pool = candidates ?? db.query<Job, [string]>("SELECT * FROM jobs WHERE company_key = ? ORDER BY id").all(companyKey(j.company));
   if (!pool.length) return null;
   const tokens = new Set(titleTokens(j.title)),
@@ -284,6 +293,8 @@ export function findTwin(j: Twinnable, candidates?: Job[]): Job | null {
   let text: Set<string> | null = null;
   for (const c of pool) {
     if (c.title === UNTITLED) continue;
+    const theirTerm = term && termOf(c.title);
+    if (theirTerm && theirTerm !== term) continue;
     const theirs = new Set(titleTokens(c.title));
     if ([...theirs].join(" ") === key) return c;
     const overlap = jaccard(tokens, theirs);
@@ -422,7 +433,7 @@ export function relocateJob(job: Job, rawUrl: string, description: string | null
 }
 
 // Re-keys rows and folds duplicates saved before the current matching rules. Safe to run on every start.
-const DEDUPE_VERSION = "2";
+const DEDUPE_VERSION = "3";
 export function dedupeExisting() {
   const stale = kvGet("dedupe.version") !== DEDUPE_VERSION;
   const unkeyed = stale ? db.query<Job, []>("SELECT * FROM jobs").all() : db.query<Job, []>("SELECT * FROM jobs WHERE company_key IS NULL").all();

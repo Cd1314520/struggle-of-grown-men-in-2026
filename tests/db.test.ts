@@ -498,6 +498,20 @@ describe("postings, duplicates and sources", () => {
   `);
   });
 
+  it("keeps the same role for different terms apart", () => {
+    scenario(`
+    const posting = { url: "https://boards.example/acme/s27", source: "greenhouse", company: "Acme", title: "Hardware Engineering Intern (Summer 2027)", location: "Austin", description: null };
+    const summer = store.insertJob(posting);
+    assert.equal(typeof store.insertJob({ ...posting, url: "https://boards.example/acme/f27", title: "Hardware Engineering Intern (Fall 2027)" }), "number");
+    assert.equal(typeof store.insertJob({ ...posting, url: "https://boards.example/acme/s28", title: "Hardware Engineering Intern - Summer '28" }), "number");
+    // The same term, or a title naming none, is still the same role.
+    assert.equal(store.insertJob({ ...posting, url: "https://other.example/acme/1", title: "Hardware Engineering Intern, Summer 2027" }), null);
+    assert.equal(store.insertJob({ ...posting, url: "https://other.example/acme/2", title: "Hardware Engineering Intern" }), null);
+    assert.equal(store.jobSources(summer).length, 2);
+    assert.equal(db.query("SELECT count(*) AS n FROM jobs").get().n, 3);
+  `);
+  });
+
   it("re-keys and folds duplicates saved under older rules, once per rules version", () => {
     scenario(`
     job(1, { company: "Acme, Inc.", title: "Software Engineer", status: "skipped" });
@@ -525,7 +539,7 @@ describe("postings, duplicates and sources", () => {
     assert.equal(store.getJob(3).location, null);
     assert.deepEqual(store.jobEvents(1), []);
     assert.equal(store.kvGet("feedback.1"), null);
-    assert.equal(store.kvGet("dedupe.version"), "2");
+    assert.equal(store.kvGet("dedupe.version"), "3");
     assert.equal(store.recentEvents()[0].message, "Folded 3 duplicate postings into existing jobs");
 
     // With the rules version recorded, only rows that have no key yet are keyed.
