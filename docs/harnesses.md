@@ -12,6 +12,10 @@ Each stage picks its own, so filling can stay on omp while assessing runs on Cla
 
 The Codex binary is `AUTO_APPLY_CODEX` if set, else `codex` on the PATH, else (on Windows) the Codex desktop app's own CLI, found once through `Get-AppxPackage OpenAI.Codex`.
 
+## Usage limits
+
+When a worker's provider says it has hit a usage limit, that provider (Codex, or one Claude account) is marked out until the reset time it names, or for 5 minutes when it names none. Every later worker runs on the first model in its chain that is not out: the stage's own model, then each model in `fallback`, and for a Claude Code model each account in turn, Claude Code's own sign-in first and then every directory in `claudeAccounts` that has been signed in (`CLAUDE_CONFIG_DIR=<dir> claude`, then `/login`). The app pauses new agent work only when the whole chain is out, until the first reset (`src/providers.ts`, `watchCapacity` in `src/scheduler.ts`).
+
 ## What each harness is given
 
 | | omp | Claude Code | Codex |

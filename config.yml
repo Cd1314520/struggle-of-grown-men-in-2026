@@ -139,6 +139,11 @@ chrome:
   window: [1440, 900]
   vncPort: 6080 # noVNC for manual takeover (localhost only); 0 disables
 
+# When a stage's provider hits its usage limit, its work moves to these models in turn; a Claude Code
+# model also tries each extra Claude config directory below that has been signed in. See docs/harnesses.md.
+fallback: []
+claudeAccounts: []
+
 # Agents' step-by-step records (each step, tool call and message) are removed after this many days;
 # 0 keeps them for good. Approvals, gates, errors, mail and your own actions are never removed.
 retention:

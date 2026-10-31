@@ -33,6 +33,7 @@ import { locateEmployerPostings, locatePerDay } from "./locate";
 import { runWorker, type RunWorker } from "./worker";
 import { needsJudgment, parsePracticeAssessment } from "./practice";
 import { prep } from "./prep";
+import { choose, hitLimit } from "./providers";
 import { nextToPrep } from "./priority";
 import { profileProblems } from "./profile";
 import { bankDue, fileKeptAnswers } from "./answer-bank";
@@ -120,14 +121,23 @@ export function resetTime(error: string | null | undefined, now = new Date()): n
   return at.getTime();
 }
 
-// Every worker's result says whether the model provider is taking work.
+// Every worker runs on the first model and account in its chain that is not at a usage limit
+// (src/providers.ts), and its result says whether that provider is still taking work.
 function watchCapacity(run: RunWorker): RunWorker {
   return options => {
-    const handle = run(options);
+    const choice = choose(options.model);
+    const env = Object.keys(choice.env).length ? { env: { ...options.env, ...choice.env } } : {};
+    const model = choice.model != null && choice.model !== options.model ? { model: choice.model } : {};
+    const handle = run({ ...options, ...model, ...env });
     void handle.done.then(result => {
       if (result.status === "completed" && !result.error) clearBackoff();
       else if (isCapacityError(result.error)) {
-        const until = backOff(resetTime(result.error));
+        const resets = hitLimit(options.model, choice.provider, resetTime(result.error));
+        if (resets === null) {
+          logEvent("system", `${choice.provider} hit its usage limit (${options.name} worker): the next model or account takes the work`);
+          return;
+        }
+        const until = backOff(resets);
         if (until) logEvent("system", `Model provider at capacity (${options.name} worker): no new agent work until ${new Date(until).toISOString()}`);
       }
     });

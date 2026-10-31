@@ -44,6 +44,10 @@ export interface Config {
   fillPauseSeconds: [number, number];
   resume: { dir: string; main: string; pdfName: string };
   chrome: { cdpPort: number; proxyPort: number; display: string; window: [number, number]; vncPort: number };
+  // When a stage's provider hits its usage limit, the work moves to these models in turn, and a Claude Code
+  // model to these extra Claude config directories (each signed in once) in turn (src/providers.ts).
+  fallback?: string[];
+  claudeAccounts?: string[];
   // How long agents' step-by-step records are kept; 0 keeps them for good. Decisions, gates, errors and mail are never removed.
   retention?: { chatterDays?: number };
 }
