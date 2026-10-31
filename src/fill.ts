@@ -1,9 +1,9 @@
 // Fill: one worker drives one browser through one application, from the frozen resume to a recorded outcome.
-import { writeFileSync } from "node:fs";
+import { copyFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
 import { checkAutoApprovedPractice } from "./auto";
-import { browserSlot, config, jobDir, readProfile } from "./config";
+import { browserSlot, config, jobDir, PROFILE, readProfile } from "./config";
 import { isCapacityError } from "./errors";
 import { jobsWithCheckpoint, logEvent, updateJob, type Job } from "./db";
 import { endVerification, isSubmitting, isVerifying, queueDraftRecovery, rememberSlot } from "./fill-state";
@@ -104,6 +104,8 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   for (const answer of context.answers) {
     if (answer.kind === "cover_letter") writeFileSync(join(dir, "cover_letter.txt"), answer.answer + "\n");
   }
+  // PDFs the answers point to (a transcript, say) go beside the resume: the browser uploads only from here.
+  for (const f of readdirSync(PROFILE)) if (f.toLowerCase().endsWith(".pdf")) copyFileSync(join(PROFILE, f), join(dir, f));
   await rt.browser.ensureChrome(slot);
   if (!ownsFill(rt, session)) return;
   const { keep: protectedTabs, closing, others: excludedTargets } = tabPlan(slot, job.id);
