@@ -112,8 +112,17 @@ export async function ensureChrome(slot = 0) {
       "--lang=en-US",
       // Vulkan reaches the machine's actual GPU through its render node (/dev/dri/renderD128),
       // providing genuine hardware WebGL and WebGL2 acceleration under Xvfb without spoofing.
-      // Windows Chrome already reaches the GPU through its default ANGLE backend (Direct3D).
-      ...(WINDOWS ? [] : ["--use-gl=angle", "--use-angle=vulkan", "--enable-features=Vulkan", "--ignore-gpu-blocklist"]),
+      // Windows Chrome already reaches the GPU through its default ANGLE backend (Direct3D). There the
+      // browsers are real windows, stacked at 0,0 and under the owner's own: Chrome stops painting a
+      // covered one (document hidden, no animation frames), and every click then waits to time out.
+      ...(WINDOWS
+        ? [
+            "--disable-features=CalculateNativeWinOcclusion",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-background-timer-throttling",
+          ]
+        : ["--use-gl=angle", "--use-angle=vulkan", "--enable-features=Vulkan", "--ignore-gpu-blocklist"]),
       "about:blank",
     ],
     { ...process.env, DISPLAY: display },
