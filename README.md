@@ -40,7 +40,7 @@ An employer is judged once against the description of a target employer (`target
 | triage | none | `triage_result` |
 | discover | read, write, web_search | `add_company`, `save_job` |
 | screen | none | `screen_result` |
-| prep | read, write, edit, bash (typst) | `submit_checklist`, `finish_prep` |
+| prep | read, write, edit (no shell: the posting is untrusted; `finish_prep` compiles) | `submit_checklist`, `finish_prep` |
 | fill | read, write, eval (browser) | `prefill` (Claude Code only), `get_account`, `gmail_*`, `ask_user`, `confirm_submit`, `need_manual`, `verify_status`, `report_result` |
 | track | read, write | `gmail_*`, `add_step`, `update_step`, `record_outcome`, `note` |
 | import | read, write, edit, bash (typst) | `finish_import` |

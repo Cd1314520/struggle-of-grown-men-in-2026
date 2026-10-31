@@ -75,7 +75,9 @@ export async function prep(job: Job, run: RunWorker) {
   const stillPrepping = () => getJob(job.id)?.status === "prepping";
   const { done } = run({
     name: "prep",
-    builtins: ["read", "write", "edit", "bash"],
+    // No shell: the job description it reads comes from anyone who can post a job, and a shell would
+    // let a planted instruction run commands on this machine. finish_prep compiles the resume itself.
+    builtins: ["read", "write", "edit"],
     jobId: job.id,
     model: config.models.prep,
     cwd: dir,

@@ -34,7 +34,7 @@ Your working directory holds a copy of the stock resume project. `{{main}}` is t
 - Everything on the resume must come from the stock resume or the notes. Do not add or inflate anything.
 - Keep the same structure and bullet style, and do not exceed the stock resume's page count. Avoid leaving the page visibly emptier than the stock version.
 
-Then run `typst compile {{main}} {{pdfName}}` and fix any errors. The output must have exactly that filename: no suffixes, versions or company names. If `typst` is not available to you, skip it: `finish_prep` compiles `{{main}}` itself and returns any errors to fix.
+You have no shell: do not try to compile. `finish_prep` compiles `{{main}}` to `{{pdfName}}` itself and returns any errors and the page count to fix.
 
 ## Step 3: report
 

@@ -1,10 +1,11 @@
 // Gmail access for the dedicated application mailbox (OAuth, gmail.modify scope).
 // Client credentials: profile/gmail-client.json (the "Desktop app" or "Web" OAuth client
 // JSON downloaded from Google Cloud). Tokens live in the local DB.
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, PROFILE, publicUrl } from "./config";
-import { kvGet, kvSet } from "./db";
+import { kvDelete, kvGet, kvSet } from "./db";
 
 const SCOPE = "https://www.googleapis.com/auth/gmail.modify";
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -50,8 +51,24 @@ function client() {
   return { id: c.client_id, secret: c.client_secret };
 }
 
+// The callback is a plain GET, and any page in the browsers the app drives can open it. Without a check
+// one could hand the app a code for an account of its choosing (login CSRF), so each sign-in started
+// here leaves a one-time `state` the callback must bring back within ten minutes.
+const STATE_KEY = "gmail.oauth.state";
+const STATE_TTL_MS = 10 * 60_000;
+export function checkOAuthState(state: string | null) {
+  const raw = kvGet(STATE_KEY);
+  if (raw !== null) kvDelete(STATE_KEY); // one use, whatever the outcome
+  const saved = raw ? (JSON.parse(raw) as { state?: string; at?: number }) : {};
+  if (!state || state !== saved.state || Date.now() - (saved.at ?? 0) > STATE_TTL_MS)
+    throw new Error("This sign-in was not started from this app, or took longer than ten minutes. Connect Gmail again from Settings.");
+}
+
 export function authUrl() {
+  const state = randomUUID();
+  kvSet(STATE_KEY, JSON.stringify({ state, at: Date.now() }));
   const q = new URLSearchParams({
+    state,
     client_id: client().id,
     redirect_uri: redirectUri(),
     response_type: "code",
@@ -73,7 +90,8 @@ async function tokenRequest(params: Record<string, string>) {
   return body;
 }
 
-export async function exchangeCode(code: string) {
+export async function exchangeCode(code: string, state: string | null) {
+  checkOAuthState(state);
   const t = await tokenRequest({ code, grant_type: "authorization_code", redirect_uri: redirectUri() });
   if (t.refresh_token) kvSet("gmail.refresh", t.refresh_token);
   kvSet("gmail.access", JSON.stringify({ token: t.access_token, exp: Date.now() + (t.expires_in - 60) * 1000 }));

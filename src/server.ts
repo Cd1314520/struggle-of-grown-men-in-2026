@@ -721,7 +721,7 @@ export function createHandler(scheduler: Scheduler) {
       const code = url.searchParams.get("code");
       if (!code) return fail(url.searchParams.get("error") ?? "no code returned");
       try {
-        await gmail.exchangeCode(code);
+        await gmail.exchangeCode(code, url.searchParams.get("state"));
         logEvent("system", `Gmail connected: ${gmail.gmailStatus().address}`);
         return Response.redirect("/#settings");
       } catch (err) {
