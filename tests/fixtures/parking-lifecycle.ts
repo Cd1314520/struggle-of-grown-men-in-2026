@@ -22,6 +22,8 @@ config.limits.applyPerDay = 50;
 config.limits.applySpreadHours = 0;
 if (scenario === "usage-limit") {
   config.models.fill = "claude-code/opus";
+  // The fill's own list replaces the global one: Sonnet is never tried for it.
+  config.fallback = ["claude-code/sonnet"];
   config.models.fallback = { fill: "codex/gpt-6-sol" };
 }
 
@@ -166,7 +168,7 @@ await mock.module("../../src/digest", () => ({
     /* digest mail is disabled in this fixture */
   },
 }));
-const { db, getJob, kvSet, updateJob } = await import("../../src/db");
+const { db, getJob, kvGet, kvSet, updateJob } = await import("../../src/db");
 const { authorizeSubmit, isSubmitting, isVerifying, isRecovering } = await import("../../src/fill-state");
 const core = await import("../../src/questions");
 const { jobBlockers } = await import("../../src/blockers");
@@ -507,12 +509,12 @@ if (scenario === "release" || scenario === "quick-answer") {
   scheduler.pump();
   assert.equal(workers.length, 2, "nothing starts before then");
   // Once Codex's limit has lifted, the draft resumes on it; Claude's is still running.
-  kvSet("limited.codex/gpt-6-sol", "0");
+  kvSet("limit.codex", "0");
   kvSet("backoff.until", "0");
   scheduler.pump();
   await until(() => workers.length === 3);
   assert.equal(workerAt(2).options.model, "codex/gpt-6-sol");
-  assert.ok(claudeResets > Date.now());
+  assert.ok(Number(kvGet("limit.claude:default")) > claudeResets, "Claude's account stays out until just after its reset");
 } else if (scenario === "retry-browser" || scenario === "retry-site-down") {
   const cause = scenario === "retry-browser" ? "browser" : "site_down";
   const parking = call(first, "need_manual", { ...navigation, cause, reason: "Clicks time out; reads work" });

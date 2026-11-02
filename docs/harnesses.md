@@ -12,26 +12,26 @@ Each stage picks its own, so filling can stay on omp while assessing runs on Cla
 
 The Codex binary is `AUTO_APPLY_CODEX` if set, else `codex` on the PATH, else (on Windows) the Codex desktop app's own CLI, found once through `Get-AppxPackage OpenAI.Codex`.
 
-## Fallback on a usage limit
+## Usage limits and fallbacks
 
-A stage can name models to move to when its own model's account runs out of its allowance, under `models.fallback.<stage>` (one model, or a list tried in order, each once):
+When a provider refuses work for capacity, the work moves to the next model or account that can take it, and the app pauses only when none can (`src/providers.ts`, `watchCapacity` in `src/scheduler.ts`).
 
 ```yaml
+fallback: [codex/gpt-6-sol]          # every stage's fallbacks, in order
+claudeAccounts: [C:/claude-account-2] # extra Claude sign-ins, each tried for a Claude Code model
 models:
   fill: claude-code/opus
   fallback:
-    fill: codex/gpt-6-sol
-    prep: [codex/gpt-6-luna, claude-code/haiku]
+    prep: [codex/gpt-6-luna, claude-code/haiku] # replaces the global list for prep
 ```
 
-Only a usage limit moves work (`isUsageLimit` in `src/errors.ts`: Claude Code's "Claude usage limit reached (five_hour, resets …)", from its rejected `rate_limit_event`, and Codex's "You've hit your usage limit"), since it lasts hours. An overload or a 429 still pauses all agent work for a few minutes, as before (`backOff` in `src/limits.ts`).
+- **The chain.** A stage's work may run on its own model, then each of its fallbacks: `models.fallback.<stage>` (one model or a list) when the stage has one, which replaces the global `fallback` rather than adding to it, else the global `fallback`. Each model is in the chain once. A Claude Code model is tried on each account in turn: Claude Code's own sign-in first, then every directory in `claudeAccounts` that has been signed in (`CLAUDE_CONFIG_DIR=<dir> claude`, then `/login`, which writes `<dir>/.credentials.json`). A worker named after no stage says which one it runs for (`stage`: the answer bank runs on `models.recheck`).
+- **Providers out.** Limits belong to an account, not a model, so they are kept per provider: `codex`, `claude:default`, `claude:<dir>` or `omp` (`limit.<provider>` in kv). Any capacity refusal (`isCapacityError` in `src/errors.ts`: a usage limit, an overload, a 429) marks the provider that served the worker out until 30 seconds after the reset it names (`limitResetsAt`: Claude Code's `resets <ISO time>`; Codex's "try again at 11:58 PM", read as this machine's local time, or a dated one; "try again in 2 hours"), or for 5 minutes when it names none. New work of a stage starts on the first choice in its chain whose provider is not out, and goes back to the stage's own model once that one is back.
+- **Most stages.** `withFallback` runs a worker that was refused for capacity again at once, with the same prompt and host tools, on the next choice that is not out, unless it called a host tool before the refusal: it may have changed something already (a prep that handed in its resume), so its caller handles the refusal as before, and the next worker of that stage starts on the fallback.
+- **Fill.** A browser worker may have filled half a form, so it is not rerun in place. `fillChoice` (`src/fill.ts`) picks the model and account before the prompt is written, since the prompt and tools follow the harness (omp's browser or Playwright's). A fill refused for capacity stops as before (the same draft goes back in the fill queue) and resumes on the next choice, with the resuming brief and the checkpoint the first worker saved.
+- **Pausing.** While some choice in the stage's chain is not out, a refusal does not pause the app. When every one is, all agent work waits until the first of them is back (`backOff(until)` in `src/limits.ts`), instead of the doubling pause of up to an hour that a worker with no stage gets. The pause covers every stage.
 
-- **Limited models.** A worker that ends on a usage limit marks its model limited (`limited.<model>` in kv, `src/limits.ts`) until the reset the provider names: Claude Code's `resets` time, or Codex's "Try again in 2 hours". A limit that names no reset in a form read there (`limitResetsAt` in `src/errors.ts`; a clock time such as "try again at 3:05 PM" has no time zone) is taken to last an hour, after which the model is tried again. While a model is limited, new work of its stage starts on the first model after it in the chain that is not (`availableModel` in `src/worker.ts`), and goes back to the stage's own model once that one's limit has passed.
-- **Most stages.** `withFallback` (`src/worker.ts`) runs a worker that ended on a usage limit again at once, with the same prompt and host tools, on the next model in the chain that is not limited, unless it called a host tool before the limit: it may have changed something already (a prep that handed in its resume), so its caller handles the refusal as before, and the next worker of that stage starts on the fallback. A worker named after no stage says which one it runs for (`stage`: the answer bank runs on `models.recheck`).
-- **Fill.** A browser worker may have filled half a form, so it is not rerun in place. The fill stops as it does on any capacity refusal (the same draft goes back in the fill queue), and resumes on the first model of `models.fill`'s chain that is not limited, with the resuming brief, the prompt and tools of that model's harness (omp's browser or Playwright's), and the checkpoint the first worker saved.
-- **Pausing.** While some model in the stage's chain is not limited, a usage limit does not pause the app. When every one is, all agent work waits until the first of them resets, instead of the doubling pause of up to an hour that an overload gets. The pause covers every stage, as it did before fallbacks.
-
-Settings → Models does not show fallbacks: they are set in `config.local.yml` (or `config.yml`). Setup counts the fallback models when it checks which harnesses and tools are needed.
+Settings → Models does not show fallbacks or accounts: they are set in `config.local.yml` (or `config.yml`). Setup counts the fallback models when it checks which harnesses and tools are needed.
 
 ## What each harness is given
 

@@ -6,22 +6,33 @@ export const errorMessage = (err: unknown): string => (err instanceof Error ? er
 export const isCapacityError = (message: string | null | undefined): boolean =>
   !!message && /at capacity|rate[ _-]?limit|too many requests|\b429\b|overloaded|usage limit|hit your (?:\w+ )?limit/i.test(message);
 
-// The account ran out of its allowance (Claude Code's "usage limit reached", Codex's "You've hit your
-// usage limit"), which lasts hours, unlike a passing overload: worth trying another model at once.
-export const isUsageLimit = (message: string | null | undefined): boolean => !!message && /usage limit|hit your (?:\w+ )?limit/i.test(message);
-
-// When a usage limit says it lifts, in ms since the epoch, or null when it does not say in a form
-// read here: Claude Code's "resets 2026-10-31T20:00:00.000Z" (src/claude.ts) or Codex's "Try again in
-// 2 hours". A clock time ("try again at 3:05 PM") names no time zone, so it is not read.
+// When a capacity refusal says it lifts, in ms since the epoch, or null when it says no time in a
+// form read here or names one already past:
+// - Claude Code's "..., resets 2026-10-31T05:00:00.000Z)" (src/claude.ts);
+// - Codex's "try again at 11:58 PM." (this machine's local time, the next one to come) or "try again
+//   at Nov 3rd, 2026 11:58 PM.";
+// - "try again in 2 hours" / "in 1 hour 30 minutes".
 const UNIT_MS: Record<string, number> = { second: 1000, minute: 60_000, hour: 3_600_000, day: 86_400_000 };
-export function limitResetsAt(message: string | null | undefined, now = Date.now()): number | null {
+export function limitResetsAt(message: string | null | undefined, now = new Date()): number | null {
   if (!message) return null;
+  const future = (at: number) => (at > now.getTime() ? at : null);
   const stamp = /\bresets (\d{4}-\d\d-\d\dT[\d:.]+Z)/.exec(message)?.[1];
-  const at = stamp ? Date.parse(stamp) : NaN;
-  if (at > now) return at;
+  if (stamp) return future(Date.parse(stamp));
+  const codex = /try again at (.+?(?:AM|PM))/i.exec(message)?.[1]?.replace(/(\d)(st|nd|rd|th),/, "$1,");
+  if (codex) {
+    const clock = /^(\d{1,2}):(\d\d) ?(AM|PM)$/i.exec(codex);
+    if (!clock) {
+      const dated = Date.parse(codex);
+      return Number.isNaN(dated) ? null : future(dated);
+    }
+    const at = new Date(now);
+    at.setHours((Number(clock[1]) % 12) + (clock[3]?.toUpperCase() === "PM" ? 12 : 0), Number(clock[2]), 0, 0);
+    if (at.getTime() <= now.getTime()) at.setDate(at.getDate() + 1);
+    return at.getTime();
+  }
   const wait = /try again in ((?:\s*(?:and\s+)?\d+(?:\.\d+)?\s*(?:second|minute|hour|day)s?,?)+)/i.exec(message)?.[1];
   if (!wait) return null;
   let ms = 0;
   for (const [, n, unit] of wait.matchAll(/(\d+(?:\.\d+)?)\s*(second|minute|hour|day)/gi)) ms += Number(n) * (UNIT_MS[(unit ?? "").toLowerCase()] ?? 0);
-  return ms > 0 ? now + ms : null;
+  return ms > 0 ? now.getTime() + ms : null;
 }

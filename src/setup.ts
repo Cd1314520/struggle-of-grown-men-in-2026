@@ -11,7 +11,8 @@ import type { ModelCatalog } from "./models";
 import { isExample, profileProblems } from "./profile";
 import { stockResume } from "./resume";
 import { codexBinary } from "./codex";
-import { harnessOf, modelChain, usesPlaywright, type HarnessId } from "./worker";
+import { stageModels } from "./providers";
+import { harnessOf, usesPlaywright, type HarnessId } from "./worker";
 
 export type SetupStepId = "tools" | "models" | "machine" | "resume" | "profile" | "gmail" | "scan";
 export interface SetupCheck {
@@ -35,7 +36,7 @@ export interface SetupResult {
 }
 
 // Whether any stage's model, or a fallback of one, runs on harness `h`.
-const onHarness = (h: HarnessId) => MODEL_STAGES.some(stage => modelChain(stage).some(model => harnessOf(model) === h));
+const onHarness = (h: HarnessId) => MODEL_STAGES.some(stage => stageModels(stage).some(model => harnessOf(model) === h));
 
 const WINDOWS = process.platform === "win32";
 
@@ -50,7 +51,7 @@ const PROGRAMS: { name: string; purpose: string; required: () => boolean; found?
     required: () => onHarness("codex"),
     found: () => !!codexBinary(),
   },
-  { name: "npx", purpose: "Starts Playwright's browser tools for a Claude Code or Codex fill", required: () => modelChain("fill").some(usesPlaywright) },
+  { name: "npx", purpose: "Starts Playwright's browser tools for a Claude Code or Codex fill", required: () => stageModels("fill").some(usesPlaywright) },
   { name: "typst", purpose: "Compiles the stock and tailored resumes", required: () => true },
   { name: WINDOWS ? "chrome" : "google-chrome", purpose: "The browsers applications are filled in", required: () => true, found: () => !!chromeBinary() },
   { name: "Xvfb", purpose: "Virtual displays for the browsers", required: () => !WINDOWS },

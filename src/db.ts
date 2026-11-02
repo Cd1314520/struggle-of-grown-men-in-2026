@@ -81,8 +81,9 @@ export function openedAt(j: Pick<Job, "posted_at" | "found_at">): number {
   return Math.min(said, found);
 }
 
-// Triaged jobs waiting to be assessed, most recently opened first.
-export const nextToPrep = () => jobsByStatus("triaged").sort((a, b) => openedAt(b) - openedAt(a))[0];
+// Triaged jobs waiting to be assessed, without their descriptions (src/priority.ts picks the next one).
+export const triagedJobs = () =>
+  db.query<Pick<Job, "id" | "posted_at" | "found_at">, []>("SELECT id, posted_at, found_at FROM jobs WHERE status = 'triaged'").all();
 
 export const jobsByStatus = (status: Status, limit = 1000) =>
   db.query<Job, [string, number]>("SELECT * FROM jobs WHERE status = ? ORDER BY id LIMIT ?").all(status, limit);
