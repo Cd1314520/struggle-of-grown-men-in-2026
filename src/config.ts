@@ -25,7 +25,7 @@ export interface Config {
   // Employers saved for later: the frontier list in profile/employers.yml, plus any the assessment
   // judges to fit `describe`. While holdBack is on their jobs are held instead of applied to.
   targets: { holdBack: boolean; describe?: string | null };
-  // `fallback`: models a stage moves to, in order, when a worker ends on a usage limit (src/worker.ts).
+  // `fallback`: per stage, the models it moves to when its provider is out, replacing the global `fallback` (src/providers.ts).
   models: Record<Exclude<ModelStage, "import">, string | null> & { import?: string | null; fallback?: Partial<Record<ModelStage, string | string[]>> };
   autoApply?: {
     minScore?: number;
@@ -49,6 +49,10 @@ export interface Config {
   fillPauseSeconds: [number, number];
   resume: { dir: string; main: string; pdfName: string };
   chrome: { cdpPort: number; proxyPort: number; display: string; window: [number, number]; vncPort: number };
+  // When a stage's provider hits its usage limit, the work moves to these models in turn, and a Claude Code
+  // model to these extra Claude config directories (each signed in once) in turn (src/providers.ts).
+  fallback?: string[];
+  claudeAccounts?: string[];
   // How long agents' step-by-step records are kept; 0 keeps them for good. Decisions, gates, errors and mail are never removed.
   retention?: { chatterDays?: number };
 }

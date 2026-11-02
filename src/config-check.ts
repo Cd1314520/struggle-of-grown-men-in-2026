@@ -122,6 +122,8 @@ const CONFIG = shape(
       { initialHours: amount(), linkedin: shape({ minutes: amount(), pages: count(1) }), indeed: shape({ minutes: amount() }) },
     ),
     retention: shape({}, { chatterDays: amount() }),
+    fallback: listOf(text),
+    claudeAccounts: listOf(text),
   },
 );
 

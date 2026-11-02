@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { SCHEMA_VERSION, connectDatabase, openDatabase, schemaVersion } from "../src/schema";
@@ -156,6 +156,31 @@ describe("job queries", () => {
     assert.deepEqual(ids(store.applicationsAwaitingOutcome()), [7, 6, 8]);
     assert.deepEqual(ids(store.applicationsAwaitingOutcome(2)), [7, 6]);
   `);
+  });
+
+  it("assesses the highest priority first, then the newest, and only the newest without priority.yml", () => {
+    const body = (expected: number[]) => `
+    const { nextToPrep } = await import(${JSON.stringify(join(import.meta.dir, "../src/priority.ts"))});
+    job(1, { status: "triaged", title: "Software Intern", location: "Seattle, WA", found_at: "2026-10-03 00:00:00" });
+    job(2, { status: "triaged", title: "Embedded Intern", location: "Boston, MA", found_at: "2026-10-01 00:00:00" });
+    job(3, { status: "triaged", title: "Embedded Intern", location: "Houston, TX", found_at: "2026-10-01 00:00:00" });
+    job(4, { status: "triaged", title: "Hardware Intern", location: "Austin, TX", found_at: "2026-10-02 00:00:00" });
+    job(5, { status: "skipped", title: "Embedded Intern", location: "Dallas, TX", found_at: "2026-10-04 00:00:00" });
+    const order = [];
+    for (let next; (next = nextToPrep());) {
+      order.push(next.id);
+      assert.equal(next.title, store.getJob(next.id).title, "the whole job");
+      store.updateJob(next.id, { status: "skipped" });
+    }
+    assert.deepEqual(order, ${JSON.stringify(expected)});`;
+    scenario(body([1, 4, 2, 3]));
+    const rules = "tiers: [{ points: 30, title: 'embedded|hardware' }]\nplaces: [{ points: 25, match: ', TX$' }]\n";
+    scenario(body([4, 3, 2, 1]), {
+      before: dir => {
+        mkdirSync(join(dir, "profile"));
+        writeFileSync(join(dir, "profile", "priority.yml"), rules);
+      },
+    });
   });
 
   it("lists the board, counts and siblings the UI shows", () => {

@@ -12,7 +12,6 @@ import {
   kvGet,
   kvSet,
   logEvent,
-  nextToPrep,
   openedAt,
   notifyJobChange,
   pruneChatter,
@@ -24,16 +23,18 @@ import { autoApply, checkAutoApprovedPractice, employerCapNote } from "./auto";
 import { jobBlockers, type BlockerCause } from "./blockers";
 import { forgetDeferredApproval, pumpDeferredApprovals } from "./deferred-approvals";
 import { tickQuestionDigest } from "./digest";
-import { errorMessage, isCapacityError, isUsageLimit, limitResetsAt } from "./errors";
+import { errorMessage, isCapacityError, limitResetsAt } from "./errors";
 import { fill } from "./fill";
 import { defaultCheckpoint, endSession, ownsFill, stopFailedFill, type Browser, type FillRuntime, type FillSession } from "./fill-session";
 import { beginAttempt, dropManualLease, endVerification, isRecovering, isSubmitting, isVerifying, lastSlot, manualLeaseGate } from "./fill-state";
-import { backedOff, backOff, clearBackoff, countOne, due, isLimited, limitedUntil, limitModel, usedToday } from "./limits";
+import { backedOff, backOff, clearBackoff, countOne, due, usedToday } from "./limits";
 import { preferUsListings } from "./listings";
 import { locateEmployerPostings, locatePerDay } from "./locate";
-import { modelChain, runWorker, stageOf, withFallback, type RunWorker } from "./worker";
+import { runWorker, stageOf, type RunWorker } from "./worker";
 import { needsJudgment, parsePracticeAssessment } from "./practice";
 import { prep } from "./prep";
+import { hitLimit, providerOf, withFallback } from "./providers";
+import { nextToPrep } from "./priority";
 import { profileProblems } from "./profile";
 import { bankDue, fileKeptAnswers } from "./answer-bank";
 import { recheckDue, recheckOpenQuestions } from "./recheck";
@@ -102,26 +103,24 @@ function employersWithOpenApplication(): Set<string> {
   return open;
 }
 
-// Every worker's result says whether the model provider is taking work. A usage limit marks its model
-// limited until the reset the provider names; while a model in the stage's chain is not limited it
-// is no pause, since the work moves to that model (withFallback, src/fill.ts). When every one is, the
-// app waits for the first of them to reset rather than retrying sooner.
+// Every worker's result says whether the provider that served it is taking work. A capacity refusal
+// marks that provider (Codex, one Claude account, omp) out until the reset it names, or for 5 minutes
+// (src/providers.ts). While another model or account in the stage's chain is not out it is no pause:
+// the work moves there (withFallback, src/fill.ts). When every one is, the app waits for the first of
+// them to come back.
 function watchCapacity(run: RunWorker): RunWorker {
   return options => {
     const handle = run(options);
     void handle.done.then(result => {
       if (result.status === "completed" && !result.error) clearBackoff();
-      else if (isUsageLimit(result.error)) {
-        const model = options.model ?? null;
-        limitModel(model, limitResetsAt(result.error));
-        const stage = stageOf(options);
-        const chain = stage ? modelChain(stage) : [model];
-        if (chain.some(m => !isLimited(m))) return;
-        const until = backOff(Math.min(...chain.map(limitedUntil)));
-        if (until)
-          logEvent("system", `Every model for the ${options.name} worker is at its usage limit: no new agent work until ${new Date(until).toISOString()}`);
-      } else if (isCapacityError(result.error)) {
-        const until = backOff();
+      else if (isCapacityError(result.error)) {
+        const provider = providerOf(options.model, options.env);
+        const resets = hitLimit(stageOf(options), options.model, provider, limitResetsAt(result.error));
+        if (resets === null) {
+          logEvent("system", `${provider} refused the ${options.name} worker for capacity: the next model or account takes the work`);
+          return;
+        }
+        const until = backOff(resets);
         if (until) logEvent("system", `Model provider at capacity (${options.name} worker): no new agent work until ${new Date(until).toISOString()}`);
       }
     });

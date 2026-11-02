@@ -12,12 +12,13 @@ export const countOne = (what: Counted) => kvSet(`count.${what}.${today()}`, Str
 
 // While the model provider is at capacity no new agent work starts: every worker would fail the same
 // way. Each time it is found at capacity again the pause doubles, from 2 minutes up to an hour; one
-// worker that completes ends it.
+// worker that completes ends it. When every model and account a stage could move to is out
+// (src/providers.ts), the pause lasts until the first of them comes back instead.
 const BACKOFF_MAX_MINUTES = 60;
 export const backoffUntil = () => Number(kvGet("backoff.until") ?? 0);
 export const backedOff = () => Date.now() < backoffUntil();
-// Returns when the pause ends, or null when one was already running. `until`: when the provider said
-// it can take work again (a usage limit's reset), which is waited for instead of the doubling pause.
+// Returns when the pause ends, or null when one was already running. `until`: when the first provider
+// in the chain takes work again, which is waited for instead of the doubling pause.
 export function backOff(until?: number): number | null {
   // Workers that fail together report one capacity refusal, not one each.
   if (backedOff()) return null;
@@ -30,19 +31,6 @@ export function backOff(until?: number): number | null {
   kvSet("backoff.level", String(level));
   kvSet("backoff.until", String(end));
   return end;
-}
-
-// Models whose account hit its usage limit, until it resets. New work skips them for the next model
-// in its stage's chain (src/worker.ts). A limit that does not say when it lifts is taken to last an
-// hour; the model is tried again after that.
-const LIMIT_GUESS_MS = 60 * 60_000;
-const limitKey = (model: string | null) => `limited.${model ?? ""}`;
-export const limitedUntil = (model: string | null) => Number(kvGet(limitKey(model)) ?? 0);
-export const isLimited = (model: string | null) => Date.now() < limitedUntil(model);
-export function limitModel(model: string | null, resetsAt: number | null): number {
-  const until = resetsAt ?? Date.now() + LIMIT_GUESS_MS;
-  kvSet(limitKey(model), String(until));
-  return until;
 }
 export function clearBackoff() {
   if (kvGet("backoff.level") !== null) kvDelete("backoff.level");

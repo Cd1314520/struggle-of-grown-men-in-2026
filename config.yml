@@ -57,14 +57,9 @@ models:
   track: claude-code/sonnet
   recheck: claude-code/opus # adds kept answers to answers.md, and answers parked questions the profile now settles
   import: claude-code/opus # turns uploaded resume files into the Typst resume (Resume page)
-  # Where a stage's work goes when its model's account hits a usage limit (Claude Code's "usage limit
-  # reached", Codex's "You've hit your usage limit"), instead of everything waiting for the limit to
-  # reset: one model or a list, each tried once, in order. A fill resumes its draft on the fallback.
-  # New work skips a limited model until its reset, then goes back to it; with every model limited the
-  # app waits for the first reset. Only usage limits move work; an overload or a 429 still pauses as
-  # before. Set in config.local.yml:
+  # A stage's own fallbacks (one model or a list), which replace the global `fallback` below for that
+  # stage. Set in config.local.yml, for example:
   #   fallback:
-  #     fill: codex/gpt-6-sol
   #     prep: [codex/gpt-6-luna, claude-code/haiku]
 
 # Scoring weights and thresholds live in profile/rubric.yml.
@@ -159,6 +154,14 @@ chrome:
   display: ":99"
   window: [1440, 900]
   vncPort: 6080 # noVNC for manual takeover (localhost only); 0 disables
+
+# When a provider (Codex, a Claude account, omp) refuses work for capacity, it is out until the reset it
+# names (5 minutes when it names none), and the work moves to these models in turn, unless the stage
+# has its own list under models.fallback. A Claude Code model also tries each extra Claude config
+# directory below that has been signed in. The app pauses only when every one is out, until the first
+# comes back. See docs/harnesses.md.
+fallback: []
+claudeAccounts: []
 
 # Agents' step-by-step records (each step, tool call and message) are removed after this many days;
 # 0 keeps them for good. Approvals, gates, errors, mail and your own actions are never removed.

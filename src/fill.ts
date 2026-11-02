@@ -1,10 +1,10 @@
 // Fill: one worker drives one browser through one application, from the frozen resume to a recorded outcome.
-import { writeFileSync } from "node:fs";
+import { copyFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
 import { checkAutoApprovedPractice } from "./auto";
-import { browserSlot, config, jobDir, readProfile } from "./config";
-import { isCapacityError, isUsageLimit } from "./errors";
+import { browserSlot, config, jobDir, PROFILE, readProfile } from "./config";
+import { isCapacityError } from "./errors";
 import { jobsWithCheckpoint, logEvent, updateJob, type Job } from "./db";
 import { endVerification, isSubmitting, isVerifying, queueDraftRecovery, rememberSlot } from "./fill-state";
 import { endSession, ownsFill, stopFailedFill, type FillRuntime, type FillSession } from "./fill-session";
@@ -15,7 +15,8 @@ import { getOpenGate, parkGate, readCheckpoint, recordCheckpoint, resumeContext 
 import { freezeResume, frozenResume } from "./resume";
 import { isSettled, to, wasSent } from "./status";
 import { fillTemplate } from "./template";
-import { availableModel, nextFallback, usesPlaywright } from "./worker";
+import { usesPlaywright } from "./worker";
+import { choose, nextChoice } from "./providers";
 import { deadEnd } from "./screen";
 import { humanizerRules, lowStakesRule, readPrompt, render, termsRule } from "./worker-tools";
 
@@ -63,9 +64,10 @@ export function tabPlan(slot: number, jobId: number, limit = PARKED_TABS) {
   return { keep, closing, others };
 }
 
-// The model a fill runs on: models.fill, or while that one is at its usage limit, the first fallback
-// that is not (src/limits.ts). A draft a usage limit stopped resumes on that fallback.
-export const fillModel = () => availableModel("fill", config.models.fill);
+// The model and account a fill runs on: models.fill's first in its chain whose provider is not at a
+// limit (src/providers.ts). It is picked before the prompt is written, since the prompt and tools
+// follow the harness. A draft a limit stopped resumes on the next one.
+export const fillChoice = () => choose("fill", config.models.fill);
 
 export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   const { slot } = session;
@@ -108,6 +110,8 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   for (const answer of context.answers) {
     if (answer.kind === "cover_letter") writeFileSync(join(dir, "cover_letter.txt"), answer.answer + "\n");
   }
+  // PDFs the answers point to (a transcript, say) go beside the resume: the browser uploads only from here.
+  for (const f of readdirSync(PROFILE)) if (f.toLowerCase().endsWith(".pdf")) copyFileSync(join(PROFILE, f), join(dir, f));
   await rt.browser.ensureChrome(slot);
   if (!ownsFill(rt, session)) return;
   const { keep: protectedTabs, closing, others: excludedTargets } = tabPlan(slot, job.id);
@@ -140,7 +144,8 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   );
   // An omp worker drives omp's browser tool and runs the prefill script in its JavaScript session; a
   // Claude Code or Codex one drives Playwright's MCP tools, and the app runs the prefill script for it.
-  const model = fillModel();
+  const choice = fillChoice();
+  const model = choice.model;
   const onPlaywright = usesPlaywright(model);
   const ctx = { job, session, mailbox, isVerification, jobBrowser };
   const tools = fillTools(rt, ctx);
@@ -178,13 +183,19 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     browser: true,
     cdpPort: session.browser.port,
     maxTime: isVerification ? "10m" : "24h",
-    env: { DISPLAY: browser.display },
+    env: { DISPLAY: browser.display, ...choice.env },
     prompt: render("fill", { ...vars, browser: fillTemplate(readPrompt(guide), vars, `prompts/${guide}.md`).trimEnd() }),
     tools,
   });
   const result = await session.handle.done;
-  const fallback = isUsageLimit(result.error) ? nextFallback("fill", model) : null;
-  if (fallback) logEvent("system", `Fill hit a usage limit on ${model ?? "omp's default"}: the same draft resumes on ${fallback}`, job.id, "fill");
+  const fallback = isCapacityError(result.error) ? nextChoice("fill", config.models.fill, choice) : null;
+  if (fallback)
+    logEvent(
+      "system",
+      `Fill refused for capacity on ${model ?? "omp's default"} (${choice.provider}): the same draft resumes on ${fallback.model ?? "omp's default"} (${fallback.provider})`,
+      job.id,
+      "fill",
+    );
   // The provider stopped the worker, not the site: the next worker picks up the same draft.
   const capacity = isCapacityError(result.error);
   if (isVerification) {
