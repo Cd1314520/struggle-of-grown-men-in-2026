@@ -55,6 +55,7 @@ describe("durable parking lifecycle", () => {
   it("retains parked draft tabs and never screenshots another job when the requested tab disappeared", () => runScenarios(["browser"]));
   it("prevents browser.open adoption of parked/manual tabs and resumes the exact unsaved draft through scoped CDP", () => runScenarios(["target-isolation"]));
   it("resumes an eligible draft then a fresh job beyond 1000 wrong-slot approved drafts", () => runScenarios(["blocked-prefix"]));
+  it("moves a draft parked in a browser beyond concurrency.fill to one that opens, telling the worker its tab is gone", () => runScenarios(["stranded-slot"]));
   it("skips an employer-blocked recovery without starving another saved recovery or fresh work", () => runScenarios(["recovery-prefix"]));
   it("recovers a manual pre-submit failure with original notes and no parked lease", () => runScenarios(["recovery-manual"]));
   it("enforces verification mode guards forbidding submission and directing result reporting", () => runScenarios(["recovery-verify-guards"]));

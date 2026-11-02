@@ -29,6 +29,8 @@ const VERIFY_BRIEF =
 const RESUME_BRIEF =
   "RESUMING an application. Recover the exact requisition and check if an account or draft exists. A frozen resume or checkpoint is navigation history, NOT proof that an ATS account or draft exists on the site. Previous handoff notes in resumeContext.handoffHistory are historical observations, NOT binding directives; current instructions and live site evidence supersede intermediate assumptions. Look at the earliest/oldest handoff to identify the true root failure. If the earliest failure occurred before account creation (e.g. outage or 302 before registration) and the site confirms no account exists, create credentials with get_account (register: true) and proceed with the first application. If remote signup never finished or this is the first application after pre-draft outage, permit initial registration with previously stored credentials or new account. If identity cannot be verified, call need_manual.";
 const FIRST_BRIEF = "First fill for this application. Open the exact posting and record the draft/requisition identity.";
+const lostTabBrief = (url: string) =>
+  `THE SAVED TAB IS GONE: the browser restarted since this draft was parked, so the assigned tab is blank and anything the page held that the site had not saved is lost. That is expected, not a browser failure: do not stop for it. Open ${url} (the last page recorded, else the posting), sign in with get_account if the site asks, and continue from the draft the site kept; if it kept none, apply again from the posting. The answers already given are in resumeContext.`;
 const SUBMIT_RULE =
   "- **Before final submit:** re-observe and verify all fields, take a full-page screenshot, then call `confirm_submit` with an exact summary and current navigation checkpoint. Click only if it returns APPROVED. An unused approval is valid only for the unchanged summary. Immediate post-click verification challenges (email codes or CAPTCHAs) continue this pending attempt; complete them, clicking final application submit again when the site requires it to finish. Call `need_manual` only when you cannot tell whether the application was sent.";
 
@@ -126,8 +128,12 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
         "fill",
       );
   if (!ownsFill(rt, session)) return;
-  const jobBrowser = await rt.browser.prepareJobBrowser(slot, session.checkpoint.tabId, excludedTargets);
+  const { tabId: savedTab, url: savedUrl } = session.checkpoint;
+  const jobBrowser = await rt.browser.prepareJobBrowser(slot, savedTab, excludedTargets);
   session.browser = jobBrowser;
+  // The draft's page closed with its browser (a crash or restart): the worker gets a blank tab and
+  // must go back to the site instead of reporting the missing page as a browser failure.
+  const tabLost = !isVerification && savedTab !== null && !jobBrowser.reused;
   if (!ownsFill(rt, session)) return;
   session.checkpoint = {
     ...session.checkpoint,
@@ -163,7 +169,9 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     resumeContext: JSON.stringify(context, null, 2),
     browserTabId: session.browser.tabId,
     continuationNote: job.note ?? "(none)",
-    recovery: isVerification ? VERIFY_BRIEF : job.resume_sha || context.checkpoint ? RESUME_BRIEF : FIRST_BRIEF,
+    recovery:
+      (isVerification ? VERIFY_BRIEF : job.resume_sha || context.checkpoint ? RESUME_BRIEF : FIRST_BRIEF) +
+      (tabLost ? `\n\n${lostTabBrief(savedUrl ?? job.url)}` : ""),
     description: job.description || "(not captured; read it from the URL)",
     captchaAttempts: 3,
     approval:

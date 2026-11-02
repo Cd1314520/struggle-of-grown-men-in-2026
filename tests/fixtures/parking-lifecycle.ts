@@ -14,7 +14,7 @@ const scenario = process.argv[2];
 const { config, jobDir, DATA } = await import("../../src/config");
 config.approval = "gated"; // every application waits at both gates
 config.targets.holdBack = false;
-config.concurrency.fill = scenario?.startsWith("restart-") || scenario === "recovery-prefix" ? 2 : 1;
+config.concurrency.fill = scenario?.startsWith("restart-") || scenario === "recovery-prefix" || scenario === "blocked-prefix" ? 2 : 1;
 config.concurrency.prep = 0;
 config.fillPauseSeconds = [0, 0];
 config.schedule = { scanMinutes: 0, discoverMinutes: 0, trackMinutes: 0 };
@@ -174,6 +174,8 @@ const core = await import("../../src/questions");
 const { jobBlockers } = await import("../../src/blockers");
 const { backedOff, backoffUntil, usedToday } = await import("../../src/limits");
 const { Scheduler, retryPassingHandoffs } = await import("../../src/scheduler");
+// blocked-prefix: browser 1 exists but rests, so its drafts wait for it instead of moving to browser 0.
+if (scenario === "blocked-prefix") kvSet("fill.rest.1", String(Date.now() + 864e5));
 const scheduler = new Scheduler({ runWorker, browser });
 
 function must<T>(value: T | null | undefined, what: string): T {
@@ -317,6 +319,29 @@ if (scenario === "blocked-prefix") {
     must(db.query<{ count: number }, []>("SELECT count(*) AS count FROM jobs WHERE id <= 1001 AND status != 'approved'").get(), "blocked job count").count,
     0,
   );
+  process.exit(0);
+}
+
+if (scenario === "stranded-slot") {
+  // Parked in browser 2 while concurrency.fill was higher; with one browser now, browser 0 takes it.
+  addJob(1);
+  const frozen = resume.freezeResume(1);
+  updateJob(1, { resume_sha: frozen.sha, resume_frozen_at: new Date().toISOString() });
+  core.recordCheckpoint(1, {
+    version: 1,
+    slot: 2,
+    tabId: "gone-tab",
+    url: null,
+    step: "Draft from a browser that no longer opens",
+    notes: "Resume from the site's draft",
+    resumeSha: frozen.sha,
+    savedAt: new Date().toISOString(),
+  });
+  scheduler.pump();
+  await until(() => workers.length === 1);
+  assert.equal(jobRow(1).status, "filling");
+  assert.equal(workerAt(0).options.cdpPort !== undefined, true);
+  assert.match(workerAt(0).options.prompt, /THE SAVED TAB IS GONE/);
   process.exit(0);
 }
 

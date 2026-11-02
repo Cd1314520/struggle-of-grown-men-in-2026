@@ -482,7 +482,10 @@ export class Scheduler {
         (usedToday("fill") >= config.limits.applyPerDay || (Date.now() < this.nextNewAt && !isFresh(candidate)) || started.has(employerOf(candidate)))
       )
         continue;
-      if (saved ? saved.slot !== slot : candidate.resume_sha && lastSlot(candidate.id) !== slot) continue;
+      // A draft resumes in the browser profile that holds its site session. A profile beyond
+      // concurrency.fill (lowered since the draft was parked) never opens again, so any browser takes it.
+      const home = saved ? saved.slot : candidate.resume_sha ? lastSlot(candidate.id) : slot;
+      if (home !== slot && (home === null || home < this.filling.length)) continue;
       return { job: candidate, checkpoint: saved, isNew };
     }
     return null;
