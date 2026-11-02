@@ -440,6 +440,28 @@ describe("durable questions", () => {
   `);
   });
 
+  it("settles an unclear submission as sent when the employer's receipt arrives, and only that kind of hand-off", () => {
+    scenario(`
+    const { confirmSubmittedByMail, unconfirmedSubmissions } = await import(${JSON.stringify(join(import.meta.dir, "../src/questions.ts"))});
+    job(1, "Shield AI", "EE Intern"); job(2); job(3);
+    parkGate(1, { kind: "submission_ambiguous", text: "Captcha; inspect before resolving" }, checkpoint);
+    authorizeSubmit(1);
+    parkGate(2, { kind: "manual", text: "Sign in by hand" }, checkpoint);
+    assert.deepEqual(unconfirmedSubmissions().map(j => j.id), [1]);
+    assert.throws(() => confirmSubmittedByMail(2, "m2", "receipt"), /no unclear submission/);
+    assert.throws(() => confirmSubmittedByMail(3, "m3", "receipt"), /being worked on/);
+    assert.throws(() => confirmSubmittedByMail(1, " ", "receipt"), /message_id/);
+    confirmSubmittedByMail(1, "m1", "Lever receipt from Shield AI");
+    const done = getJob(1);
+    assert.equal(done.status, "submitted");
+    assert.match(done.note, /Lever receipt from Shield AI \\[confirmation email msg=m1\\]/);
+    assert.equal(getOpenGate(1), null);
+    assert.equal(isSubmitting(1), false);
+    assert.deepEqual(unconfirmedSubmissions(), []);
+    assert.throws(() => confirmSubmittedByMail(1, "m1", "again"), /already settled/);
+  `);
+  });
+
   it("reopens the database with queued answers, explicit reservations, and frozen checkpoints intact", () => {
     scenario(
       `

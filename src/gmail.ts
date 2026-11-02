@@ -38,6 +38,7 @@ interface Message {
 }
 interface MessageList {
   messages?: { id: string }[];
+  nextPageToken?: string;
 }
 
 function client() {
@@ -162,11 +163,18 @@ function bodyText(payload: Part | undefined): string {
 }
 
 export async function search(query: string, max = 10) {
-  const list = (await call(`/messages?${new URLSearchParams({ q: query, maxResults: String(Math.min(max, 25)) }).toString()}`)) as MessageList;
-  const out = [];
+  return (await searchPage(query, max)).messages;
+}
+
+// One page of a search, and the token for the next one (null on the last page): after a few days
+// away the mailbox holds more than one page, and a reader that stops at the first misses the rest.
+export async function searchPage(query: string, max = 10, page?: string) {
+  const params = new URLSearchParams({ q: query, maxResults: String(Math.min(max, 25)), ...(page ? { pageToken: page } : {}) });
+  const list = (await call(`/messages?${params.toString()}`)) as MessageList;
+  const messages = [];
   for (const m of list.messages ?? []) {
     const msg = (await call(`/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`)) as Message;
-    out.push({
+    messages.push({
       id: m.id,
       thread: msg.threadId,
       from: header(msg, "from"),
@@ -176,7 +184,7 @@ export async function search(query: string, max = 10) {
       snippet: msg.snippet,
     });
   }
-  return out;
+  return { messages, next: list.nextPageToken ?? null };
 }
 
 export async function read(id: string) {

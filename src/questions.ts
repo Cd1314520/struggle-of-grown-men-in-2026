@@ -583,6 +583,33 @@ export function resolveAmbiguous(jobId: number, resolution: string): void {
   }).immediate();
   notifyJobChange(jobId);
 }
+// Applications whose final submit left no confirmation on the page (an open submission_ambiguous
+// hand-off). The employer's receipt in the mailbox settles them: see confirmSubmittedByMail.
+export const unconfirmedSubmissions = () =>
+  db
+    .query<Job, []>(
+      "SELECT jobs.* FROM jobs JOIN question_gates g ON g.job_id = jobs.id WHERE g.state = 'open' AND g.kind = 'submission_ambiguous' ORDER BY jobs.id",
+    )
+    .all();
+
+// The employer's receipt for an application in unconfirmedSubmissions: it was sent after all.
+export function confirmSubmittedByMail(jobId: number, messageId: string, note: string): void {
+  db.transaction(() => {
+    const job = requireJob(jobId);
+    if (isSettled(job)) throw new Error("This application is already settled");
+    if (job.status === "filling") throw new Error("This application is being worked on now; leave it to that worker");
+    const current = getOpenGate(jobId);
+    if (current?.kind !== "submission_ambiguous") throw new Error("This application has no unclear submission to settle");
+    if (!messageId.trim()) throw new Error("message_id of the receipt is required");
+    closeGate(current.id);
+    clearManualLease(jobId);
+    invalidateApproval(jobId);
+    clearFillFlags(jobId);
+    writeJob(jobId, to.submitted(`${note.trim()} [confirmation email msg=${messageId.trim()}]`));
+  }).immediate();
+  notifyJobChange(jobId);
+}
+
 export interface AmbiguityEvidence {
   notes: string;
   requisitionId: string;
