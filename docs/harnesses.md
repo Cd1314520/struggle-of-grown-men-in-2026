@@ -61,6 +61,10 @@ All three harnesses drive the same browser through the same scoped pacing proxy 
 - **WebMCP.** omp's browser adds `navigator.modelContext` unless the prompt's init script removes it; Playwright's server is started with `--no-webmcp`, and adds nothing to `navigator`.
 - **Proxy.** Playwright asks for `/json/version/` and expects a page it creates to be announced before `Target.createTarget` replies; the scoped proxy allows both.
 
+## Writing free-text answers
+
+Workers load no skills (see Isolation above), so the humanizer skill reaches them through the prompt instead: `prompts/humanizer.md` is a copy of it (MIT, `prompts/humanizer.LICENSE`), and the fill and recheck prompts include it under "Editing a free-text answer", with a note on using it without anyone to ask. Every harness gets the same text, so an answer reads the same whether Claude Code, Codex or omp wrote it, including when a usage limit moves a fill from one to another. Answers copied unchanged from the answer bank or the candidate details are left as they are, and the answer-bank worker, which files the candidate's own words, does not get it. It adds about 8,000 tokens to each fill and recheck prompt.
+
 ## Differences that remain
 
 - **Prefill timing.** A Claude Code fill waits for the prefill tool's reply (up to a few minutes on a long form) as one tool call; omp runs it as one `eval` call with a 180-second timeout.

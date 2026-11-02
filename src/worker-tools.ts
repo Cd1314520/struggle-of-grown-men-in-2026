@@ -24,6 +24,10 @@ export const render = (name: string, vars: Record<string, string | number | null
 // What the fill and recheck agents may answer for the candidate without asking (prompts/low-stakes.md).
 export const lowStakesRule = () => readPrompt("low-stakes").trim();
 export const termsRule = () => readPrompt("terms").trim();
+// How the fill and recheck agents edit a free-text answer before it goes onto a form: the humanizer
+// skill (prompts/humanizer.md, MIT, prompts/humanizer.LICENSE), given to every harness in the prompt,
+// since workers load no skills of their own.
+export const humanizerRules = () => readPrompt("humanizer").trim();
 
 export const workDir = () => {
   const dir = join(DATA, "work");

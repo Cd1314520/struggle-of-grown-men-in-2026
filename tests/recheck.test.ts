@@ -72,6 +72,8 @@ describe("recheck", () => {
     // listQuestionGroups puts the most recently opened posting first.
     assert.ok(prompts[0].includes("1. Gamma") && prompts[0].includes("3. Acme"));
     assert.ok(prompts[0].includes("Hispanic or Latino?\\nNo."));
+    // A free-text answer it writes goes through the humanizer rules first.
+    assert.ok(prompts[0].includes("Editing a free-text answer") && prompts[0].includes("# Humanizer: remove AI writing patterns"));
     assert.ok(replies[0].startsWith("ERROR") && replies[1].startsWith("ERROR"));
     assert.equal(getGate(title.id).answer, "Mr.");
     assert.equal(getGate(hispanic.id).answer, "No");

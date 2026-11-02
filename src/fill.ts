@@ -17,7 +17,7 @@ import { isSettled, to, wasSent } from "./status";
 import { fillTemplate } from "./template";
 import { availableModel, nextFallback, usesPlaywright } from "./worker";
 import { deadEnd } from "./screen";
-import { lowStakesRule, readPrompt, render, termsRule } from "./worker-tools";
+import { humanizerRules, lowStakesRule, readPrompt, render, termsRule } from "./worker-tools";
 
 // The prefill script the worker imports into its JavaScript session.
 const PREFILL_MODULE = join(import.meta.dir, "prefill.ts");
@@ -154,6 +154,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     answers: readProfile("answers.md"),
     lowStakes: lowStakesRule(),
     terms: termsRule(),
+    humanizer: humanizerRules(),
     resumeContext: JSON.stringify(context, null, 2),
     browserTabId: session.browser.tabId,
     continuationNote: job.note ?? "(none)",

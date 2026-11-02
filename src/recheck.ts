@@ -9,7 +9,7 @@ import { errorMessage } from "./errors";
 import { due } from "./limits";
 import { arg, S, schema, type RunWorker } from "./worker";
 import { answerGate, listQuestionGroups, type QuestionGroup } from "./questions";
-import { lowStakesRule, readPrompt, render, termsRule, workDir } from "./worker-tools";
+import { humanizerRules, lowStakesRule, readPrompt, render, termsRule, workDir } from "./worker-tools";
 
 // Questions per worker: enough to share one read of the profile, few enough that long legal context still fits.
 const BATCH = 25;
@@ -28,6 +28,7 @@ const fingerprint = () =>
         readPrompt("recheck"),
         readPrompt("low-stakes"),
         readPrompt("terms"),
+        readPrompt("humanizer"),
       ]),
     )
     .digest("hex");
@@ -79,6 +80,7 @@ async function recheckBatch(run: RunWorker, groups: readonly QuestionGroup[]) {
       answers: readProfile("answers.md"),
       lowStakes: lowStakesRule(),
       terms: termsRule(),
+      humanizer: humanizerRules(),
       questions: questionList(groups),
     }),
     tools: {

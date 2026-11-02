@@ -479,6 +479,7 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(usedToday("fill"), 1, "resuming is not a new application");
 } else if (scenario === "usage-limit") {
   assert.equal(first.options.model, "claude-code/opus");
+  assert.match(first.options.prompt, /# Humanizer: remove AI writing patterns/);
   await call(first, "checkpoint", navigation);
   const claudeResets = Date.now() + 3 * 3_600_000;
   first.fail(`Claude usage limit reached (five_hour, resets ${new Date(claudeResets).toISOString()}): limit reached`);
@@ -491,6 +492,8 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(second.options.jobId, 1, "the same draft resumes");
   assert.equal(second.options.model, "codex/gpt-6-sol", "on the fallback model");
   assert.match(second.options.prompt, /RESUMING an application/);
+  // A Codex fill edits its free-text answers with the same humanizer rules as a Claude Code one.
+  assert.match(second.options.prompt, /Editing a free-text answer[\s\S]*# Humanizer: remove AI writing patterns/);
   assert.equal(jobRow(1).resume_sha, initialSha);
   assert.equal(usedToday("fill"), 1, "resuming is not a new application");
   // The fallback runs out too: nothing is left to move to, so the app waits for the first of the two
