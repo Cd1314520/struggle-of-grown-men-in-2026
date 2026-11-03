@@ -182,6 +182,15 @@ describe("durable questions", () => {
     const only = parkGate(2, prompt, checkpoint);
     answerGate(only.id, "Yes", "application");
     assert.equal(getJob(2).status, "approved");
+
+    // A question asked without context has no answer to reuse elsewhere, but once answered here it is not asked again.
+    job(3);
+    const bare = { ...prompt, context: "" };
+    queueQuestion(3, bare);
+    const asked = parkGate(3, nextQueuedQuestion(3), checkpoint);
+    answerGate(asked.id, "No", "application");
+    assert.equal(getJob(3).status, "approved");
+    assert.equal(getOpenGate(3), null);
   `);
   });
 

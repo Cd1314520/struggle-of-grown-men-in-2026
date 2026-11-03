@@ -308,17 +308,14 @@ export function queueQuestion(jobId: number, input: GateInput) {
   );
 }
 // The first queued question this application has not had answered yet.
+// Answered here is enough: a question without context has no stored answer findStoredAnswer would reuse.
 export function nextQueuedQuestion(jobId: number): GateInput | null {
-  const rows = db
+  const row = db
     .query<{ text: string; context: string; options: string }, [number]>(
-      "SELECT text, context, options FROM queued_questions WHERE job_id = ? ORDER BY queued_at, rowid",
+      "SELECT text, context, options FROM queued_questions q WHERE job_id = ? AND NOT EXISTS (SELECT 1 FROM application_answers a WHERE a.job_id = q.job_id AND a.match_key = q.match_key) ORDER BY queued_at, rowid",
     )
-    .all(jobId);
-  for (const row of rows) {
-    const input: GateInput = { kind: "question", text: row.text, context: row.context, options: JSON.parse(row.options) as string[] };
-    if (findStoredAnswer(jobId, input) === null) return input;
-  }
-  return null;
+    .get(jobId);
+  return row ? { kind: "question", text: row.text, context: row.context, options: JSON.parse(row.options) as string[] } : null;
 }
 // A worker starting on the application re-observes the form and asks again whatever it still needs.
 export function clearQueuedQuestions(jobId: number) {
@@ -327,13 +324,13 @@ export function clearQueuedQuestions(jobId: number) {
 // The queued questions still unanswered besides the one this gate asks.
 function queuedAfter(row: GateRow): number {
   if (row.kind !== "question") return 0;
-  return db
-    .query<{ text: string; context: string; options: string }, [number, string]>(
-      "SELECT text, context, options FROM queued_questions WHERE job_id = ? AND match_key != ?",
-    )
-    .all(row.job_id, row.match_key)
-    .filter(q => findStoredAnswer(row.job_id, { kind: "question", text: q.text, context: q.context, options: JSON.parse(q.options) as string[] }) === null)
-    .length;
+  return (
+    db
+      .query<{ n: number }, [number, string]>(
+        "SELECT count(*) n FROM queued_questions q WHERE job_id = ? AND match_key != ? AND NOT EXISTS (SELECT 1 FROM application_answers a WHERE a.job_id = q.job_id AND a.match_key = q.match_key)",
+      )
+      .get(row.job_id, row.match_key)?.n ?? 0
+  );
 }
 // Open gates grouped by what they ask, the group with the most recently opened posting first: an
 // answer is worth most to an application while its posting is new.
