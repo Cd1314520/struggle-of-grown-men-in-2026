@@ -26,6 +26,42 @@ export interface Stats {
   funnel: Funnel; // the postings found in the window, by how far they got
   response: { sent: number; heard: number }; // applications sent in the window, and how many were answered
   approvals: { auto: number; user: number }; // jobs approved in the window, by who gave gate 1
+  calibration: Band[]; // every application ever sent, by its Fit score: does the score predict who moves on?
+}
+// Applications sent in one Fit score band. `advanced`: the employer moved them on (an assessment, a call
+// to schedule, an interview or an offer), even if a no came later; `rejected`: a no with nothing before it.
+export interface Band {
+  label: string;
+  sent: number;
+  advanced: number;
+  rejected: number;
+}
+// "No score": sent without an assessment (imported from elsewhere, or added by hand).
+const BANDS = ["80 and up", "70 to 79", "60 to 69", "Under 60", "No score"] as const;
+const bandOf = (score: number | null) => (score === null ? 4 : score >= 80 ? 0 : score >= 70 ? 1 : score >= 60 ? 2 : 3);
+const MOVED_ON = ["interview", "offer"];
+const MOVED_ON_STEPS = ["assessment", "schedule", "interview"];
+
+export function calibration(): Band[] {
+  const rows = db
+    .query<{ score: number | null; advanced: number; rejected: number }, [string, string]>(
+      `SELECT score,
+        status IN (SELECT value FROM json_each(?1))
+          OR EXISTS (SELECT 1 FROM status_changes c WHERE c.job_id = j.id AND c.to_status IN (SELECT value FROM json_each(?1)))
+          OR EXISTS (SELECT 1 FROM application_steps s WHERE s.job_id = j.id AND s.kind IN (SELECT value FROM json_each(?2))) AS advanced,
+        status = 'rejected_by_company' AS rejected
+      FROM jobs j WHERE submitted_at IS NOT NULL`,
+    )
+    .all(JSON.stringify(MOVED_ON), JSON.stringify(MOVED_ON_STEPS));
+  const bands: Band[] = BANDS.map(label => ({ label, sent: 0, advanced: 0, rejected: 0 }));
+  for (const r of rows) {
+    const band = bands[bandOf(r.score)];
+    if (!band) continue;
+    band.sent++;
+    if (r.advanced) band.advanced++;
+    else if (r.rejected) band.rejected++;
+  }
+  return bands;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -126,7 +162,7 @@ export function computeStats(now = Date.now()): Stats {
     .all(since);
   for (const r of approvers) if (r.by === "auto" || r.by === "user") approvals[r.by] = r.n;
 
-  return { days, found, applied, responses, funnel, response, approvals };
+  return { days, found, applied, responses, funnel, response, approvals, calibration: calibration() };
 }
 
 // The pass over jobs reads every posting's row, descriptions and all (~150ms on 80k), and the Overview

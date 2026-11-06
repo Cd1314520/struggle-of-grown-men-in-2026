@@ -36,6 +36,14 @@ const SUBMIT_RULE =
 
 // Parked applications whose pages stay open in one browser. Every open page costs memory for as long
 // as its question goes unanswered, so only the most recently parked keep theirs.
+// What the worker does about cover letters and references, by `coverLetters` (config.yml).
+const REFERENCES =
+  "Never invent a reference. Leave optional reference fields empty. When the form requires references (names and contact details of people to contact), the candidate does not apply: call `skip_application` with `requires: references` and the field's label in `note`, as soon as you see it and before filling further. A question asking only whether references can be provided is answered from the answer bank, not skipped. When the form makes completed coursework a condition of applying and the answer bank says the candidate has not completed it, call `skip_application` with `requires: coursework` and the question in `note`.";
+export const coverLetterRule = () =>
+  config.coverLetters === "draft"
+    ? `- **Cover letters and references:** leave an optional cover letter field or upload empty. When the form requires a cover letter, call \`cover_letter\` with the field's label and your draft. If it returns the candidate's approved letter, enter that exactly: paste it into a text box, or upload \`cover_letter.txt\` from this application's folder (if the upload refuses a .txt file, call \`need_manual\`). Otherwise the application parks while the candidate reads and edits your draft; stop. Write the draft in under 250 words from the resume and the answer bank only, with one or two specifics from the posting: what draws the candidate to this role, the one or two projects that match it best with their real numbers, and when they can start. Plain sentences under the writing rules: no invented facts, tools or numbers, no em or en dashes, no generic openers. ${REFERENCES}`
+    : `- **Cover letters and references:** never write a cover letter. Leave an optional cover letter field or upload empty. When the form requires a cover letter, the candidate does not apply: call \`skip_application\` with \`requires: cover_letter\` and the field's label in \`note\`, as soon as you see it and before filling further. ${REFERENCES}`;
+
 export const PARKED_TABS = 8;
 
 // What becomes of the tabs that checkpoints on this browser point at, when `jobId` starts a fill there.
@@ -164,6 +172,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     personal: readProfile("personal.yml"),
     answers: readProfile("answers.md"),
     lowStakes: lowStakesRule(),
+    coverLetterRule: coverLetterRule(),
     terms: termsRule(),
     humanizer: humanizerRules(),
     resumeContext: JSON.stringify(context, null, 2),

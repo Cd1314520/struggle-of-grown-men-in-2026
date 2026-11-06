@@ -294,6 +294,11 @@ export function findStoredAnswer(jobId: number, input: GateInput): string | null
     .get(jobId, key.matchKey);
   return local?.answer ?? null;
 }
+// The letter the candidate approved for this application, the latest if they changed it.
+export const approvedCoverLetter = (jobId: number) =>
+  db
+    .query<{ answer: string }, [number]>("SELECT answer FROM application_answers WHERE job_id = ? AND kind = 'cover_letter' ORDER BY answered_at DESC LIMIT 1")
+    .get(jobId)?.answer ?? null;
 // ---- questions a worker found together. It queues every unknown question on a page and parks once,
 // on the first still unanswered; answering that one opens the next instead of starting a worker for it.
 export function queueQuestion(jobId: number, input: GateInput) {

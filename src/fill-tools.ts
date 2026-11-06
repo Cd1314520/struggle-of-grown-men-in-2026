@@ -1,6 +1,7 @@
 // The host tools a fill worker is given. Each one acts for the session it was built for and for
 // nothing else: once that session no longer owns the application, every tool refuses.
 import { resolveAccount } from "./accounts";
+import { config } from "./config";
 import { CAUSE_GUIDE, recordBlocker, WORKER_CAUSES } from "./blockers";
 import { connectTab } from "./cdp-tab";
 import type { JobBrowser } from "./chrome";
@@ -28,6 +29,7 @@ import {
   queueQuestion,
   resolveAmbiguityWithEvidence,
   type AmbiguityEvidence,
+  approvedCoverLetter,
   type GateInput,
 } from "./questions";
 import { to } from "./status";
@@ -103,8 +105,16 @@ async function verifyStatus(rt: FillRuntime, ctx: FillContext, args: ToolArgs): 
 }
 
 // What a form may require that the candidate does not give, so the application is dropped instead of parked.
-const SKIPPED_FOR = { cover_letter: "a cover letter", references: "references" };
+const SKIPPED_FOR = { cover_letter: "a cover letter", references: "references", coursework: "completed coursework the candidate does not have" };
 
+// Why a cover letter draft cannot go to the candidate as it is, or null.
+export function coverLetterProblem(draft: string): string | null {
+  const words = draft.split(/\s+/).filter(Boolean).length;
+  if (words < 60) return `the draft has ${words} words; write a complete letter.`;
+  if (words > 250) return `the draft has ${words} words; keep it under 250.`;
+  if (/[\u2013\u2014]/.test(draft)) return "the draft uses an em or en dash; the writing rules forbid them.";
+  return null;
+}
 // What stopped the application, so stops can be counted and looked at again by cause.
 const causeParam = { type: "string", enum: WORKER_CAUSES, description: CAUSE_GUIDE };
 
@@ -173,7 +183,7 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
     },
     skip_application: {
       description:
-        "Drop this application, unsubmitted, because the form requires something the candidate does not give: a cover letter or references. Terminates the worker.",
+        "Drop this application, unsubmitted, because the form requires something the candidate does not give: a cover letter, references, or completed coursework the answer bank says the candidate lacks. Terminates the worker.",
       parameters: schema({
         requires: { type: "string", enum: Object.keys(SKIPPED_FOR), description: "What the form requires" },
         note: S.str("The required field's label and the posting or form text that makes it required"),
@@ -181,6 +191,7 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
       handler: args => {
         if (isVerification || isSubmitting(job.id)) return "ERROR: an authorized or ambiguous submission cannot be skipped; report it as usual.";
         const requires = arg.oneOf(args, "requires", Object.keys(SKIPPED_FOR) as (keyof typeof SKIPPED_FOR)[]);
+        if (requires === "cover_letter" && config.coverLetters === "draft") return "ERROR: draft the letter with cover_letter instead of skipping.";
         db.transaction(() => {
           cancelJobGates(job.id);
           clearFillFlags(job.id);
@@ -191,6 +202,34 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
         return "Recorded: application skipped. Stop now.";
       },
     },
+    ...(config.coverLetters === "draft" && {
+      cover_letter: {
+        description:
+          "The form requires a cover letter. Returns the letter the candidate approved for this application if there is one; otherwise parks the application on your draft for the candidate to edit and approve, and terminates this worker.",
+        parameters: schema({
+          field: S.str("The cover letter field's label, and whether it is a text box or an upload"),
+          draft: S.str("Your complete draft letter, under 250 words"),
+          ...navigationFields,
+        }),
+        handler: async args => {
+          if (isVerification || isSubmitting(job.id)) return "ERROR: an authorized or ambiguous submission cannot park on a cover letter.";
+          const approved = approvedCoverLetter(job.id);
+          if (approved !== null)
+            return `The candidate approved this letter (also saved as cover_letter.txt in this application's folder). Enter it exactly as written:\n\n${approved}`;
+          const draft = arg.str(args, "draft").trim();
+          const problem = coverLetterProblem(draft);
+          if (problem) return `ERROR: ${problem} Rewrite the draft and call again.`;
+          if (!ownsFill(rt, session)) throw new Error("stale fill worker");
+          const input: GateInput = {
+            kind: "cover_letter",
+            text: `Cover letter: ${arg.str(args, "field")}`,
+            context: `${job.company}, ${job.title}`,
+            options: [draft],
+          };
+          return parkFill(rt, session, input, await checkpointFrom(rt, session, args));
+        },
+      },
+    }),
     confirm_submit: {
       description: "After re-observing all entered fields, authorize the one final click or durably park for review.",
       parameters: schema({ summary: S.str("Exact final entered values, every non-trivial answer and free text verbatim"), ...navigationFields }),

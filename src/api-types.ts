@@ -9,6 +9,7 @@ import type { ModelCatalog } from "./models";
 import type { ImportState } from "./resume-import";
 import type { StockResume } from "./resume";
 import type { FillCheckpoint, Gate, QuestionGroup } from "./questions";
+import type { InterviewPrep } from "./interview";
 import type { NextStep, Step } from "./steps";
 import type { Drafts } from "./referral-drafts";
 import type { ContactStep, PickKind } from "./referral-plan";
@@ -71,6 +72,7 @@ export interface JobDetail extends Job {
   manualBrowserReserved: boolean;
   submissionAmbiguous: boolean;
   recoveryMode: "verify" | "fill" | null;
+  interviewPrep: InterviewPrep | null; // the story bank and a prep note, once the employer moves it on
   vncUrl: string | null;
   hasPdf: boolean;
   resumeFrozen: boolean;

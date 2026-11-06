@@ -48,6 +48,7 @@ import { digestStatus, sendQuestionDigest } from "./digest";
 import { errorMessage } from "./errors";
 import { isSubmitting, recoveryMode } from "./fill-state";
 import { RETRYABLE, to, wasSent } from "./status";
+import { interviewPrep } from "./interview";
 import { addStep, changeStep, jobSteps, nextStepOf, nextSteps, recordOutcome, removeStep, STEP_KINDS, stepOf } from "./steps";
 import { serveUi } from "./ui";
 import { isListView, listJobs } from "./listing";
@@ -198,6 +199,7 @@ function jobDetail(scheduler: Scheduler, job: Job): JobDetail {
     manualBrowserReserved: scheduler.manualBrowserReserved(job.id),
     submissionAmbiguous: gate?.kind === "submission_ambiguous" || (job.status !== "filling" && isSubmitting(job.id)),
     recoveryMode: recoveryMode(job.id),
+    interviewPrep: interviewPrep(job, steps),
     vncUrl: config.chrome.vncPort && slot !== null ? vncUrl(slot) : null,
     hasPdf: existsSync(files.pdf),
     resumeFrozen: files.frozen,
@@ -482,6 +484,10 @@ export function createHandler(scheduler: Scheduler) {
         } catch (err) {
           return fail(err instanceof Error ? err.message : "job action failed", 409);
         }
+      }
+      if (sub === "/prep-note" && req.method === "POST") {
+        const err = scheduler.writePrepNote(job, jobSteps(job.id));
+        return err ? fail(err, 409) : json({ ok: true });
       }
       if (sub === "/steps" && req.method === "POST") {
         try {

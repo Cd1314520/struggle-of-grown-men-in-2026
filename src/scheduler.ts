@@ -37,6 +37,8 @@ import { hitLimit, providerOf, withFallback } from "./providers";
 import { nextToPrep } from "./priority";
 import { profileProblems } from "./profile";
 import { bankDue, fileKeptAnswers } from "./answer-bank";
+import { writePrepNote } from "./interview";
+import type { Step } from "./steps";
 import { recheckDue, recheckOpenQuestions } from "./recheck";
 import {
   cancelJobGates,
@@ -352,6 +354,12 @@ export class Scheduler {
     this.importRun.cancelled = true;
     this.importRun.handle.abort();
     return true;
+  }
+
+  // An interview prep note for one application, written in the background (src/interview.ts).
+  // Returns what stopped it, or null once it has started.
+  writePrepNote(job: Job, steps: readonly Step[]): string | null {
+    return writePrepNote(this.run, job, steps);
   }
 
   // ---- fill sessions and the browsers they hold

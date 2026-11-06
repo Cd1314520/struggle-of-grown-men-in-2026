@@ -392,6 +392,7 @@ if (scenario === "freshest-first") {
   process.exit(0);
 }
 
+if (scenario === "cover-letter") config.coverLetters = "draft";
 if (scenario === "paced") {
   config.limits.applySpreadHours = 24;
   config.limits.applyPerDay = 100;
@@ -463,6 +464,25 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.match(jobRow(1).note ?? "", /^requires a cover letter: Cover Letter\*/);
   assert.equal(core.getOpenGate(1), null);
   await until(() => !scheduler.activeFillSession(1));
+} else if (scenario === "cover-letter") {
+  const field = { ...navigation, field: "Cover Letter* (text box)" };
+  const letter = Array.from({ length: 90 }, (_, i) => `word${i}`).join(" ");
+  assert.match(await call(first, "skip_application", { requires: "cover_letter", note: "Cover Letter*" }), /^ERROR: draft the letter/);
+  assert.match(await call(first, "cover_letter", { ...field, draft: "Too short." }), /^ERROR: the draft has 2 words/);
+  assert.match(await call(first, "cover_letter", { ...field, draft: `${letter} — more` }), /^ERROR: the draft uses an em or en dash/);
+  const parking = call(first, "cover_letter", { ...field, draft: letter });
+  await until(() => core.getOpenGate(1) !== null);
+  const gate = must(core.getOpenGate(1), "cover letter gate");
+  assert.equal(gate.kind, "cover_letter");
+  assert.deepEqual(gate.options, [letter], "the draft travels on the gate for the owner to edit");
+  assert.equal(jobRow(1).status, "needs_input", "a letter waits for the owner even though nothing else would");
+  first.exit();
+  await parking;
+  assert.equal(core.respond(1, "My edited letter."), true);
+  scheduler.pump();
+  await until(() => workers.length === 2);
+  assert.equal(readFileSync(join(jobDir(1), "cover_letter.txt"), "utf8"), "My edited letter.\n");
+  assert.match(await call(workerAt(1), "cover_letter", { ...field, draft: letter }), /Enter it exactly as written:\n\nMy edited letter\.$/);
 } else if (scenario === "paced") {
   await call(first, "report_result", { outcome: "submitted", note: "Submitted" });
   first.exit();

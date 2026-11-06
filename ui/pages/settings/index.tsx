@@ -69,6 +69,10 @@ const APPROVALS = [
   { value: "auto", label: "Auto-apply" },
   { value: "gated", label: "Gated" },
 ] as const;
+const COVER_LETTERS = [
+  { value: "skip", label: "Skip the job" },
+  { value: "draft", label: "Draft for me" },
+] as const;
 
 // Settings the app reads only at start, saved but not yet in use.
 function RestartNotice() {
@@ -115,6 +119,12 @@ function General({ s }: { s: Summary }) {
             : "You approve every job in Review, and OK every filled-in application before it's sent."
         }
         field={{ kind: "choice", options: APPROVALS }}
+      />
+      <ConfigRow
+        path="coverLetters"
+        label="Required cover letters"
+        description="When a form requires a cover letter: skip the application, or have the agent draft one that waits for you to edit and approve, even under Auto-apply. Optional cover letters are always left empty."
+        field={{ kind: "choice", options: COVER_LETTERS }}
       />
       <ConfigRow
         path="targets.holdBack"

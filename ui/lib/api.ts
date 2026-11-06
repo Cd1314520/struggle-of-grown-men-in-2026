@@ -107,6 +107,7 @@ export const api = {
   stepAction: (id: number, body: Record<string, unknown>) => post(`/api/jobs/${id}/steps`, body),
   browserAction: (id: number, body: { action: "reserve" | "release"; gateId: string }) => post(`/api/jobs/${id}/browser`, body),
   recover: (id: number, gateId: string) => post(`/api/jobs/${id}/recover`, { gateId }),
+  prepNote: (id: number) => post(`/api/jobs/${id}/prep-note`, {}),
   // Quiet: the caller shows a 409 as "already tracked" with a link rather than as an error.
   addPosting: (url: string) => post<{ id: number }>("/api/jobs", { url }, true),
   run: (what: "scan" | "track" | "discover" | "release_held" | "release_targets") => post("/api/run", { what }),

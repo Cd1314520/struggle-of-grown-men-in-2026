@@ -106,6 +106,23 @@ describe("stats", () => {
     `);
   });
 
+  it("bands every application sent by Fit score, counting who moved it on and who turned it down", () => {
+    scenario(`
+      const sent = "2026-10-20T14:00:00.000Z";
+      job({ status: "interview", score: 85, submitted_at: sent });
+      const tested = job({ status: "rejected_by_company", score: 82, submitted_at: sent }); // an assessment, then a no: moved on
+      db.query("INSERT INTO application_steps (job_id, kind, title, source) VALUES (?, 'assessment', 'Online test', 'mail')").run(tested);
+      job({ status: "submitted", score: 81, submitted_at: sent });
+      job({ status: "rejected_by_company", score: 72, submitted_at: sent });
+      const called = job({ status: "rejected_by_company", score: 64, submitted_at: sent }); // an interview once, a no later
+      db.query("INSERT INTO status_changes (job_id, from_status, to_status) VALUES (?, 'submitted', 'interview')").run(called);
+      job({ status: "submitted", submitted_at: sent }); // imported, never assessed
+      job({ status: "awaiting_approval", score: 90 }); // not sent
+      const by = Object.fromEntries(stats(NOW).calibration.map(b => [b.label, [b.sent, b.advanced, b.rejected]]));
+      assert.deepEqual(by, { "80 and up": [3, 2, 0], "70 to 79": [1, 0, 1], "60 to 69": [1, 1, 0], "Under 60": [0, 0, 0], "No score": [1, 0, 0] });
+    `);
+  });
+
   it("keeps its numbers until a job changes, and then for a few seconds more", () => {
     scenario(`
       assert.equal(kept(NOW).funnel.found, 0);

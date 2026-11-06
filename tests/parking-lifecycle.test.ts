@@ -34,6 +34,7 @@ describe("durable parking lifecycle", () => {
   it("exits before releasing an ordinary question's slot and starts another job", () => runScenarios(["release"]));
   it("preserves a fast answer against old cleanup/callbacks and resumes the same frozen artifact", () => runScenarios(["quick-answer"]));
   it("drops an application whose form requires a cover letter, without parking it", () => runScenarios(["skip"]));
+  it("parks a required cover letter on the agent's draft and hands the approved letter back", () => runScenarios(["cover-letter"]));
   it("releases stopped manual blockers and resumes their frozen drafts later", () => runScenarios(["manual"]));
   it("retries a browser stop once, at once, before it waits for the user", () => runScenarios(["retry-browser"]));
   it("retries a site outage after a few hours", () => runScenarios(["retry-site-down"]));
