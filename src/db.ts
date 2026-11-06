@@ -441,13 +441,22 @@ export function dedupeExisting() {
   for (const j of unkeyed)
     db.query("UPDATE jobs SET dedupe_key = ?, company_key = ? WHERE id = ?").run(dedupeKey(j.company, j.title), companyKey(j.company), j.id);
   kvSet("dedupe.version", DEDUPE_VERSION);
+  // insertJob folds a posting as it arrives, so once every company has been searched under these rules
+  // only the companies of rows keyed just now can hold a duplicate. Searching one compares each of its
+  // postings with the others, so searching every company on every start took minutes.
+  const companies = stale
+    ? db
+        .query<{ company_key: string }, []>("SELECT company_key FROM jobs GROUP BY company_key HAVING count(*) > 1")
+        .all()
+        .map(g => g.company_key)
+    : [...new Set(unkeyed.map(j => companyKey(j.company)))];
   // Only rows nothing has acted on yet may be folded away; the most advanced row of a set is kept.
   const rank = (st: string) => ({ skipped: 0, found: 1, held: 2, locating: 3, triaged: 3 })[st] ?? 9;
   let merged = 0;
-  for (const g of db.query<{ company_key: string }, []>("SELECT company_key FROM jobs GROUP BY company_key HAVING count(*) > 1").all()) {
+  for (const company of companies) {
     const rows = db
       .query<Job, [string]>("SELECT * FROM jobs WHERE company_key = ?")
-      .all(g.company_key)
+      .all(company)
       .sort((a, b) => rank(b.status) - rank(a.status) || a.id - b.id);
     const kept: Job[] = [];
     for (const r of rows) {

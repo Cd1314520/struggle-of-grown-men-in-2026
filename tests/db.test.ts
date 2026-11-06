@@ -573,10 +573,20 @@ describe("postings, duplicates and sources", () => {
     store.dedupeExisting();
     assert.deepEqual([store.getJob(3).company_key, store.getJob(5).company_key, store.getJob(5).dedupe_key], ["stale", "new", "new|analyst"]);
 
-    // A new rules version re-keys everything.
+    // Postings are folded as they are inserted, so with the rules version recorded only the companies
+    // of rows keyed just now are searched for duplicates: searching all of them takes minutes.
+    job(8, { company: "Other Co", title: "Software Engineer", company_key: "other", dedupe_key: "other|engineer software" });
+    job(9, { company: "Other Co", title: "Software Engineer" });
+    job(10, { company: "Gamma", title: "Analyst", company_key: "gamma", dedupe_key: "gamma|analyst" });
+    job(11, { company: "Gamma", title: "Analyst", company_key: "gamma", dedupe_key: "gamma|analyst" });
+    store.dedupeExisting();
+    assert.deepEqual([4, 8, 9, 10, 11].map(id => store.getJob(id) !== null), [true, false, false, true, true]);
+
+    // A new rules version re-keys everything and searches every company again.
     store.kvSet("dedupe.version", "1");
     store.dedupeExisting();
     assert.equal(store.getJob(3).company_key, "acme");
+    assert.equal(store.getJob(11), null);
   `);
   });
 

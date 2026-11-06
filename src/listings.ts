@@ -9,8 +9,9 @@ import { NOT_STARTED } from "./status";
 // posting. Safe to run on every start. Returns how many moved.
 export function preferUsListings() {
   let moved = 0;
-  for (const job of jobsInStatuses(NOT_STARTED)) {
-    if (job.status === "skipped" || job.submitted_at || isSubmitting(job.id)) continue;
+  // Skipped jobs are most of the table and are never moved: leave them out of the read.
+  for (const job of jobsInStatuses(NOT_STARTED.filter(status => status !== "skipped"))) {
+    if (job.submitted_at || isSubmitting(job.id)) continue;
     const home = jobSources(job.id).find(listing => listing.url !== job.url && betterListing(job, listing));
     if (!home) continue;
     applyThrough(job, home.url, home.source, home.location);
