@@ -44,6 +44,7 @@ An employer is judged once against the description of a target employer (`target
 | fill | read, write, eval (browser) | `prefill` (Claude Code only), `get_account`, `gmail_*`, `ask_user`, `confirm_submit`, `need_manual`, `verify_status`, `report_result` |
 | track | read, write | `gmail_*`, `add_step`, `update_step`, `record_outcome`, `note` |
 | import | read, write, edit, bash (typst) | `finish_import` |
+| interview | read, web_search | `save_brief` |
 
 ## Checks
 
@@ -52,7 +53,7 @@ An employer is judged once against the description of a target employer (`target
 ## Layout
 
 - `src/scheduler.ts`: what runs when. A `Scheduler` holds the state that only exists while the process is up (running workers, which job has which browser) and takes the agent runner and the browser functions as constructor arguments, so it can be driven without either.
-- One module per worker: `src/scan.ts` (sources, triage, discovery), `src/locate.ts`, `src/prep.ts`, `src/fill.ts`, `src/track.ts`. `src/fill-session.ts` is a fill worker's hold on a job and a browser; `src/fill-tools.ts` is the host tools it is given. `src/worker-tools.ts` is what the workers share.
+- One module per worker: `src/scan.ts` (sources, triage, discovery), `src/locate.ts`, `src/prep.ts`, `src/fill.ts`, `src/track.ts`, `src/interview-prep.ts`. `src/fill-session.ts` is a fill worker's hold on a job and a browser; `src/fill-tools.ts` is the host tools it is given. `src/worker-tools.ts` is what the workers share.
 - `src/server.ts`: the HTTP API. `createHandler(scheduler)` answers requests; `main()` starts the server, the proxies and the scheduler, and only runs when the file is the entry point.
 - `ui/`: the web UI, a React and Tailwind app that `src/ui.ts` bundles on request, with no build step.
 - `docs/ui.md`: how `ui/` is laid out, the API it reads, and the design rules every page keeps.

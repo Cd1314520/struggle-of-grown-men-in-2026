@@ -26,6 +26,7 @@ import { fill } from "./fill";
 import { defaultCheckpoint, endSession, ownsFill, stopFailedFill, type Browser, type FillRuntime, type FillSession } from "./fill-session";
 import { beginAttempt, dropManualLease, fillPhase, isRecovering, isSubmitting, isVerifying, lastSlot, manualLeaseGate, markAmbiguous } from "./fill-state";
 import { backedOff, backOff, clearBackoff, countOne, due, usedToday } from "./limits";
+import { briefInterviews } from "./interview-prep";
 import { preferUsListings } from "./listings";
 import { locateEmployerPostings, locatePerDay } from "./locate";
 import { runWorker, type RunWorker } from "./worker";
@@ -51,6 +52,7 @@ import { interruptedImport, runImport, type ImportRun } from "./resume-import";
 import { scanSources } from "./scan";
 import { applicationStarted, FILL_STAGE, PARKED, to } from "./status";
 import { trackMailbox } from "./track";
+import { stepsNeedingBrief } from "./steps";
 
 export interface SchedulerDeps {
   runWorker: RunWorker;
@@ -277,8 +279,14 @@ export class Scheduler {
     });
   }
 
-  track() {
-    return this.exclusive("track", () => trackMailbox(this.run));
+  async track() {
+    await this.exclusive("track", () => trackMailbox(this.run));
+    await this.interviewPrep();
+  }
+
+  interviewPrep() {
+    if (backedOff() || !stepsNeedingBrief(1).length) return Promise.resolve();
+    return this.exclusive("interview-prep", () => briefInterviews(this.run));
   }
 
   recheck() {
@@ -501,6 +509,7 @@ export class Scheduler {
         void this.track();
       }
       if (!this.isRunning("recheck") && !profileProblems().length && (bankDue() || recheckDue())) void this.recheck();
+      if (!this.isRunning("interview-prep") && stepsNeedingBrief(1).length) void this.interviewPrep();
       retryPassingHandoffs();
       this.pump();
     };

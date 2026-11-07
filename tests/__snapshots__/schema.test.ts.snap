@@ -1,7 +1,7 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
 exports[`schema migrations produces exactly the recorded schema 1`] = `
-"version 9
+"version 10
 
 CREATE TRIGGER jobs_blockers_forgotten AFTER DELETE ON jobs
 BEGIN
@@ -86,7 +86,7 @@ created_at TEXT NOT NULL DEFAULT (datetime('now')),
 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
 done_at TEXT,
 done_note TEXT,       -- the user's own note on doing it
-closed_at TEXT,
+closed_at TEXT, brief TEXT, brief_at TEXT, brief_tries INTEGER NOT NULL DEFAULT 0,
 CHECK (state != 'scheduled' OR scheduled_at IS NOT NULL)
 );
 

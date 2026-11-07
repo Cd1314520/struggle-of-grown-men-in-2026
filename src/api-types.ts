@@ -15,6 +15,8 @@ export type Highlight = Omit<EventRow, "worker"> & { company: string | null; tit
 export interface AppState {
   jobs: ListedJob[];
   counts: Record<string, number>;
+  quiet: number;
+  quietDays: number;
   questionGroups: QuestionGroup[];
   digest: DigestStatus;
   events: EventRow[];

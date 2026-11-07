@@ -348,7 +348,7 @@ describe("schema migrations", () => {
       return db;
     };
     const upgrade = (db: Database) => {
-      expect(migrate(db).map(m => m.name)).toEqual(["state machines"]);
+      expect(migrate(db, MIGRATIONS.slice(0, 9)).map(m => m.name)).toEqual(["state machines"]);
     };
 
     it("maps each combination of the old fill flags to a phase", () => {

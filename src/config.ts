@@ -10,7 +10,7 @@ export const PROMPTS = join(ROOT, "prompts");
 
 mkdirSync(join(DATA, "jobs"), { recursive: true });
 
-export const MODEL_STAGES = ["triage", "discover", "locate", "screen", "prep", "fill", "track", "recheck", "import"] as const;
+export const MODEL_STAGES = ["triage", "discover", "locate", "screen", "prep", "fill", "track", "recheck", "import", "interview"] as const;
 export type ModelStage = (typeof MODEL_STAGES)[number];
 
 export interface Config {
@@ -20,7 +20,7 @@ export interface Config {
   mailbox: string | null;
   approval: "auto" | "gated";
   targets: { holdBack: boolean; describe?: string | null };
-  models: Record<Exclude<ModelStage, "import">, string | null> & { import?: string | null };
+  models: Record<Exclude<ModelStage, "import" | "interview">, string | null> & { import?: string | null; interview?: string | null };
   autoApply?: {
     minScore?: number;
     allowConcerns?: boolean;
@@ -28,6 +28,7 @@ export interface Config {
     perEmployer?: number;
   };
   schedule: { scanMinutes: number; discoverMinutes: number; trackMinutes: number };
+  quietDays?: number;
   questionDigest?: { enabled: boolean; time: string; timeZone: string };
   feeds?: Record<string, { minutes: number; [param: string]: unknown }>;
   boards?: import("./boards").Boards;

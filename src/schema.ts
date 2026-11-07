@@ -443,6 +443,14 @@ function stateMachines(db: Database) {
   ]);
 }
 
+function interviewBriefs(db: Database) {
+  runEach(db, [
+    "ALTER TABLE application_steps ADD COLUMN brief TEXT",
+    "ALTER TABLE application_steps ADD COLUMN brief_at TEXT",
+    "ALTER TABLE application_steps ADD COLUMN brief_tries INTEGER NOT NULL DEFAULT 0",
+  ]);
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: "baseline", up: baseline },
   { version: 2, name: "status history", up: statusHistory },
@@ -453,6 +461,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 7, name: "answer bank", up: answerBank },
   { version: 8, name: "gate reasons", up: gateReasons },
   { version: 9, name: "state machines", up: stateMachines },
+  { version: 10, name: "interview briefs", up: interviewBriefs },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

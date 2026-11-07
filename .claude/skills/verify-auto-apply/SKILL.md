@@ -74,7 +74,7 @@ Primary surface: the web UI, driven with the Playwright MCP browser tools (`mcp_
 | `#review`, `#review/<id>` | The approval queue. On a desktop a job is always open: `#review` becomes `#review/<first id>` |
 | `#questions`, `#questions/<group key>` | One question at a time beside the queue (the first opens by itself on a desktop) |
 | `#pipeline?group=<stage>`, `#pipeline/<id>` | Applications past review, by stage: `needs_you`, `questions`, `failed`, `applying`, `assessing`. Without `group` it opens on the first stage holding anything; a linked job opens on its own stage |
-| `#applications?group=<g>`, `#applications/<id>` | Sent applications: `offer`, `your_move`, `upcoming`, `waiting`, `no_reply`, `closed` |
+| `#applications?group=<g>`, `#applications/<id>` | Sent applications: `offer`, `your_move`, `upcoming`, `waiting`, `quiet`, `no_reply`, `closed` |
 | `#archive/held`, `#archive/rejected`, `#archive/<held\|rejected>/<id>` | Jobs set aside; the job opens in a panel over the table (`#archive` is Held) |
 | `#activity?kind=<k>`, `#activity/blockers?cause=<c>`, `#activity/log?kind=<k>` | Highlights (`gate`, `user`, `error`, `system`, `mail`), every stop by cause, the raw event log |
 | `#profile/<file>` | A profile file (`targets.md`, `rubric.yml`, `main.typ`, `resume-notes.md`, `answers.md`, `personal.yml`, `companies.yml`); bare `#profile` opens the first still to fill in |

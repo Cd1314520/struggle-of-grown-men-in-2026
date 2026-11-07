@@ -1,3 +1,4 @@
+import { config } from "./config";
 import { db, getJob, moveJob, notifyJobChange, type Job } from "./db";
 import { canMove, SENT, to, type Status } from "./status";
 
@@ -7,7 +8,7 @@ export const STEP_STATES = ["todo", "done", "scheduled", "closed", "expired", "c
 export type StepState = (typeof STEP_STATES)[number];
 const OPEN: readonly StepState[] = ["todo", "done", "scheduled"];
 const IN_PROCESS: readonly Status[] = ["submitted", "interview", "offer"];
-export const QUIET_DAYS = 7;
+export const QUIET_DAYS_DEFAULT = 14;
 
 export interface Step {
   id: number;
@@ -26,6 +27,9 @@ export interface Step {
   done_at: string | null;
   done_note: string | null;
   closed_at: string | null;
+  brief: string | null;
+  brief_at: string | null;
+  brief_tries: number;
 }
 
 export const stepMs = (s: string) => (s.length === 10 ? Date.parse(`${s}T23:59:59Z`) : Date.parse(s.includes("T") ? s : `${s.replace(" ", "T")}Z`));
@@ -168,6 +172,12 @@ export function recordOutcome(jobId: number, outcome: "reopen" | "offer" | "reje
   return moved;
 }
 
+// Quiet only after a step that really happened: the candidate did their part (done), a booked time passed (scheduled) or it was closed after
+// taking place. Expired and cancelled steps, and an application with no step at all, never read as quiet.
+const QUIET_STATES: readonly StepState[] = ["done", "scheduled", "closed"];
+const DAY_MS = 86400_000;
+export const quietDays = () => config.quietDays ?? QUIET_DAYS_DEFAULT;
+
 export interface NextStep {
   whose: "you" | "upcoming" | "them";
   at: string;
@@ -183,7 +193,7 @@ export function nextStepOf(steps: readonly Step[], now = Date.now()): NextStep |
     due,
     kind: s.kind,
     label: s.title,
-    quiet: whose === "them" && now - stepMs(at) >= QUIET_DAYS * 86400_000,
+    quiet: whose === "them" && QUIET_STATES.includes(s.state) && now - stepMs(at) >= quietDays() * DAY_MS,
   });
   const todo = steps
     .filter(s => s.state === "todo")
@@ -232,3 +242,64 @@ export const stepOf = (jobId: number, stepId: number) => {
   const step = getStep(stepId);
   return step?.job_id === jobId ? step : null;
 };
+
+export interface QuietApplication {
+  job_id: number;
+  company: string;
+  title: string;
+  label: string;
+  kind: StepKind;
+  since: string;
+  days: number;
+}
+/** Open in-process applications waiting on the employer past `quietDays`, longest quiet first. Passive: nothing acts on these. */
+export function quietApplications(now = Date.now()): QuietApplication[] {
+  const next = nextSteps(now);
+  const jobs = db
+    .query<{ id: number; company: string; title: string }, [string]>("SELECT id, company, title FROM jobs WHERE id IN (SELECT value FROM json_each(?))")
+    .all(JSON.stringify([...next.keys()]));
+  return jobs
+    .flatMap(j => {
+      const n = next.get(j.id);
+      return n?.whose === "them" && n.quiet
+        ? [{ job_id: j.id, company: j.company, title: j.title, label: n.label, kind: n.kind, since: n.at, days: Math.floor((now - stepMs(n.at)) / DAY_MS) }]
+        : [];
+    })
+    .sort((a, b) => b.days - a.days || a.job_id - b.job_id);
+}
+
+export const BRIEF_TRIES = 2;
+
+export type BriefStep = Step & { company: string; title_of_job: string };
+/** Open interview steps with no brief yet, oldest first. A booked time that has passed no longer needs one. */
+export function stepsNeedingBrief(limit: number, now = Date.now()): BriefStep[] {
+  return db
+    .query<BriefStep, [number]>(
+      `
+      SELECT s.*, j.company, j.title AS title_of_job
+      FROM application_steps s JOIN jobs j ON j.id = s.job_id
+      WHERE s.kind = 'interview' AND s.state IN ('todo', 'scheduled') AND s.brief IS NULL AND s.brief_tries < ?
+        AND j.status IN ('submitted', 'interview')
+      ORDER BY s.id`,
+    )
+    .all(BRIEF_TRIES)
+    .filter(s => s.state === "todo" || !s.scheduled_at || stepMs(s.scheduled_at) > now)
+    .slice(0, limit);
+}
+
+export function saveBrief(stepId: number, markdown: string) {
+  const step = getStep(stepId);
+  if (!step) return;
+  const at = new Date().toISOString();
+  db.query("UPDATE application_steps SET brief = ?, brief_at = ?, updated_at = ? WHERE id = ?").run(markdown, at, at, stepId);
+  notifyJobChange(step.job_id);
+}
+
+export const bumpBriefTries = (stepId: number) => void db.query("UPDATE application_steps SET brief_tries = brief_tries + 1 WHERE id = ?").run(stepId);
+
+export function clearBrief(stepId: number) {
+  const step = getStep(stepId);
+  if (!step) return;
+  db.query("UPDATE application_steps SET brief = NULL, brief_at = NULL, brief_tries = 0, updated_at = ? WHERE id = ?").run(new Date().toISOString(), stepId);
+  notifyJobChange(step.job_id);
+}

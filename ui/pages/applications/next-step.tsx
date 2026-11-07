@@ -15,7 +15,7 @@ function nextPhrase(next: NextStep, short = false, now = Date.now()): { text: st
   if (next.whose === "you") return { text: `Asked ${short ? agoShort(at) : ago(at)}`, hint: `Asked ${when}`, tone: "text-warning-text" };
   if (next.whose === "upcoming") return { text: `Booked in ${span(at - now)}`, hint: `Booked for ${when}`, tone: "text-info-text" };
   return next.quiet
-    ? { text: `Quiet for ${span(now - at)}`, hint: `Waiting on them since ${when}`, tone: "text-fg-muted" }
+    ? { text: `Quiet for ${span(now - at)}`, hint: `Waiting on them since ${when}`, tone: "text-warning-text" }
     : { text: `Waiting ${span(now - at)}`, hint: `Waiting on them since ${when}`, tone: "text-fg-muted" };
 }
 

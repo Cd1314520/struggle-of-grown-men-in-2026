@@ -12,6 +12,7 @@ import { Kpis } from "./kpis";
 import { attentionRows, NeedsYou } from "./needs-you";
 import { Recent } from "./recent";
 import { Trend } from "./trend";
+import { Quiet } from "./quiet";
 import { Upcoming } from "./upcoming";
 
 const greeting = (hour: number) => (hour < 5 ? "Good evening" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening");
@@ -97,6 +98,7 @@ export function OverviewPage() {
           <div className="@container/ws">
             <Health summary={s} />
             <Upcoming />
+            <Quiet />
             <Recent />
           </div>
         }

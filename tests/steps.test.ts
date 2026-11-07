@@ -66,7 +66,7 @@ describe("application steps", () => {
     steps.changeStep(a, { state: "done" });
     next = steps.nextSteps(now).get(1);
     assert.equal(next.whose, "them"); assert.equal(next.quiet, false);
-    assert.equal(steps.nextSteps(Date.now() + 8 * DAY).get(1).quiet, true);
+    assert.equal(steps.nextSteps(Date.now() + 15 * DAY).get(1).quiet, true);
     const c = steps.addStep(getJob(1), { kind: "schedule", title: "Onsite", source: "user" }).id;
     assert.throws(() => steps.changeStep(c, { state: "scheduled" }), /time/);
     steps.changeStep(c, { state: "scheduled", scheduled_at: at(now + 2 * DAY) });
@@ -97,6 +97,39 @@ describe("application steps", () => {
     steps.recordOutcome(2, "withdrawn", "no longer interested");
     steps.recordOutcome(2, "reopen", "reopened by you");
     assert.equal(getJob(2).status, "submitted");
+  `);
+  });
+
+  it("calls an application quiet once the wait reaches quietDays, and only after a step", () => {
+    scenario(`
+    import { config } from ${JSON.stringify(join(import.meta.dir, "../src/config.ts"))};
+    job(1);
+    job(2);
+    job(3);
+    const a = steps.addStep(getJob(1), { kind: "assessment", title: "OA", source: "mail" }).id;
+    steps.changeStep(a, { state: "done" });
+    const since = Date.parse(steps.getStep(a).done_at);
+    assert.equal(steps.quietDays(), 14);
+    config.quietDays = 5;
+    assert.equal(steps.quietDays(), 5);
+    assert.equal(steps.nextSteps(since + 5 * DAY - 1).get(1).quiet, false);
+    assert.equal(steps.nextSteps(since + 5 * DAY).get(1).quiet, true);
+    assert.deepEqual(steps.quietApplications(since + 7 * DAY + 1000).map(q => [q.job_id, q.company, q.label, q.kind, q.days]), [[1, "Acme", "OA", "assessment", 7]]);
+    assert.deepEqual(steps.quietApplications(since + 4 * DAY), []);
+
+    // no step at all: sent and nothing back, never quiet however long
+    assert.equal(steps.nextSteps(since + 400 * DAY).has(2), false);
+    assert.equal(steps.quietApplications(since + 400 * DAY).some(q => q.job_id === 2), false);
+
+    // a step still to do is the user's move, not the employer's silence
+    const todo = steps.addStep(getJob(3), { kind: "assessment", title: "Take-home", source: "mail" }).id;
+    assert.deepEqual([steps.nextSteps(since + 400 * DAY).get(3).whose, steps.nextSteps(since + 400 * DAY).get(3).quiet], ["you", false]);
+
+    // an expired or cancelled step is not a step the candidate took
+    steps.changeStep(todo, { state: "expired" });
+    assert.deepEqual([steps.nextSteps(since + 400 * DAY).get(3).whose, steps.nextSteps(since + 400 * DAY).get(3).quiet], ["them", false]);
+    steps.changeStep(todo, { state: "closed" });
+    assert.equal(steps.nextSteps(Date.now() + 6 * DAY).get(3).quiet, true);
   `);
   });
 

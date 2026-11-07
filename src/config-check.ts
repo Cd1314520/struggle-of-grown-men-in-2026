@@ -65,7 +65,10 @@ const CONFIG = shape(
     port,
     approval: oneOf("auto", "gated"),
     targets: shape({ holdBack: bool }, { describe: orNull(words) }),
-    models: shape({ triage: model, discover: model, locate: model, screen: model, prep: model, fill: model, track: model, recheck: model }, { import: model }),
+    models: shape(
+      { triage: model, discover: model, locate: model, screen: model, prep: model, fill: model, track: model, recheck: model },
+      { import: model, interview: model },
+    ),
     schedule: shape({ scanMinutes: amount(), discoverMinutes: amount(), trackMinutes: amount() }),
     concurrency: shape({ prep: count() }, { fill: count(1) }),
     limits: shape({ prepPerDay: count(), applyPerDay: count() }, { locatePerDay: count(), applySpreadHours: amount() }),
@@ -75,6 +78,7 @@ const CONFIG = shape(
   },
   {
     publicUrl: orNull(url),
+    quietDays: count(1),
     vncUrl: orNull(url),
     mailbox: orNull(matching(/^\S+@\S+$/, "an email address")),
     autoApply: shape({}, { minScore: amount(), allowConcerns: bool, perDay: count(), perEmployer: count() }),
