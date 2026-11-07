@@ -1,7 +1,9 @@
 // Agent workers, whichever harness runs them: one process per unit of work, given a prompt and the
 // app's "host tools". The agent calls back into those tools; that is the only channel through which a
 // worker changes application state. The stage's model picks the harness: `claude-code/<model>` runs
-// on Claude Code (src/claude.ts), `codex/<model>` on Codex (src/codex.ts), anything else on omp (src/omp.ts).
+// on Claude Code (src/claude.ts), `codex/<model>` on Codex (src/codex.ts), `antigravity/<model>` on
+// Google's Antigravity CLI (src/antigravity.ts), anything else on omp (src/omp.ts).
+import { killAgyWorkers, runAntigravity } from "./antigravity";
 import { killClaudeWorkers, runClaude } from "./claude";
 import { killCodexWorkers, runCodex } from "./codex";
 import { MODEL_STAGES, type ModelStage } from "./config";
@@ -84,19 +86,32 @@ export interface WorkerHandle {
   abort: () => void;
 }
 
-export type HarnessId = "omp" | "claude-code" | "codex";
+export type HarnessId = "omp" | "claude-code" | "codex" | "antigravity";
 export const CLAUDE_PREFIX = "claude-code/";
 export const CODEX_PREFIX = "codex/";
+export const AGY_PREFIX = "antigravity/";
+// The model a selector names, after the harness prefix, and the reasoning effort asked for with an
+// `@<effort>` suffix: `codex/gpt-6.1-terra@low` (Codex's model_reasoning_effort),
+// `claude-code/claude-sonnet-5-5@low` (Claude Code's --effort). agy's models carry it in the name
+// (`antigravity/gemini-3.8-flash-low`).
+export function modelEffort(selector: string | null | undefined, prefix: string): { model: string; effort: string | null } {
+  const rest = selector?.slice(prefix.length) ?? "";
+  const m = /^(.*)@(low|medium|high|xhigh|max)$/.exec(rest);
+  return m ? { model: m[1] ?? "", effort: m[2] ?? null } : { model: rest, effort: null };
+}
+
 // null is omp's default model.
 export const harnessOf = (model: string | null | undefined): HarnessId =>
-  model?.startsWith(CLAUDE_PREFIX) ? "claude-code" : model?.startsWith(CODEX_PREFIX) ? "codex" : "omp";
+  model?.startsWith(CLAUDE_PREFIX) ? "claude-code" : model?.startsWith(CODEX_PREFIX) ? "codex" : model?.startsWith(AGY_PREFIX) ? "antigravity" : "omp";
 
-// Claude Code and Codex both reach the browser through Playwright's MCP server, not omp's browser tool.
+// Claude Code, Codex and agy all reach the browser through Playwright's MCP server, not omp's browser tool.
 export const usesPlaywright = (model: string | null | undefined) => harnessOf(model) !== "omp";
 
 export function runWorker(opts: WorkerOptions): WorkerHandle {
   const harness = harnessOf(opts.model);
-  return harness === "claude-code" ? runClaude(opts) : harness === "codex" ? runCodex(opts) : runOmp(opts);
+  if (harness === "claude-code") return runClaude(opts);
+  if (harness === "codex") return runCodex(opts);
+  return harness === "antigravity" ? runAntigravity(opts) : runOmp(opts);
 }
 
 export const stageOf = (opts: Pick<WorkerOptions, "name" | "stage">): ModelStage | null => opts.stage ?? MODEL_STAGES.find(s => s === opts.name) ?? null;
@@ -105,6 +120,7 @@ export const killAllWorkers = () => {
   killOmpWorkers();
   killClaudeWorkers();
   killCodexWorkers();
+  killAgyWorkers();
 };
 
 // "20m", "24h", "90s" in milliseconds.

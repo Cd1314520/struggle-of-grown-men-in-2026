@@ -1,6 +1,7 @@
-// The models agents run on: which ones omp, Claude Code and Codex can reach, and the choice per stage. A choice made in the
+// The models agents run on: which ones omp, Claude Code, Codex and agy can reach, and the choice per stage. A choice made in the
 // app is written to config.local.yml (laid over config.yml) and to the loaded config, so the next
 // worker of that stage uses it without a restart.
+import { agyCatalog } from "./antigravity";
 import { config, LOCAL_CONFIG, MODEL_STAGES, type ModelStage } from "./config";
 import { claudeCatalog } from "./claude";
 import { codexCatalog } from "./codex";
@@ -9,7 +10,7 @@ import { setSetting } from "./settings";
 import type { HarnessId } from "./worker";
 
 export interface CatalogModel {
-  selector: string; // what a stage names: "<provider>/<id>", "claude-code/<model>" or "codex/<model>"
+  selector: string; // what a stage names: "<provider>/<id>", "claude-code/<model>", "codex/<model>" or "antigravity/<model>"
   provider: string;
   name: string;
   contextWindow: number | null;
@@ -26,19 +27,21 @@ export interface ModelCatalog {
 export const isModelStage = (v: unknown): v is ModelStage => MODEL_STAGES.some(s => s === v);
 
 // `omp models --json` reads the providers this machine is logged in to, `claude auth status`
-// whether Claude Code is signed in, and `codex debug models` what the app's Codex sign-in offers. That takes a second or two, so the list is kept for a while;
+// whether Claude Code is signed in, `codex debug models` what the app's Codex sign-in offers, and
+// `agy models` what agy's sign-in offers. That takes a second or two, so the list is kept for a while;
 // `refresh` asks again (after `omp login` or `claude auth login`, say).
 const KEEP_MS = 10 * 60_000;
 let cached: ModelCatalog | null = null;
 export async function modelCatalog(refresh = false): Promise<ModelCatalog> {
   if (cached && !refresh && Date.now() - Date.parse(cached.at) < KEEP_MS) return cached;
   const at = new Date().toISOString();
-  const [omp, claude, codex] = await Promise.all([ompCatalog(), claudeCatalog(), codexCatalog()]);
+  const [omp, claude, codex, agy] = await Promise.all([ompCatalog(), claudeCatalog(), codexCatalog(), agyCatalog()]);
   const errors: ModelCatalog["errors"] = {};
   if (omp.error) errors.omp = omp.error;
   if (claude.error) errors["claude-code"] = claude.error;
   if (codex.error) errors.codex = codex.error;
-  cached = { models: [...omp.models, ...claude.models, ...codex.models], errors, at };
+  if (agy.error) errors.antigravity = agy.error;
+  cached = { models: [...omp.models, ...claude.models, ...codex.models, ...agy.models], errors, at };
   return cached;
 }
 

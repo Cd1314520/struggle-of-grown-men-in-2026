@@ -13,7 +13,7 @@ import { config, DATA, PROMPTS } from "./config";
 import { logEvent } from "./db";
 import { errorMessage } from "./errors";
 import type { CatalogModel } from "./models";
-import { CODEX_PREFIX, durationMs, type WorkerHandle, type WorkerOptions, type WorkerResult } from "./worker";
+import { CODEX_PREFIX, durationMs, modelEffort, type WorkerHandle, type WorkerOptions, type WorkerResult } from "./worker";
 
 export const codexHome = () => process.env["AUTO_APPLY_CODEX_HOME"] ?? join(DATA, "codex");
 
@@ -112,7 +112,7 @@ export function runCodex(opts: WorkerOptions): WorkerHandle {
     log("error", `${opts.name} worker error: ${error}`);
     return { done: Promise.resolve({ status: "error", error, lastText: "" }), abort: () => undefined };
   }
-  const model = opts.model?.slice(CODEX_PREFIX.length) ?? "";
+  const { model, effort } = modelEffort(opts.model, CODEX_PREFIX);
   const host = serveHostTools(opts.tools, log);
   const tokenVar = "AUTO_APPLY_HOST_TOKEN";
   const token = host.config.headers.Authorization.replace(/^Bearer /, "");
@@ -161,6 +161,7 @@ export function runCodex(opts: WorkerOptions): WorkerHandle {
     );
   }
   if (model && model !== "default") args.push("-m", model);
+  if (effort) args.push(...set("model_reasoning_effort", effort));
   args.push("-");
 
   const home = codexHome();

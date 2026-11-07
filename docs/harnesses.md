@@ -6,11 +6,20 @@ Every piece of agent work is one process started by `runWorker` (`src/worker.ts`
 |---|---|---|
 | `claude-code/<model>`: `claude-code/opus`, `claude-code/sonnet`, `claude-code/default`, or a full model name such as `claude-code/claude-opus-5-5` | Claude Code, `claude -p`, signed in as `claude auth status` shows | `src/claude.ts` |
 | `codex/<model>`: `codex/gpt-6-luna`, `codex/gpt-6-sol`, or `codex/default` for Codex's own default | Codex, `codex exec --json`, signed in under the app's own `CODEX_HOME` (`data/codex`, `bun run codex:login`) | `src/codex.ts` |
+| `antigravity/<model>`: `antigravity/gemini-3.8-flash-medium`, `antigravity/gemini-4-argon-high` (the slugs `agy models` lists), or `antigravity/default` | Google's Antigravity CLI, `agy` headless with stream-json in and out (no `-p`: the prompt comes on stdin), signed in by running `agy` once in a terminal (the sign-in is kept in the system keyring) | `src/antigravity.ts` |
 | anything else, or null (omp's default) | omp, `omp --mode rpc` | `src/omp.ts` |
 
 Each stage picks its own, so filling can stay on omp while assessing runs on Claude Code or Codex. Settings → Models lists all three: omp's own listing, Claude Code's aliases once `claude` is signed in, and the models Codex shows in its picker (`codex debug models`) once the app's Codex home is signed in. Setup requires only the harnesses the stages use, and `npx` when a Claude Code or Codex model fills applications.
 
 The Codex binary is `AUTO_APPLY_CODEX` if set, else `codex` on the PATH, else (on Windows) the Codex desktop app's own CLI, found once through `Get-AppxPackage OpenAI.Codex`.
+
+The agy binary is `AUTO_APPLY_AGY` if set, else `agy` on the PATH, else `%LOCALAPPDATA%gyingy.exe`, where its installer puts it (`irm https://antigravity.google/cli/install.ps1 | iex`).
+
+A Codex or Claude Code model takes a reasoning effort as an `@<effort>` suffix (low, medium, high, xhigh, max): `codex/gpt-6.1-terra@low` sets Codex's `model_reasoning_effort`, `claude-code/claude-sonnet-5-5@low` passes `--effort low`. agy's models carry it in their name (`antigravity/gemini-3.8-flash-low`).
+
+## Antigravity (agy)
+
+agy takes MCP servers only from files, so each worker writes the host server (and, for a browser worker, Playwright's) into `.agents/mcp_config.json` in its working directory for the run, and removes it afterwards (putting back one that was there). Workers that share a directory (`data/work`) start there one at a time; fills each have their own job directory. The host tools are loaded eagerly; Playwright's are reached through agy's `call_mcp_tool`, with `browser_close`, `browser_fill_form` and `browser_run_code_unsafe` disabled. The prompt, with `prompts/system.md` first, goes in on stdin as one stream-json `user` message, since a fill prompt is longer than a Windows command line may be, and stdin stays open until the `result` event, since agy ends the session when it closes. Tools are approved with `--dangerously-skip-permissions`; agy has no flag that limits a worker to the built-ins it was given, so a read-only worker can still write. agy also has its own browser and web tools (`open_browser_url`, `browser_click_element`, `search_web`, ...) and no setting turns them off: a browser worker is told not to use them, and a step that does is logged as an error. The owner's own agy settings and global MCP servers (`~/.gemini/`) still load. A `result` with a status other than `SUCCESS` is an error; one about a quota (`RESOURCE_EXHAUSTED`, "quota exceeded") counts as capacity, and so does agy (or any harness) not being installed or signed in, so the work moves to the next model. Written against agy's documentation (headless mode, MCP) and a fake; not yet run against the real CLI.
 
 ## Usage limits and fallbacks
 

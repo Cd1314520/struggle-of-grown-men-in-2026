@@ -33,6 +33,13 @@ describe("capacity refusals", () => {
     expect(isCapacityError("529 overloaded")).toBe(true);
     expect(isCapacityError("the tool crashed")).toBe(false);
   });
+
+  it("count a harness that is not installed or not signed in, so the next model takes the work", () => {
+    expect(isCapacityError("agy is not installed")).toBe(true);
+    expect(isCapacityError("agy is not signed in (run agy once in a terminal to sign in)")).toBe(true);
+    expect(isCapacityError("codex is not installed")).toBe(true);
+    expect(isCapacityError("Chrome is not installed")).toBe(false);
+  });
 });
 
 describe("which model and account a worker runs on", () => {

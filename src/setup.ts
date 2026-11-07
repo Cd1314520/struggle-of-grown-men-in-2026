@@ -11,6 +11,7 @@ import type { ModelCatalog } from "./models";
 import { isExample, profileProblems } from "./profile";
 import { stockResume } from "./resume";
 import { codexBinary } from "./codex";
+import { agyBinary } from "./antigravity";
 import { stageModels } from "./providers";
 import { harnessOf, usesPlaywright, type HarnessId } from "./worker";
 
@@ -51,7 +52,13 @@ const PROGRAMS: { name: string; purpose: string; required: () => boolean; found?
     required: () => onHarness("codex"),
     found: () => !!codexBinary(),
   },
-  { name: "npx", purpose: "Starts Playwright's browser tools for a Claude Code or Codex fill", required: () => stageModels("fill").some(usesPlaywright) },
+  {
+    name: "agy",
+    purpose: "Runs the agents on Google's Antigravity CLI (antigravity/…); sign in by running agy once",
+    required: () => onHarness("antigravity"),
+    found: () => !!agyBinary(),
+  },
+  { name: "npx", purpose: "Starts Playwright's browser tools for a Claude Code, Codex or agy fill", required: () => stageModels("fill").some(usesPlaywright) },
   { name: "typst", purpose: "Compiles the stock and tailored resumes", required: () => true },
   { name: WINDOWS ? "chrome" : "google-chrome", purpose: "The browsers applications are filled in", required: () => true, found: () => !!chromeBinary() },
   { name: "Xvfb", purpose: "Virtual displays for the browsers", required: () => !WINDOWS },
@@ -80,10 +87,10 @@ function tools() {
 }
 
 // A stage's model is known when its harness lists it under that exact name. omp also matches names
-// loosely ("opus"), and Claude Code and Codex take any full model name, so an unlisted name is a
+// loosely ("opus"), and Claude Code, Codex and agy take any full model name, so an unlisted name is a
 // warning, not a failure.
 function models(catalog: ModelCatalog | null) {
-  if (!catalog) return step("models", [check("catalog", "Model provider", false, "Checking what omp, Claude Code and Codex can reach…", false)]);
+  if (!catalog) return step("models", [check("catalog", "Model provider", false, "Checking what omp, Claude Code, Codex and agy can reach…", false)]);
   const known = new Set(catalog.models.flatMap(m => [m.selector, m.selector.slice(m.provider.length + 1)]));
   const reachable = catalog.models.length > 0;
   const harness = (h: HarnessId, label: string) => {
@@ -98,11 +105,12 @@ function models(catalog: ModelCatalog | null) {
       reachable,
       reachable
         ? `${catalog.models.length} models from ${new Set(catalog.models.map(m => m.provider)).size} providers`
-        : Object.values(catalog.errors).join("; ") || "No models listed: log in to omp, Claude Code or Codex",
+        : Object.values(catalog.errors).join("; ") || "No models listed: log in to omp, Claude Code, Codex or agy",
     ),
     harness("omp", "omp"),
     harness("claude-code", "Claude Code"),
     harness("codex", "Codex"),
+    harness("antigravity", "Antigravity (agy)"),
     ...MODEL_STAGES.map(stage => {
       const model = config.models[stage] ?? null;
       const ok = model === null || !reachable || known.has(model) || harnessOf(model) !== "omp";

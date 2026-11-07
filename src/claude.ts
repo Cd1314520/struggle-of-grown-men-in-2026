@@ -12,7 +12,17 @@ import { config, DATA, PROMPTS } from "./config";
 import { logEvent } from "./db";
 import { errorMessage } from "./errors";
 import type { CatalogModel } from "./models";
-import { CLAUDE_PREFIX, durationMs, type Builtin, type HostTool, type ToolArgs, type WorkerHandle, type WorkerOptions, type WorkerResult } from "./worker";
+import {
+  CLAUDE_PREFIX,
+  durationMs,
+  modelEffort,
+  type Builtin,
+  type HostTool,
+  type ToolArgs,
+  type WorkerHandle,
+  type WorkerOptions,
+  type WorkerResult,
+} from "./worker";
 
 // Overridable so a test can stand in a fake. A fake in TypeScript runs under Bun: Windows does not
 // start a script from its shebang.
@@ -162,7 +172,7 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
   const log = (kind: string, message: string) => {
     logEvent(kind, message, opts.jobId, opts.name);
   };
-  const model = opts.model?.slice(CLAUDE_PREFIX.length) ?? "";
+  const { model, effort } = modelEffort(opts.model, CLAUDE_PREFIX);
   const sessionId = randomUUID();
   const host = serveHostTools(opts.tools, log);
   const servers: Record<string, unknown> = { host: host.config };
@@ -190,6 +200,7 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
     sessionId,
   ];
   if (model && model !== "default") args.push("--model", model);
+  if (effort) args.push("--effort", effort);
   // Closing the page would lose the application's tab, a form filled all at once gets flagged as a
   // bot, and running code in Playwright's own process is outside anything a worker needs.
   if (opts.browser) args.push("--disallowedTools", ["browser_close", "browser_fill_form", "browser_run_code_unsafe"].map(t => `mcp__browser__${t}`).join(","));

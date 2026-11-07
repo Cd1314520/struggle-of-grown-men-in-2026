@@ -2,9 +2,13 @@
 export const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 // The model provider turned the request away for load or quota, not because of the job: the same
-// work can run again once it has capacity.
+// work can run again once it has capacity. A harness that is not installed or not signed in counts
+// too, so the work moves to the next model in the stage's chain instead of failing every job.
 export const isCapacityError = (message: string | null | undefined): boolean =>
-  !!message && /at capacity|rate[ _-]?limit|too many requests|\b429\b|overloaded|usage limit|hit your (?:\w+ )?limit/i.test(message);
+  !!message &&
+  /at capacity|rate[ _-]?limit|too many requests|\b429\b|overloaded|usage limit|hit your (?:\w+ )?limit|quota (?:exceeded|exhausted)|exceeded (?:your |the )?(?:\w+ )?quota|resource[ _-]?exhausted|\b(?:agy|codex|claude|omp) is not (?:installed|signed in)/i.test(
+    message,
+  );
 
 // When a capacity refusal says it lifts, in ms since the epoch, or null when it says no time in a
 // form read here or names one already past:

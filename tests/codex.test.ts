@@ -93,6 +93,15 @@ describe("a Codex worker", () => {
     expect(prompt).toContain('"host" MCP server');
   });
 
+  it("asks for the reasoning effort a model@effort selector names", async () => {
+    await run({ tool: "report_result", args: {} }, { tools: report }).done;
+    expect(settings(given().argv)["model_reasoning_effort"]).toBeUndefined();
+    await run({ tool: "report_result", args: {} }, { tools: report, model: "codex/gpt-6.1-terra@low" }).done;
+    const { argv } = given();
+    expect(flag(argv, "-m")).toBe("gpt-6.1-terra");
+    expect(settings(argv)["model_reasoning_effort"]).toBe("low");
+  });
+
   it("loads no skills from the owner's home or its own", async () => {
     const userHome = join(dir, "user-home");
     for (const root of [join(userHome, ".agents", "skills", "owner-skill"), join(home, "skills", "home-skill")]) {
