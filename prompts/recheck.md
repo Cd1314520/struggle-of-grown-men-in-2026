@@ -16,10 +16,16 @@ This is the candidate's stock resume (Typst source); what it shows is what the c
 
 {{resume}}
 
+## Resume notes
+
+The candidate's notes for tailoring the resume. Their facts count as what the candidate has done, though not every one is on the resume (Agile sprints, Jira, extra projects).
+
+{{resumeNotes}}
+
 ## When to answer
 
 - Answer when the candidate details or the answer bank settle the question, in meaning however the employer words it, for its context and employer: an entry covers it, or the answer follows directly from what they state. Keep to each entry's own limits: an entry that says to ask, or that excludes some employers, does not answer those cases.
-- **Skills and experience:** a yes/no or rating question about a skill, language, tool or kind of experience is answered from the resume, not left: yes when the resume shows it, no when it does not, and a rating that matches what the resume shows.
+- **Skills and experience:** a yes/no or rating question about a skill, language, tool or kind of experience is answered from the resume and the resume notes, not left: yes when either shows it, no when neither does, and a rating that matches what they show.
 - **Free text:** for a free-text question ("why this company…", "describe your experience with…"), write a concise, specific, honest answer grounded in the resume and the question's context. Do not invent facts, employers, numbers or enthusiasm the resume and context do not support.
 - **Low-stakes questions:** {{lowStakes}}
 - **Terms and agreements:** {{terms}} The page cannot be opened from here: judge the agreement by the text quoted with the question.

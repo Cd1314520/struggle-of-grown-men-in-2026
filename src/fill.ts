@@ -134,6 +134,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     mailbox,
     personal: readProfile("personal.yml"),
     answers: readProfile("answers.md"),
+    resumeNotes: readProfile("resume-notes.md"),
     lowStakes: lowStakesRule(),
     terms: termsRule(),
     resumeContext: JSON.stringify(context, null, 2),
