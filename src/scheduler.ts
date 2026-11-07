@@ -9,12 +9,12 @@ import {
   kvGet,
   kvSet,
   logEvent,
+  moveJob,
   nextToPrep,
   openedAt,
   notifyJobChange,
   pruneChatter,
   requeueInterruptedPrep,
-  updateJob,
   type Job,
 } from "./db";
 import { autoApply, checkAutoApprovedPractice, employerCapNote } from "./auto";
@@ -24,7 +24,7 @@ import { tickQuestionDigest } from "./digest";
 import { errorMessage, isCapacityError } from "./errors";
 import { fill } from "./fill";
 import { defaultCheckpoint, endSession, ownsFill, stopFailedFill, type Browser, type FillRuntime, type FillSession } from "./fill-session";
-import { beginAttempt, dropManualLease, endVerification, isRecovering, isSubmitting, isVerifying, lastSlot, manualLeaseGate } from "./fill-state";
+import { beginAttempt, dropManualLease, fillPhase, isRecovering, isSubmitting, isVerifying, lastSlot, manualLeaseGate, markAmbiguous } from "./fill-state";
 import { backedOff, backOff, clearBackoff, countOne, due, usedToday } from "./limits";
 import { preferUsListings } from "./listings";
 import { locateEmployerPostings, locatePerDay } from "./locate";
@@ -49,7 +49,7 @@ import {
 } from "./questions";
 import { interruptedImport, runImport, type ImportRun } from "./resume-import";
 import { scanSources } from "./scan";
-import { FILL_STAGE, PARKED, to } from "./status";
+import { applicationStarted, FILL_STAGE, PARKED, to } from "./status";
 import { trackMailbox } from "./track";
 
 export interface SchedulerDeps {
@@ -80,8 +80,7 @@ function newApplicationGap(): number {
 
 function employersWithOpenApplication(): Set<string> {
   const open = new Set<string>();
-  for (const job of jobsInStatuses(["approved", "filling", ...PARKED]))
-    if (job.status !== "approved" || job.resume_sha || job.fill_checkpoint) open.add(employerOf(job));
+  for (const job of jobsInStatuses(["approved", "filling", ...PARKED])) if (job.status !== "approved" || applicationStarted(job)) open.add(employerOf(job));
   return open;
 }
 
@@ -102,10 +101,12 @@ function watchCapacity(run: RunWorker): RunWorker {
 function requeueCapacityFailures() {
   let requeued = 0;
   for (const job of jobsByStatus("failed", 100_000))
-    if (job.note?.startsWith("prep did not finish") && isCapacityError(job.note)) {
-      updateJob(job.id, to.triaged("assessing again: the model provider was at capacity"));
+    if (
+      job.note?.startsWith("prep did not finish") &&
+      isCapacityError(job.note) &&
+      moveJob(job.id, "failed", to.triaged("assessing again: the model provider was at capacity"))
+    )
       requeued++;
-    }
   if (requeued) logEvent("system", `Requeued ${requeued} assessments the model provider refused for capacity`);
 }
 
@@ -129,8 +130,8 @@ export function retryPassingHandoffs() {
     const blockers = jobBlockers(job.id);
     const last = blockers.at(-1);
     const rule = last && RETRIED[last.cause];
+    if (!last || !rule || last.gate_id !== gate.id) continue;
     const parkedAt = Date.parse(gate.createdAt);
-    if (!last || !rule || Math.abs(parkedAt - Date.parse(`${last.at.replace(" ", "T")}Z`)) > 60_000) continue;
     const tried = blockers.filter(b => b.cause === last.cause).length - 1;
     if (tried >= rule.tries || Date.now() - parkedAt < rule.afterMs) continue;
     try {
@@ -143,7 +144,7 @@ export function retryPassingHandoffs() {
 }
 
 function fillQueue(): FillCandidate[] {
-  const rank = (c: FillCandidate) => (c.verify ? 4 : 0) + (c.recovering ? 2 : 0) + (c.job.fill_checkpoint === null ? 0 : 1);
+  const rank = (c: FillCandidate) => (c.verify ? 4 : 0) + (c.recovering ? 2 : 0) + (applicationStarted(c.job) ? 1 : 0);
   return jobsInStatuses(["approved", "needs_manual"])
     .map(job => ({ job, verify: isVerifying(job.id), recovering: isRecovering(job.id) }))
     .filter(c => c.job.status === "approved" || c.verify)
@@ -152,15 +153,23 @@ function fillQueue(): FillCandidate[] {
 
 export function reviewStandingApprovals() {
   for (const job of jobsByStatus("approved")) {
-    if (job.approved_by !== "auto" || job.resume_sha || job.fill_checkpoint) continue;
+    if (job.approved_by !== "auto" || applicationStarted(job)) continue;
     const guard = checkAutoApprovedPractice(job);
     if (guard.ok) continue;
-    forgetDeferredApproval(job.id);
     if (needsJudgment(parsePracticeAssessment(job.practice_assessment), describing())) {
-      updateJob(job.id, { ...to.triaged("assessing again: the practice rules now judge the employer, not the pay or location"), approved_by: null });
+      if (
+        !moveJob(job.id, "approved", {
+          ...to.triaged("assessing again: the practice rules now judge the employer, not the pay or location"),
+          approved_by: null,
+        })
+      )
+        continue;
+      forgetDeferredApproval(job.id);
       logEvent("auto", "Auto-approval withdrawn for a fresh assessment under the current practice rules", job.id);
     } else {
-      updateJob(job.id, { ...to.held(`needs your review: ${guard.reason ?? "no longer a practice job"}`), approved_by: null });
+      if (!moveJob(job.id, "approved", { ...to.held(`needs your review: ${guard.reason ?? "no longer a practice job"}`, "review"), approved_by: null }))
+        continue;
+      forgetDeferredApproval(job.id);
       logEvent("auto", `Auto-approval withdrawn and job held: ${guard.reason ?? "no longer a practice job"}`, job.id);
     }
   }
@@ -168,13 +177,13 @@ export function reviewStandingApprovals() {
 
 export function trimEmployerApprovals() {
   const queued = jobsByStatus("approved")
-    .filter(job => job.approved_by === "auto" && !job.resume_sha && !job.fill_checkpoint)
+    .filter(job => job.approved_by === "auto" && !applicationStarted(job))
     .sort((a, b) => (a.score ?? -1) - (b.score ?? -1) || b.id - a.id);
   for (const job of queued) {
     const others = employerApplications(job);
     if (others < autoApply().perEmployer) continue;
+    if (!moveJob(job.id, "approved", { ...to.awaitingApproval(`needs your review: ${employerCapNote(others)}`), approved_by: null })) continue;
     forgetDeferredApproval(job.id);
-    updateJob(job.id, { ...to.awaitingApproval(`needs your review: ${employerCapNote(others)}`), approved_by: null });
     logEvent("auto", `Auto-approval withdrawn: ${employerCapNote(others)}`, job.id);
   }
 }
@@ -190,10 +199,11 @@ function pruneOldChatter() {
 
 function recoverInterruptedFills() {
   for (const j of jobsInStatuses(FILL_STAGE)) {
+    if (fillPhase(j.id) === "verify_queued") continue;
     const checkpoint = readCheckpoint(j.id) ?? defaultCheckpoint(j, lastSlot(j.id) ?? 0);
     const gate = getOpenGate(j.id);
     if (isSubmitting(j.id)) {
-      endVerification(j.id);
+      markAmbiguous(j.id);
       if (gate?.kind !== "submission_ambiguous")
         parkGate(
           j.id,
@@ -207,8 +217,8 @@ function recoverInterruptedFills() {
       if (!readCheckpoint(j.id)) recordCheckpoint(j.id, checkpoint);
     } else if (j.status === "filling") {
       recordCheckpoint(j.id, checkpoint);
-      updateJob(j.id, to.resumeFill("Recovering the same interrupted draft after restart"));
-      logEvent("system", "Interrupted fill queued for exact draft recovery with frozen resume", j.id);
+      if (moveJob(j.id, "filling", to.resumeFill("Recovering the same interrupted draft after restart")))
+        logEvent("system", "Interrupted fill queued for exact draft recovery with frozen resume", j.id);
     } else if (PARKED.includes(j.status)) {
       parkGate(j.id, { kind: "manual", text: "Interrupted wait has no recoverable gate. Inspect the exact draft before returning control." }, checkpoint);
     }
@@ -226,6 +236,7 @@ export class Scheduler {
   private nextNewAt: number;
   private readonly manualActivations = new Map<number, number>();
   private importRun: ImportRun | null = null;
+  private tickTimer: Timer | null = null;
 
   constructor(deps: Partial<SchedulerDeps> = {}) {
     this.run = watchCapacity(deps.runWorker ?? runWorker);
@@ -385,12 +396,12 @@ export class Scheduler {
   }
 
   private startPrep(job: Job) {
+    if (!moveJob(job.id, "triaged", to.prepping())) return;
     this.prepActive++;
     countOne("prep");
-    updateJob(job.id, to.prepping());
     void prep(job, this.run)
       .catch((err: unknown) => {
-        if (getJob(job.id)?.status === "prepping") updateJob(job.id, to.failed(`prep: ${errorMessage(err)}`));
+        moveJob(job.id, "prepping", to.failed(`prep: ${errorMessage(err)}`));
       })
       .finally(() => {
         this.prepActive--;
@@ -407,13 +418,13 @@ export class Scheduler {
     for (const { job: candidate, verify } of queue) {
       if (this.rt.sessions.has(candidate.id) || employers.has(employerOf(candidate)) || getOpenGate(candidate.id)) continue;
       const saved = readCheckpoint(candidate.id);
-      const isNew = !verify && !saved && !candidate.resume_sha;
+      const isNew = !verify && !saved && !applicationStarted(candidate);
       if (
         isNew &&
         (usedToday("fill") >= config.limits.applyPerDay || (Date.now() < this.nextNewAt && !isFresh(candidate)) || started.has(employerOf(candidate)))
       )
         continue;
-      if (saved ? saved.slot !== slot : candidate.resume_sha && lastSlot(candidate.id) !== slot) continue;
+      if (saved ? saved.slot !== slot : applicationStarted(candidate) && lastSlot(candidate.id) !== slot) continue;
       return { job: candidate, checkpoint: saved, isNew };
     }
     return null;
@@ -442,17 +453,26 @@ export class Scheduler {
         }
       })
       .finally(() => {
-        session.browser?.close();
-        if (this.rt.sessions.get(job.id) === session) this.rt.sessions.delete(job.id);
-        if (this.filling[slot] !== session) return;
-        this.filling[slot] = null;
-        this.restUntil[slot] = Date.now() + (min + Math.random() * (max - min)) * 1000;
-        kvSet(`fill.rest.${slot}`, String(this.restUntil[slot]));
-        this.pump();
+        try {
+          try {
+            session.browser?.close();
+          } catch (err) {
+            logEvent("error", `fill: closing the browser failed: ${errorMessage(err)}`, job.id);
+          }
+          if (this.rt.sessions.get(job.id) === session) this.rt.sessions.delete(job.id);
+          if (this.filling[slot] === session) {
+            this.filling[slot] = null;
+            this.restUntil[slot] = Date.now() + (min + Math.random() * (max - min)) * 1000;
+            kvSet(`fill.rest.${slot}`, String(this.restUntil[slot]));
+          }
+        } finally {
+          this.pump();
+        }
       });
   }
 
   start() {
+    if (this.tickTimer) return;
     interruptedImport();
     dedupeExisting();
     preferUsListings();
@@ -484,7 +504,13 @@ export class Scheduler {
       retryPassingHandoffs();
       this.pump();
     };
-    setInterval(tick, 30_000);
+    this.tickTimer = setInterval(tick, 30_000);
     tick();
+  }
+
+  stop() {
+    if (!this.tickTimer) return;
+    clearInterval(this.tickTimer);
+    this.tickTimer = null;
   }
 }

@@ -1,7 +1,7 @@
 import { boardHost, feedNames, fetchCompany, fetchDescription, fetchFeed, loadCompanies, watchBoardOf, type Company } from "./ats";
 import { boardMinutes, boardNames, fetchBoard, isBoardUrl } from "./boards";
 import { config, readProfile } from "./config";
-import { appliedLocation, insertJob, jobsByStatus, kvGet, kvSet, logEvent, updateJob, type Job } from "./db";
+import { appliedLocation, insertJob, jobsByStatus, kvSet, logEvent, moveJob, type Job } from "./db";
 import { employersText } from "./employers";
 import { errorMessage } from "./errors";
 import { due } from "./limits";
@@ -76,11 +76,9 @@ function screen(batch: Job[]): Job[] {
   const left: Job[] = [];
   let dropped = 0;
   for (const job of batch) {
-    const reason = kvGet(`feedback.${job.id}`) ? null : screenOut(job.title, appliedLocation(job), job.url);
-    if (reason) {
-      updateJob(job.id, to.skipped(reason));
-      dropped++;
-    } else left.push(job);
+    const reason = job.hand_picked === 1 ? null : screenOut(job.title, appliedLocation(job), job.url);
+    if (!reason) left.push(job);
+    else if (moveJob(job.id, "found", to.skipped(reason))) dropped++;
   }
   if (dropped) logEvent("system", `Triage: screened out ${dropped} of ${batch.length} abroad, senior-level, hardware or dead-end portals before reading`);
   return left;
@@ -130,12 +128,12 @@ async function triage(run: RunWorker) {
     const keep = new Set<number>(config.targets.holdBack ? kept : [...kept, ...held]);
     const hold = new Set<number>(config.targets.holdBack ? held : []);
     for (const j of batch) {
-      if (keep.has(j.id) && isBoardUrl(j.url)) updateJob(j.id, to.locating());
+      if (keep.has(j.id) && isBoardUrl(j.url)) moveJob(j.id, "found", to.locating());
       else if (keep.has(j.id)) {
         const description = j.description ? undefined : await fetchDescription(j.url);
-        updateJob(j.id, { ...to.triaged(), ...(description ? { description } : {}) });
-      } else if (hold.has(j.id)) updateJob(j.id, to.held("held back at triage"));
-      else updateJob(j.id, to.skipped("dropped at triage"));
+        moveJob(j.id, "found", { ...to.triaged(), ...(description ? { description } : {}) });
+      } else if (hold.has(j.id)) moveJob(j.id, "found", to.held("held back at triage", "triage"));
+      else moveJob(j.id, "found", to.skipped("dropped at triage"));
     }
     logEvent("system", `Triage: kept ${keep.size}, held ${hold.size} of ${batch.length}`);
   }

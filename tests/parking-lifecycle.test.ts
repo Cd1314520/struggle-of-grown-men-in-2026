@@ -48,6 +48,9 @@ describe("durable parking lifecycle", () => {
   it("consumes unchanged final approval only on re-observation and refuses ambiguous submission retry", () => runScenarios(["confirm"]));
   it("requires a new final approval when the observed summary changes", () => runScenarios(["changed-summary"]));
   it("preserves open/answered gates across process restart and quarantines the final-submit marker", () => runScenarios(["restart-setup", "restart-resume"]));
+  it("keeps a queued verification across a restart and returns an interrupted one to ambiguity", () =>
+    runScenarios(["restart-verify-setup", "restart-verify-resume"]));
+  it("does not retry a newer handoff because of a blocker recorded for an older gate", () => runScenarios(["stale-blocker"]));
   it("rejects tampered frozen source/PDF rather than substituting a modified working resume", () => runScenarios(["frozen"]));
   it("retains parked draft tabs and never screenshots another job when the requested tab disappeared", () => runScenarios(["browser"]));
   it("prevents browser.open adoption of parked/manual tabs and resumes the exact unsaved draft through scoped CDP", () => runScenarios(["target-isolation"]));

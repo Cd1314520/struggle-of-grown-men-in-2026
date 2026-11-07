@@ -1,7 +1,7 @@
 import { ArrowRight, CircleCheck, MessageSquareText } from "lucide-react";
 import { useRef } from "react";
 import type { ListResult, ListRow as Row } from "../../../src/api-types";
-import type { Status } from "../../../src/status";
+import { ASSESSING } from "../../../src/status";
 import { ListDetail, NoMatch, useOpenRecord } from "../../components/list";
 import {
   Button,
@@ -31,7 +31,6 @@ import { stageSegments, STAGES } from "./stages";
 import { thresholdOf } from "../job/model";
 
 const STUCK = new Set(["needs_you", "questions", "failed"]);
-const UNASSESSED: readonly Status[] = ["triaged", "locating", "prepping"];
 
 const firstStage = (list: ListResult) => list.groups.find(g => g.count > 0)?.key ?? "needs_you";
 
@@ -169,7 +168,7 @@ export function PipelinePage() {
       ) : (
         rows.map(r => {
           const at = timeOf(group, r),
-            score = UNASSESSED.includes(r.status) ? null : r.score;
+            score = ASSESSING.includes(r.status) ? null : r.score;
           return (
             <ListRow
               key={r.id}

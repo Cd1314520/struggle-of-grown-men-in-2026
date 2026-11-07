@@ -4,15 +4,15 @@ import YAML from "yaml";
 import { checkAutoApprovedPractice } from "./auto";
 import { browserSlot, config, jobDir, readProfile } from "./config";
 import { isCapacityError } from "./errors";
-import { jobsWithCheckpoint, logEvent, updateJob, type Job } from "./db";
-import { endVerification, isSubmitting, isVerifying, queueDraftRecovery, rememberSlot } from "./fill-state";
+import { db, jobsWithCheckpoint, logEvent, moveJob, notifyJobChange, updateJob, type Job } from "./db";
+import { isSubmitting, isVerifying, queueDraftRecovery, queueVerification, rememberSlot } from "./fill-state";
 import { endSession, ownsFill, stopFailedFill, type FillRuntime, type FillSession } from "./fill-session";
 import { fillTools, prefillTool } from "./fill-tools";
 import * as gmail from "./gmail";
 import { buildFacts } from "./prefill";
 import { getOpenGate, parkGate, readCheckpoint, recordCheckpoint, resumeContext } from "./questions";
 import { freezeResume, frozenResume } from "./resume";
-import { isSettled, to, wasSent } from "./status";
+import { applicationStarted, isSettled, to, wasSent } from "./status";
 import { fillTemplate } from "./template";
 import { harnessOf } from "./worker";
 import { deadEnd } from "./screen";
@@ -58,7 +58,10 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   const { slot } = session;
   const isVerification = isVerifying(job.id);
   if (isSubmitting(job.id) && !isVerification) {
-    updateJob(job.id, to.filling());
+    if (!moveJob(job.id, "approved", to.filling())) {
+      endSession(session, "job changed before fill start");
+      return;
+    }
     stopFailedFill(rt, session, "Runnable job still had a final-submit marker.");
     return;
   }
@@ -67,19 +70,21 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     if (!guard.ok) {
       session.active = false;
       const note = `needs your review: ${guard.reason ?? "invalid practice assessment"}`;
-      updateJob(job.id, to.held(note));
-      logEvent("auto", `Early fill guard: held auto-approved job #${job.id} (${guard.reason})`, job.id, "fill");
+      if (moveJob(job.id, "approved", to.held(note, "review")))
+        logEvent("auto", `Early fill guard: held auto-approved job #${job.id} (${guard.reason})`, job.id, "fill");
       return;
     }
   }
-  const portal = job.resume_sha ? null : deadEnd(job.url);
+  const portal = isVerification || applicationStarted(job) ? null : deadEnd(job.url);
   if (portal) {
     session.active = false;
-    updateJob(job.id, to.skipped(portal));
-    logEvent("auto", `Skipped before filling: ${portal}`, job.id, "fill");
+    if (moveJob(job.id, "approved", to.skipped(portal))) logEvent("auto", `Skipped before filling: ${portal}`, job.id, "fill");
     return;
   }
-  updateJob(job.id, to.filling());
+  if (!moveJob(job.id, isVerification ? "needs_manual" : "approved", to.filling())) {
+    endSession(session, "job changed before fill start");
+    return;
+  }
   const dir = jobDir(job.id);
   const browser = browserSlot(slot);
   const context = resumeContext(job.id);
@@ -140,7 +145,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     resumeContext: JSON.stringify(context, null, 2),
     browserTabId: session.browser.tabId,
     continuationNote: job.note ?? "(none)",
-    recovery: isVerification ? VERIFY_BRIEF : job.resume_sha || context.checkpoint ? RESUME_BRIEF : FIRST_BRIEF,
+    recovery: isVerification ? VERIFY_BRIEF : applicationStarted(job) || context.checkpoint ? RESUME_BRIEF : FIRST_BRIEF,
     description: job.description || "(not captured; read it from the URL)",
     captchaAttempts: 3,
     approval:
@@ -168,7 +173,13 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   const capacity = isCapacityError(result.error);
   if (isVerification) {
     if (session.active && capacity && ownsFill(rt, session)) {
-      updateJob(job.id, to.verifyAgain(`verification stopped by model provider capacity; checking again (${result.error})`));
+      const requeued = db.transaction(() => {
+        if (!moveJob(job.id, "filling", to.verifyAgain(`verification stopped by model provider capacity; checking again (${result.error})`), { quiet: true }))
+          return false;
+        queueVerification(job.id);
+        return true;
+      })();
+      if (requeued) notifyJobChange(job.id);
       endSession(session, "model provider at capacity; verification will retry");
     } else if (session.active) {
       parkGate(
@@ -179,14 +190,18 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
         },
         session.checkpoint,
       );
-      endVerification(job.id);
       session.active = false;
     }
     return;
   }
   if (capacity && !isSubmitting(job.id) && ownsFill(rt, session)) {
-    updateJob(job.id, to.resumeFill(`Resuming the same draft: the model provider was at capacity (${result.error})`));
-    queueDraftRecovery(job.id);
+    const requeued = db.transaction(() => {
+      if (!moveJob(job.id, "filling", to.resumeFill(`Resuming the same draft: the model provider was at capacity (${result.error})`), { quiet: true }))
+        return false;
+      queueDraftRecovery(job.id);
+      return true;
+    })();
+    if (requeued) notifyJobChange(job.id);
     endSession(session, "model provider at capacity; resuming the same draft");
     return;
   }

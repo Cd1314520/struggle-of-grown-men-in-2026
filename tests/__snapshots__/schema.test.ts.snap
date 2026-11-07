@@ -1,7 +1,7 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
 exports[`schema migrations produces exactly the recorded schema 1`] = `
-"version 8
+"version 9
 
 CREATE TRIGGER jobs_blockers_forgotten AFTER DELETE ON jobs
 BEGIN
@@ -32,6 +32,18 @@ END;
 CREATE TRIGGER jobs_status_forgotten AFTER DELETE ON jobs
 BEGIN
 DELETE FROM status_changes WHERE job_id = OLD.id;
+END;
+
+CREATE TRIGGER jobs_status_valid_insert BEFORE INSERT ON jobs
+WHEN NEW.status NOT IN ('found','locating','triaged','prepping','awaiting_approval','approved','filling','needs_input','awaiting_submit','needs_manual','submitted','interview','offer','rejected_by_company','withdrawn','held','skipped','rejected','failed')
+BEGIN
+SELECT RAISE(ABORT, 'invalid job status');
+END;
+
+CREATE TRIGGER jobs_status_valid_update BEFORE UPDATE OF status ON jobs
+WHEN NEW.status NOT IN ('found','locating','triaged','prepping','awaiting_approval','approved','filling','needs_input','awaiting_submit','needs_manual','submitted','interview','offer','rejected_by_company','withdrawn','held','skipped','rejected','failed')
+BEGIN
+SELECT RAISE(ABORT, 'invalid job status');
 END;
 
 CREATE TRIGGER jobs_steps_forgotten AFTER DELETE ON jobs
@@ -97,7 +109,7 @@ job_id INTEGER NOT NULL,
 cause TEXT NOT NULL CHECK (cause IN ('site_down', 'login', 'captcha', 'email_code', 'no_form', 'needs_you', 'browser', 'no_response', 'unknown', 'other')),
 detail TEXT NOT NULL, -- the worker's own account of what it saw
 at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+, gate_id TEXT);
 
 CREATE TABLE events (
 id INTEGER PRIMARY KEY,
@@ -108,14 +120,11 @@ message TEXT NOT NULL,
 at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE fill_state (
+CREATE TABLE "fill_state" (
 job_id INTEGER PRIMARY KEY,
-submitting INTEGER NOT NULL DEFAULT 0 CHECK (submitting IN (0, 1)),
-verifying INTEGER NOT NULL DEFAULT 0 CHECK (verifying IN (0, 1)),
-recovering INTEGER NOT NULL DEFAULT 0 CHECK (recovering IN (0, 1)),
-slot INTEGER CHECK (slot >= 0),   -- the browser that last held this job's draft
-manual_gate TEXT,                 -- the open gate under which a person reserved that browser
-CHECK (verifying = 0 OR submitting = 1)
+phase TEXT NOT NULL DEFAULT 'idle' CHECK (phase IN ('idle', 'draft_recovery', 'submitting', 'ambiguous', 'verify_queued', 'verifying')),
+slot INTEGER CHECK (slot >= 0),
+manual_gate TEXT
 );
 
 CREATE TABLE job_sources (
@@ -144,18 +153,19 @@ note TEXT,             -- latest human-readable status note
 found_at TEXT NOT NULL DEFAULT (datetime('now')),
 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
 submitted_at TEXT
-, resume_sha TEXT, resume_frozen_at TEXT, checklist TEXT, dedupe_key TEXT, company_key TEXT, posted_at TEXT, approved_by TEXT, practice_assessment TEXT, fill_checkpoint TEXT);
+, resume_sha TEXT, resume_frozen_at TEXT, checklist TEXT, dedupe_key TEXT, company_key TEXT, posted_at TEXT, approved_by TEXT, practice_assessment TEXT, fill_checkpoint TEXT, hold_reason TEXT CHECK (hold_reason IN ('triage', 'target', 'review', 'user')), feedback TEXT, hand_picked INTEGER NOT NULL DEFAULT 0 CHECK (hand_picked IN (0, 1)), locate_tries INTEGER NOT NULL DEFAULT 0, deferred_at TEXT);
 
 CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
-CREATE TABLE question_digest_deliveries (
+CREATE TABLE "question_digest_deliveries" (
 id TEXT PRIMARY KEY,
 recipient TEXT NOT NULL,
 fingerprints TEXT NOT NULL,
 group_count INTEGER NOT NULL,
 subject TEXT NOT NULL,
 body TEXT NOT NULL,
-state TEXT NOT NULL CHECK (state IN ('sending', 'uncertain', 'failed', 'sent')),
+state TEXT NOT NULL CHECK (state IN ('sending', 'uncertain', 'failed', 'sent', 'abandoned')),
+attempts INTEGER NOT NULL DEFAULT 1,
 created_at TEXT NOT NULL,
 attempt_at TEXT NOT NULL,
 sent_at TEXT,
@@ -232,8 +242,7 @@ CREATE INDEX jobs_dedupe ON jobs(dedupe_key);
 
 CREATE INDEX jobs_status ON jobs(status);
 
-CREATE UNIQUE INDEX question_digest_one_pending
-ON question_digest_deliveries ((1)) WHERE state != 'sent';
+CREATE UNIQUE INDEX question_digest_one_pending ON question_digest_deliveries ((1)) WHERE state NOT IN ('sent', 'abandoned');
 
 CREATE INDEX question_gates_group ON question_gates(group_key, state);
 

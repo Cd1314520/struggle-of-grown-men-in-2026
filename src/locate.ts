@@ -1,7 +1,7 @@
 import { addCompany, fetchDescription, watchBoardOf } from "./ats";
 import { isBoardUrl, linkedinDescription, probeEmployer } from "./boards";
 import { config } from "./config";
-import { findTwin, jobsByStatus, kvGet, kvSet, logEvent, relocateJob, updateJob } from "./db";
+import { findTwin, jobsByStatus, logEvent, moveJob, relocateJob, updateJob } from "./db";
 import { countOne, usedToday } from "./limits";
 import { arg, S, schema, type RunWorker } from "./worker";
 import { to } from "./status";
@@ -14,7 +14,7 @@ export const locatePerDay = () => config.limits.locatePerDay ?? 40;
 export async function locateEmployerPostings(run: RunWorker) {
   for (const job of jobsByStatus("locating")) {
     if (!isBoardUrl(job.url)) {
-      updateJob(job.id, to.triaged());
+      moveJob(job.id, "locating", to.triaged());
       continue;
     }
     const hit = await probeEmployer(job);
@@ -31,7 +31,7 @@ export async function locateEmployerPostings(run: RunWorker) {
     const open = new Map(batch.map(j => [j.id, j]));
     for (const j of batch) {
       countOne("locate");
-      kvSet(`locate.tries.${j.id}`, String(Number(kvGet(`locate.tries.${j.id}`) ?? 0) + 1));
+      updateJob(j.id, { locate_tries: j.locate_tries + 1 });
     }
     const { done } = run({
       name: "locate",
@@ -90,7 +90,8 @@ export async function locateEmployerPostings(run: RunWorker) {
           handler: args => {
             const job_id = arg.int(args, "job_id");
             if (!open.delete(job_id)) return "ERROR: unknown job id, or already reported.";
-            updateJob(job_id, to.skipped(`no posting on the employer's own site: ${arg.str(args, "reason")}`));
+            if (!moveJob(job_id, "locating", to.skipped(`no posting on the employer's own site: ${arg.str(args, "reason")}`)))
+              return "ERROR: that job is no longer being located.";
             return "Recorded.";
           },
         },
@@ -102,8 +103,7 @@ export async function locateEmployerPostings(run: RunWorker) {
       },
     });
     const res = await done;
-    for (const j of open.values())
-      if (Number(kvGet(`locate.tries.${j.id}`)) >= 2) updateJob(j.id, to.skipped("could not find a posting on the employer's own site"));
+    for (const j of open.values()) if (j.locate_tries + 1 >= 2) moveJob(j.id, "locating", to.skipped("could not find a posting on the employer's own site"));
     if (res.status !== "completed") break;
   }
 }

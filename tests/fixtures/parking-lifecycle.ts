@@ -148,8 +148,9 @@ await mock.module("../../src/gmail", () => ({
 await mock.module("../../src/digest", () => ({
   tickQuestionDigest: async () => {},
 }));
-const { db, getJob, kvSet, updateJob } = await import("../../src/db");
-const { authorizeSubmit, isSubmitting, isVerifying, isRecovering } = await import("../../src/fill-state");
+const { db, getJob, kvSet, moveJob, updateJob } = await import("../../src/db");
+const { to } = await import("../../src/status");
+const { authorizeSubmit, fillPhase, isSubmitting, isVerifying, isRecovering } = await import("../../src/fill-state");
 const core = await import("../../src/questions");
 const { jobBlockers } = await import("../../src/blockers");
 const { backedOff, usedToday } = await import("../../src/limits");
@@ -212,7 +213,8 @@ if (scenario === "restart-setup") {
   for (const id of [1, 2, 3, 4]) {
     addJob(id);
     const frozen = resume.freezeResume(id);
-    updateJob(id, { status: "filling", resume_sha: frozen.sha, resume_frozen_at: new Date().toISOString() });
+    moveJob(id, "approved", to.filling());
+    updateJob(id, { resume_sha: frozen.sha, resume_frozen_at: new Date().toISOString() });
     core.recordCheckpoint(id, {
       version: 1,
       slot: 0,
@@ -249,6 +251,43 @@ if (scenario === "restart-resume") {
   assert.equal(isSubmitting(3), true);
   assert.equal(jobRow(4).status, "approved");
   assert.equal(core.respond(3, "approve"), false);
+  process.exit(0);
+}
+
+if (scenario === "restart-verify-setup") {
+  for (const id of [1, 2]) {
+    addJob(id);
+    const frozen = resume.freezeResume(id);
+    moveJob(id, "approved", to.filling());
+    updateJob(id, { resume_sha: frozen.sha, resume_frozen_at: new Date().toISOString() });
+    core.recordCheckpoint(id, {
+      version: 1,
+      slot: 0,
+      tabId: id === 1 ? "draft-tab" : `draft-tab-${id}`,
+      url: navigation.url,
+      step: `Requisition ${id}`,
+      notes: "Existing draft",
+      resumeSha: frozen.sha,
+      savedAt: new Date().toISOString(),
+    });
+    authorizeSubmit(id);
+    const gate = core.parkGate(id, { kind: "submission_ambiguous", text: "Timeout after final click" }, core.readCheckpoint(id));
+    core.queueRecovery(id, gate.id);
+  }
+  assert.equal(fillPhase(1), "verify_queued");
+  db.run("UPDATE fill_state SET phase = 'verifying' WHERE job_id = 2");
+  process.exit(0);
+}
+if (scenario === "restart-verify-resume") {
+  scheduler.start();
+  await until(() => workers.length === 1);
+  assert.equal(workerAt(0).options.jobId, 1, "the queued verification is still queued after the restart");
+  assert.equal(isVerifying(1), true);
+  assert.equal(isSubmitting(1), true);
+  assert.equal(core.getOpenGate(1), null, "a queued verification is not turned back into an ambiguity gate");
+  assert.equal(fillPhase(2), "ambiguous", "a verification interrupted mid-run is ambiguous again");
+  assert.equal(openGate(2).kind, "submission_ambiguous");
+  assert.equal(jobRow(2).status, "needs_manual");
   process.exit(0);
 }
 
@@ -310,6 +349,7 @@ if (scenario === "recovery-prefix") {
   for (const id of [1, 2, 4]) {
     const frozen = resume.freezeResume(id);
     updateJob(id, { resume_sha: frozen.sha });
+    moveJob(id, "approved", to.filling());
     const tabId = `recovery-${id}`;
     simulatedTabs.add(tabId);
     core.recordCheckpoint(id, {
@@ -433,6 +473,22 @@ if (scenario === "release" || scenario === "quick-answer") {
   await until(() => workers.length === 2);
   assert.equal(workerAt(1).options.jobId, 3, "a posting opened today does not wait out the gap");
   assert.equal(jobRow(2).status, "approved");
+} else if (scenario === "stale-blocker") {
+  const parking = call(first, "need_manual", { ...navigation, cause: "browser", reason: "Clicks time out; reads work" });
+  await until(() => core.getOpenGate(1) !== null);
+  const older = openGate(1);
+  first.exit();
+  await parking;
+  await until(() => !scheduler.activeFillSession(1));
+  assert.equal(jobBlockers(1).at(-1)?.gate_id, older.id);
+  const newer = core.parkGate(1, { kind: "manual", text: "Different stop, no cause recorded" }, core.readCheckpoint(1));
+  assert.notEqual(newer.id, older.id);
+  retryPassingHandoffs();
+  scheduler.pump();
+  await Bun.sleep(20);
+  assert.equal(workers.length, 1, "a blocker recorded for the older gate does not retry the newer one");
+  assert.equal(jobRow(1).status, "needs_manual");
+  assert.equal(openGate(1).id, newer.id);
 } else if (scenario === "crash") {
   await call(first, "checkpoint", navigation);
   assert.throws(() => call(first, "report_result", { outcome: "failed", note: "no cause given" }), /cause must be one of/);

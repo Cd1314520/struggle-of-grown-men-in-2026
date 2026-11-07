@@ -21,11 +21,12 @@ export interface Blocker {
   cause: BlockerCause;
   detail: string;
   at: string;
+  gate_id: string | null;
 }
 export type ListedBlocker = Blocker & Pick<Job, "company" | "title" | "url" | "status">;
 
-export function recordBlocker(jobId: number, cause: BlockerCause, detail: string) {
-  db.query("INSERT INTO blockers (job_id, cause, detail) VALUES (?, ?, ?)").run(jobId, cause, detail.trim());
+export function recordBlocker(jobId: number, cause: BlockerCause, detail: string, gateId: string | null) {
+  db.query("INSERT INTO blockers (job_id, cause, detail, gate_id) VALUES (?, ?, ?, ?)").run(jobId, cause, detail.trim(), gateId);
 }
 
 export const jobBlockers = (jobId: number) => db.query<Blocker, [number]>("SELECT * FROM blockers WHERE job_id = ? ORDER BY id").all(jobId);

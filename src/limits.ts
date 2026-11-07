@@ -8,11 +8,13 @@ export const usedToday = (what: Counted) => Number(kvGet(`count.${what}.${today(
 export const countOne = (what: Counted) => kvSet(`count.${what}.${today()}`, String(usedToday(what) + 1));
 
 const BACKOFF_MAX_MINUTES = 60;
+const BACKOFF_FORGET_MS = 6 * 60 * 60_000;
 export const backoffUntil = () => Number(kvGet("backoff.until") ?? 0);
 export const backedOff = () => Date.now() < backoffUntil();
 export function backOff(): number | null {
   if (backedOff()) return null;
-  const level = Number(kvGet("backoff.level") ?? 0) + 1;
+  const quiet = Date.now() - backoffUntil() > BACKOFF_FORGET_MS;
+  const level = (quiet ? 0 : Number(kvGet("backoff.level") ?? 0)) + 1;
   const until = Date.now() + Math.min(2 ** level, BACKOFF_MAX_MINUTES) * 60_000;
   kvSet("backoff.level", String(level));
   kvSet("backoff.until", String(until));
@@ -20,6 +22,7 @@ export function backOff(): number | null {
 }
 export function clearBackoff() {
   if (kvGet("backoff.level") !== null) kvDelete("backoff.level");
+  if (kvGet("backoff.until") !== null) kvDelete("backoff.until");
 }
 
 export const uncountOne = (what: Counted) => kvSet(`count.${what}.${today()}`, String(Math.max(0, usedToday(what) - 1)));

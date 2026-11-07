@@ -22,6 +22,14 @@ The current schema in full is recorded in `tests/__snapshots__/schema.test.ts.sn
 
 A database that already holds something is copied to `<file>.v<N>.bak` (for the app, `data/app.db.v1.bak`) before a migration changes it, under the same lock as the migration; `N` is the version it was at. An upgrade that cannot be backed up does not run. To undo an upgrade, stop the service, check out the older code, and put the copy back in place of `app.db` (remove `app.db-wal` and `app.db-shm` with it). The copies are never deleted for you.
 
+## Job status
+
+A job's `status` changes only through `moveJob` in `src/db.ts` (bulk moves through `moveWhere` there). Each move names the status it expects the job to be in and the new one; it changes the row only if the job is still where expected, and returns whether it did, so two workers cannot both move the same job. A move that `TRANSITIONS` in `src/status.ts` does not allow throws, as does a move to `held` without a `hold_reason`; `writeJob` and `updateJob` refuse a `status` field. When a job moves to anything other than a parked status (`needs_input`, `awaiting_submit`, `needs_manual`), its open gates are closed and any browser reservation is released in the same transaction. Triggers on `jobs` reject a status that is not one of `STATUSES`, whatever writes it.
+
+Facts about a job that used to live in `kv` or in its note are columns on `jobs`: `hold_reason` (`triage`, `target`, `review` or `user`; why a held job is held), `feedback` (your words on a redo, read by the next assessment), `hand_picked` (you asked for the job yourself, so screening does not skip it), `locate_tries` (lookups of an aggregator posting on the employer's site) and `deferred_at` (when it was left waiting for the auto-approval daily cap). Version 9 moved the old `feedback.<id>`, `locate.tries.<id>` and `auto.deferred.<id>` keys into them and deleted the keys.
+
+Each row of `blockers` names the gate it was recorded under (`gate_id`; rows from before version 9 were matched to a gate opened within a minute of them, or left blank).
+
 ## Status history
 
 `status_changes` holds every change of a job's status: where it was, where it went, the note written with the change, who approved it on a move to `approved`, and when. Triggers on `jobs` write it, so a bulk update or a script working on the file directly leaves a row like anything else. A job's page returns it as `history` (`GET /api/jobs/<id>`). History starts with the first change after version 2; that row's `from_status` says where the job stood before.
@@ -32,7 +40,22 @@ SELECT at, from_status, to_status, approved_by, note FROM status_changes WHERE j
 
 ## Fill state
 
-`fill_state` has one row per application that has reached a browser: whether its final submit was authorized and has no recorded outcome (`submitting`), whether a verification-only worker is queued for it (`verifying`), whether its next attempt resumes a draft (`recovering`), the browser that last held it (`slot`), and the gate under which you reserved that browser (`manual_gate`). `verifying` cannot be set without `submitting`. Everything that reads or changes it is in `src/fill-state.ts`.
+`fill_state` has one row per application that has reached a browser: its `phase`, the browser that last held it (`slot`), and the gate under which you reserved that browser (`manual_gate`). Everything that reads or changes it is in `src/fill-state.ts`; each change only applies from the phases listed, so a stale caller changes nothing.
+
+| Phase | Meaning | Entered from |
+| --- | --- | --- |
+| `idle` | no submit authorized, nothing queued | `draft_recovery` when the resumed attempt starts; any phase when an outcome is recorded |
+| `submitting` | final submit authorized, no outcome recorded | `idle` (`confirm_submit`) |
+| `ambiguous` | parked without knowing whether it was sent (always set when a `submission_ambiguous` gate parks) | any other phase |
+| `verify_queued` | a verification-only worker is queued | `ambiguous`, `verifying` |
+| `verifying` | that worker is running | `verify_queued` when it starts |
+| `draft_recovery` | the next attempt resumes the draft | `idle`; `ambiguous`, `verify_queued` or `verifying` once it is known not to have been sent |
+
+`submitting`, `ambiguous`, `verify_queued` and `verifying` all keep submission protection.
+
+## Digest deliveries
+
+`question_digest_deliveries` holds each digest email: its `state` (`sending`, `uncertain`, `failed`, `sent`, `abandoned`), how many times it was sent (`attempts`) and when last (`attempt_at`). Only one may be neither `sent` nor `abandoned` at a time.
 
 ## Application steps
 

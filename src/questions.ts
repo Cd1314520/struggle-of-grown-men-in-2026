@@ -1,17 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
-import { db, getJob, notifyJobChange, openedAt, writeJob, type Job } from "./db";
+import { db, getJob, moveJob, notifyJobChange, openedAt, writeJob, type Job } from "./db";
 import {
-  clearFillFlags,
   clearManualLease,
   confirmNotSubmitted,
+  isAmbiguous,
   isSubmitting,
   isVerifying,
   manualLeaseGate,
+  markAmbiguous,
   queueDraftRecovery,
   queueVerification,
+  resetFillPhase,
   setManualLease,
 } from "./fill-state";
-import { isSettled, to, type ParkedStatus } from "./status";
+import { FILL_STAGE, isSettled, PARKED, to, type ParkedStatus, type Status } from "./status";
 
 export type GateKind = "question" | "cover_letter" | "confirm_submit" | "manual" | "submission_ambiguous";
 export type AnswerScope = "application" | "bank";
@@ -112,6 +114,13 @@ const parkedStatus: Record<GateKind, ParkedStatus> = {
   confirm_submit: "awaiting_submit",
   manual: "needs_manual",
   submission_ambiguous: "needs_manual",
+};
+const parkFrom: Record<GateKind, readonly Status[]> = {
+  question: ["filling"],
+  cover_letter: ["filling"],
+  confirm_submit: ["filling"],
+  manual: ["filling", ...PARKED],
+  submission_ambiguous: FILL_STAGE,
 };
 const now = () => new Date().toISOString();
 function requireJob(jobId: number): Job {
@@ -230,7 +239,7 @@ export function getOpenGate(jobId: number): Gate | null {
   const row = openGateRow(jobId);
   return row && isCurrent(row, job) ? gate(row) : null;
 }
-function park(jobId: number, input: GateInput, checkpoint: FillCheckpoint | null): Gate {
+function park(jobId: number, input: GateInput, checkpoint: FillCheckpoint | null, from: Status | readonly Status[] = parkFrom[input.kind]): Gate {
   const job = requireJob(jobId),
     key = identity(job, input);
   if (isSettled(job)) throw new Error("Cannot park a terminal application");
@@ -241,6 +250,7 @@ function park(jobId: number, input: GateInput, checkpoint: FillCheckpoint | null
   if ((input.kind === "manual" || input.kind === "submission_ambiguous") && !checkpoint && !job.fill_checkpoint)
     throw new Error("Interactive gates require a browser checkpoint");
   if (checkpoint) writeCheckpoint(job, checkpoint);
+  if (input.kind === "submission_ambiguous") markAmbiguous(jobId);
   if (existing && isCurrent(existing, job) && existing.match_key === key.matchKey) return gate(existing);
   closeOpenGate(jobId);
   clearManualLease(jobId);
@@ -281,7 +291,8 @@ function park(jobId: number, input: GateInput, checkpoint: FillCheckpoint | null
     value.missing,
     value.createdAt,
   );
-  writeJob(jobId, to.parked(parkedStatus[input.kind], payload(value)));
+  if (!moveJob(jobId, from, to.parked(parkedStatus[input.kind], payload(value)), { quiet: true }))
+    throw new Error(`Cannot park a ${input.kind} gate while the application is ${job.status}`);
   return value;
 }
 export function parkGate(jobId: number, input: GateInput, checkpoint: FillCheckpoint | null): Gate {
@@ -344,14 +355,20 @@ function queuedAfter(row: GateRow): number {
 export const openGateKinds = () =>
   new Map(
     db
-      .query<{ job_id: number; kind: GateKind }, []>("SELECT job_id, kind FROM question_gates WHERE state = 'open'")
+      .query<{ job_id: number; kind: GateKind }, []>(
+        "SELECT g.job_id, g.kind FROM question_gates g JOIN jobs j ON j.id = g.job_id AND j.status = CASE g.kind WHEN 'question' THEN 'needs_input' WHEN 'cover_letter' THEN 'needs_input' WHEN 'confirm_submit' THEN 'awaiting_submit' WHEN 'manual' THEN 'needs_manual' WHEN 'submission_ambiguous' THEN 'needs_manual' END WHERE g.state = 'open'",
+      )
       .all()
       .map(r => [r.job_id, r.kind]),
   );
 
 export function listQuestionGroups(): QuestionGroup[] {
   const groups = new Map<string, QuestionGroup>();
-  for (const row of db.query<GateRow, []>("SELECT * FROM question_gates WHERE state = 'open' ORDER BY created_at, id").all()) {
+  for (const row of db
+    .query<GateRow, []>(
+      "SELECT g.* FROM question_gates g JOIN jobs j ON j.id = g.job_id AND j.status = CASE g.kind WHEN 'question' THEN 'needs_input' WHEN 'cover_letter' THEN 'needs_input' WHEN 'confirm_submit' THEN 'awaiting_submit' WHEN 'manual' THEN 'needs_manual' WHEN 'submission_ambiguous' THEN 'needs_manual' END WHERE g.state = 'open' ORDER BY g.created_at, g.id",
+    )
+    .all()) {
     const job = getJob(row.job_id);
     if (!job || !isCurrent(row, job)) continue;
     let group = groups.get(row.group_key);
@@ -397,10 +414,11 @@ function saveAnswer(row: GateRow, answer: string, scope: AnswerScope, at: string
     row.id,
   );
   const next = row.kind === "question" || row.kind === "cover_letter" ? nextQueuedQuestion(row.job_id) : null;
-  if (next) return void park(row.job_id, next, null);
+  if (next) return void park(row.job_id, next, null, parkedStatus[row.kind]);
   const value = gate(row);
   value.state = "answered";
-  writeJob(row.job_id, to.resumeFill("Answer saved; queued to resume the existing application", payload(value)));
+  if (!moveJob(row.job_id, parkedStatus[row.kind], to.resumeFill("Answer saved; queued to resume the existing application", payload(value)), { quiet: true }))
+    throw new Error("Gate is stale or already answered");
 }
 export function answerGate(gateId: string, answer: string, scope: AnswerScope): { jobIds: number[] } {
   if (typeof answer !== "string" || !answer.trim()) throw new Error("Answer must be nonblank text");
@@ -547,11 +565,9 @@ export function returnManualControl(jobId: number, gateId: string, answer: strin
       const job = getJob(jobId);
       const row = gateRow(gateId);
       if (!job || row?.job_id !== jobId || row.kind !== "manual" || !isCurrent(row, job) || isSubmitting(jobId)) return false;
-      closeGate(row.id);
-      clearManualLease(jobId);
       const note = answer.trim() ? `Manual control returned: ${answer.trim()}` : job.note?.trim() || "Manual control returned: done";
-      writeJob(jobId, to.resumeFill(note));
-      queueDraftRecovery(jobId);
+      if (!moveJob(jobId, "needs_manual", to.resumeFill(note), { quiet: true })) return false;
+      if (!queueDraftRecovery(jobId)) throw new Error("Submission may have occurred; manual control requires explicit inspection");
       return true;
     })
     .immediate();
@@ -572,12 +588,11 @@ export function resolveAmbiguous(jobId: number, resolution: string): void {
   if (resolution !== "not_submitted") throw new Error("Explicit confirmed-not-submitted resolution required");
   db.transaction(() => {
     const current = getOpenGate(jobId);
-    if (current?.kind !== "submission_ambiguous") throw new Error("No current submission ambiguity to resolve");
-    closeGate(current.id);
-    clearManualLease(jobId);
+    if (current?.kind !== "submission_ambiguous" || !isAmbiguous(jobId)) throw new Error("No current submission ambiguity to resolve");
     invalidateApproval(jobId);
-    confirmNotSubmitted(jobId);
-    writeJob(jobId, to.resumeFill("Explicit inspection confirmed not submitted; queued to resume existing draft"));
+    if (!confirmNotSubmitted(jobId)) throw new Error("No current submission ambiguity to resolve");
+    if (!moveJob(jobId, "needs_manual", to.resumeFill("Explicit inspection confirmed not submitted; queued to resume existing draft"), { quiet: true }))
+      throw new Error("No current submission ambiguity to resolve");
   }).immediate();
   notifyJobChange(jobId);
 }
@@ -612,7 +627,7 @@ export function resolveAmbiguityWithEvidence(jobId: number, outcome: "submitted"
     if (job.status !== "filling") {
       throw new Error("Application must be in active filling status to resolve ambiguity");
     }
-    if (!isSubmitting(jobId) || !isVerifying(jobId)) {
+    if (!isVerifying(jobId)) {
       throw new Error("Application is not in verified ambiguous submission state");
     }
     if (evidence.notes.trim().length < 5) {
@@ -630,16 +645,16 @@ export function resolveAmbiguityWithEvidence(jobId: number, outcome: "submitted"
     ].join(" ");
 
     writeCheckpoint(job, evidence.checkpoint);
-    closeOpenGate(jobId);
-    clearManualLease(jobId);
     invalidateApproval(jobId);
 
     if (outcome === "submitted") {
-      clearFillFlags(jobId);
-      writeJob(jobId, to.submitted(durableNote));
+      resetFillPhase(jobId);
+      if (!moveJob(jobId, "filling", to.submitted(durableNote), { quiet: true }))
+        throw new Error("Application must be in active filling status to resolve ambiguity");
     } else {
-      confirmNotSubmitted(jobId);
-      writeJob(jobId, to.resumeFill(durableNote));
+      if (!confirmNotSubmitted(jobId)) throw new Error("Application is not in verified ambiguous submission state");
+      if (!moveJob(jobId, "filling", to.resumeFill(durableNote), { quiet: true }))
+        throw new Error("Application must be in active filling status to resolve ambiguity");
     }
   }).immediate();
   notifyJobChange(jobId);
@@ -656,22 +671,20 @@ export function queueRecovery(jobId: number, gateId: string): { mode: "fill" | "
       const checkpoint = readCheckpoint(jobId);
       if (!checkpoint) throw new Error("Recovery requires a saved browser checkpoint");
 
-      closeGate(current.id);
-      clearManualLease(jobId);
-
       if (current.kind === "manual") {
         const note = current.text.trim() || job.note?.trim() || "Manual recovery queued";
-        writeJob(jobId, to.resumeFill(note));
-        queueDraftRecovery(jobId);
+        if (!moveJob(jobId, "needs_manual", to.resumeFill(note), { quiet: true })) throw new Error("Gate is stale or already answered");
+        if (!queueDraftRecovery(jobId)) throw new Error("Submission may have occurred; manual recovery requires explicit inspection");
         return { mode: "fill" as const, slot: checkpoint.slot };
-      } else {
-        const originalReason = current.context.trim();
-        const note =
-          originalReason && originalReason !== current.text ? originalReason : current.text.trim() || job.note?.trim() || "Ambiguous verification queued";
-        writeJob(jobId, { pending: null, note });
-        queueVerification(jobId);
-        return { mode: "verify" as const, slot: checkpoint.slot };
       }
+      const originalReason = current.context.trim();
+      const note =
+        originalReason && originalReason !== current.text ? originalReason : current.text.trim() || job.note?.trim() || "Ambiguous verification queued";
+      closeGate(current.id);
+      clearManualLease(jobId);
+      if (!moveJob(jobId, "needs_manual", to.verifyAgain(note), { quiet: true })) throw new Error("Gate is stale or already answered");
+      if (!queueVerification(jobId)) throw new Error("Submission is not ambiguous; nothing to verify");
+      return { mode: "verify" as const, slot: checkpoint.slot };
     })
     .immediate();
   notifyJobChange(jobId);

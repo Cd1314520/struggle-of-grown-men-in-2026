@@ -1,54 +1,42 @@
 import { db } from "./db";
 
-type Flag = "submitting" | "verifying" | "recovering";
+export const FILL_PHASES = ["idle", "draft_recovery", "submitting", "ambiguous", "verify_queued", "verifying"] as const;
+export type FillPhase = (typeof FILL_PHASES)[number];
+
 interface FillState {
-  submitting: number;
-  verifying: number;
-  recovering: number;
+  phase: FillPhase;
   slot: number | null;
   manual_gate: string | null;
 }
 
-const read = (jobId: number) =>
-  db.query<FillState, [number]>("SELECT submitting, verifying, recovering, slot, manual_gate FROM fill_state WHERE job_id = ?").get(jobId);
-const put = (jobId: number, flags: Partial<Record<Flag, boolean>>) => {
-  const value = (flag: Flag) => (flags[flag] === undefined ? null : Number(flags[flag]));
-  db.query(
-    `
-      INSERT INTO fill_state (job_id, submitting, verifying, recovering)
-      VALUES (?1, COALESCE(?2, 0), COALESCE(?3, 0), COALESCE(?4, 0))
-      ON CONFLICT(job_id) DO UPDATE SET
-        submitting = COALESCE(?2, submitting),
-        verifying = COALESCE(?3, verifying),
-        recovering = COALESCE(?4, recovering)`,
-  ).run(jobId, value("submitting"), value("verifying"), value("recovering"));
+const read = (jobId: number) => db.query<FillState, [number]>("SELECT phase, slot, manual_gate FROM fill_state WHERE job_id = ?").get(jobId);
+const cas = (jobId: number, to: FillPhase, from: readonly FillPhase[]) => {
+  db.query("INSERT INTO fill_state (job_id) VALUES (?) ON CONFLICT(job_id) DO NOTHING").run(jobId);
+  return (
+    db.query("UPDATE fill_state SET phase = ? WHERE job_id = ? AND phase IN (SELECT value FROM json_each(?))").run(to, jobId, JSON.stringify(from)).changes > 0
+  );
 };
 
-export const isSubmitting = (jobId: number) => read(jobId)?.submitting === 1;
-export const isVerifying = (jobId: number) => read(jobId)?.verifying === 1;
-export const isRecovering = (jobId: number) => read(jobId)?.recovering === 1;
-export const recoveryMode = (jobId: number): "verify" | "fill" | null => (isVerifying(jobId) ? "verify" : isRecovering(jobId) ? "fill" : null);
+export const fillPhase = (jobId: number): FillPhase => read(jobId)?.phase ?? "idle";
+export const isSubmitting = (jobId: number) => ["submitting", "ambiguous", "verify_queued", "verifying"].includes(fillPhase(jobId));
+export const isAmbiguous = (jobId: number) => ["ambiguous", "verify_queued", "verifying"].includes(fillPhase(jobId));
+export const isVerifying = (jobId: number) => ["verify_queued", "verifying"].includes(fillPhase(jobId));
+export const isRecovering = (jobId: number) => ["draft_recovery", "verify_queued"].includes(fillPhase(jobId));
+export const recoveryMode = (jobId: number): "verify" | "fill" | null =>
+  isVerifying(jobId) ? "verify" : fillPhase(jobId) === "draft_recovery" ? "fill" : null;
 
-export const authorizeSubmit = (jobId: number) => {
-  put(jobId, { submitting: true });
+export const authorizeSubmit = (jobId: number) => cas(jobId, "submitting", ["idle"]);
+export const beginAttempt = (jobId: number): FillPhase => {
+  cas(jobId, "idle", ["draft_recovery"]);
+  cas(jobId, "verifying", ["verify_queued"]);
+  return fillPhase(jobId);
 };
-export const beginAttempt = (jobId: number) => {
-  put(jobId, { recovering: false });
-};
-export const queueDraftRecovery = (jobId: number) => {
-  put(jobId, { verifying: false, recovering: true });
-};
-export const queueVerification = (jobId: number) => {
-  put(jobId, { submitting: true, verifying: true, recovering: true });
-};
-export const endVerification = (jobId: number) => {
-  put(jobId, { verifying: false, recovering: false });
-};
-export const confirmNotSubmitted = (jobId: number) => {
-  put(jobId, { submitting: false, verifying: false, recovering: true });
-};
-export const clearFillFlags = (jobId: number) => {
-  put(jobId, { submitting: false, verifying: false, recovering: false });
+export const markAmbiguous = (jobId: number) => cas(jobId, "ambiguous", ["idle", "draft_recovery", "submitting", "verifying", "verify_queued"]);
+export const queueVerification = (jobId: number) => cas(jobId, "verify_queued", ["ambiguous", "verifying"]);
+export const confirmNotSubmitted = (jobId: number) => cas(jobId, "draft_recovery", ["ambiguous", "verify_queued", "verifying"]);
+export const queueDraftRecovery = (jobId: number) => cas(jobId, "draft_recovery", ["idle", "draft_recovery"]);
+export const resetFillPhase = (jobId: number) => {
+  db.query("INSERT INTO fill_state (job_id) VALUES (?) ON CONFLICT(job_id) DO UPDATE SET phase = 'idle'").run(jobId);
 };
 
 export const lastSlot = (jobId: number): number | null => read(jobId)?.slot ?? null;

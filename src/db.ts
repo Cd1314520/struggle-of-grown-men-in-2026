@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { DATA } from "./config";
 import { placeOf } from "./location";
 import { connectDatabase, migrate } from "./schema";
-import { AWAITING_OUTCOME, NOT_STARTED, OFF_BOARD, to, UNASSESSED, type Status } from "./status";
+import { applicationStarted, AWAITING_OUTCOME, canMove, NOT_STARTED, OFF_BOARD, PARKED, to, UNASSESSED, type HoldReason, type Status } from "./status";
 
 export function refuseLiveDataUnderTest(env: Record<string, string | undefined> = process.env) {
   if (env["NODE_ENV"] === "test" && !env["AUTO_APPLY_DATA"])
@@ -45,6 +45,11 @@ export interface Job {
   checklist: string | null;
   practice_assessment: string | null;
   fill_checkpoint: string | null;
+  hold_reason: HoldReason | null;
+  feedback: string | null;
+  hand_picked: 0 | 1;
+  locate_tries: number;
+  deferred_at: string | null;
 }
 
 type Listener = (change: { type: "job" | "event"; jobId?: number }) => void;
@@ -105,8 +110,8 @@ export type BoardJob = Pick<
 >;
 export const listedJobs = (statuses: readonly Status[]) =>
   db
-    .query<BoardJob & Pick<Job, "practice_assessment">, [string]>(
-      `SELECT id, url, source, company, title, location, status, score, pending, note, found_at, posted_at, updated_at, submitted_at, practice_assessment
+    .query<BoardJob & Pick<Job, "practice_assessment" | "hold_reason">, [string]>(
+      `SELECT id, url, source, company, title, location, status, score, pending, note, found_at, posted_at, updated_at, submitted_at, practice_assessment, hold_reason
       FROM jobs WHERE status IN (SELECT value FROM json_each(?))`,
     )
     .all(JSON.stringify(statuses));
@@ -339,10 +344,10 @@ export function betterListing(job: Pick<Job, "source" | "location">, listing: { 
 }
 
 function fold(into: Job, url: string, source: string, location: string | null, description: string | null) {
-  if (NOT_STARTED.includes(into.status) && !into.resume_sha && betterListing(into, { source, location })) {
+  if (NOT_STARTED.includes(into.status) && !applicationStarted(into) && betterListing(into, { source, location })) {
     const cameHome = AGGREGATORS.has(into.source) === AGGREGATORS.has(source);
     applyThrough(into, url, source, location);
-    if (cameHome && !UNASSESSED.includes(into.status)) writeJob(into.id, { status: "found", note: null });
+    if (cameHome && !UNASSESSED.includes(into.status)) moveJob(into.id, NOT_STARTED, { status: "found", note: null });
   } else addSource(into.id, url, source, location);
   if (UNASSESSED.includes(into.status))
     db.query("UPDATE jobs SET location = ?, description = COALESCE(description, ?) WHERE id = ?").run(
@@ -377,10 +382,9 @@ export function insertJob(
 function deleteJob(id: number) {
   db.query("DELETE FROM events WHERE job_id = ?").run(id);
   db.query("DELETE FROM jobs WHERE id = ?").run(id);
-  for (const key of ["feedback", "locate.tries", "auto.deferred"]) kvDelete(`${key}.${id}`);
 }
 
-export function relocateJob(job: Job, rawUrl: string, description: string | null): "moved" | "merged" {
+export function relocateJob(job: Job, rawUrl: string, description: string | null): "moved" | "merged" | "stale" {
   const url = normalizeUrl(rawUrl);
   const other = jobIdForUrl(url);
   if (other !== null && other !== job.id) {
@@ -390,8 +394,13 @@ export function relocateJob(job: Job, rawUrl: string, description: string | null
     emit({ type: "job", jobId: other });
     return "merged";
   }
-  addSource(job.id, job.url, job.source, job.location);
-  updateJob(job.id, { ...to.triaged(), url, description: description || job.description });
+  const moved = db.transaction(() => {
+    if (!moveJob(job.id, "locating", { ...to.triaged(), url, description: description || job.description }, { quiet: true })) return false;
+    addSource(job.id, job.url, job.source, job.location);
+    return true;
+  })();
+  if (!moved) return "stale";
+  notifyJobChange(job.id);
   return "moved";
 }
 
@@ -402,7 +411,7 @@ export function dedupeExisting() {
   for (const j of unkeyed)
     db.query("UPDATE jobs SET dedupe_key = ?, company_key = ? WHERE id = ?").run(dedupeKey(j.company, j.title), companyKey(j.company), j.id);
   kvSet("dedupe.version", DEDUPE_VERSION);
-  const rank = (st: string) => ({ skipped: 0, found: 1, held: 2, locating: 3, triaged: 3 })[st] ?? 9;
+  const rank = (st: Status) => (st === "skipped" ? 0 : st === "found" ? 1 : st === "held" ? 2 : UNASSESSED.includes(st) ? 3 : 9);
   let merged = 0;
   for (const g of db.query<{ company_key: string }, []>("SELECT company_key FROM jobs GROUP BY company_key HAVING count(*) > 1").all()) {
     const rows = db
@@ -425,15 +434,15 @@ export function dedupeExisting() {
   if (merged) logEvent("system", `Folded ${merged} duplicate postings into existing jobs`);
 }
 
-export type JobFields = Partial<Omit<Job, "id" | "updated_at">>;
-const WRITABLE_JOB_COLUMNS: Record<keyof JobFields, true> = {
+export type JobFields = Partial<Omit<Job, "id" | "updated_at" | "status">> & { status?: never };
+export type Move = Omit<JobFields, "status"> & { status: Status };
+const WRITABLE_JOB_COLUMNS: Record<Exclude<keyof JobFields, "status">, true> = {
   url: true,
   source: true,
   company: true,
   title: true,
   location: true,
   description: true,
-  status: true,
   score: true,
   rationale: true,
   concerns: true,
@@ -451,13 +460,24 @@ const WRITABLE_JOB_COLUMNS: Record<keyof JobFields, true> = {
   checklist: true,
   practice_assessment: true,
   fill_checkpoint: true,
+  hold_reason: true,
+  feedback: true,
+  hand_picked: true,
+  locate_tries: true,
+  deferred_at: true,
 };
 
-export function writeJob(id: number, fields: JobFields) {
-  const keys = Object.keys(fields) as (keyof JobFields)[];
-  if (!keys.length) return;
+function writableKeys(fields: object) {
+  const keys = Object.keys(fields);
+  if (keys.includes("status")) throw new Error("jobs.status can only change through moveJob");
   const unknown = keys.filter(k => !Object.hasOwn(WRITABLE_JOB_COLUMNS, k));
   if (unknown.length) throw new Error(`Not a writable jobs column: ${unknown.join(", ")}`);
+  return keys as (keyof JobFields)[];
+}
+
+export function writeJob(id: number, fields: JobFields) {
+  const keys = writableKeys(fields);
+  if (!keys.length) return;
   const sets = keys.map(k => `${k} = ?`).join(", ");
   db.query(`UPDATE jobs SET ${sets}, updated_at = datetime('now') WHERE id = ?`).run(...keys.map(k => fields[k] ?? null), id);
 }
@@ -468,16 +488,58 @@ export function updateJob(id: number, fields: JobFields) {
   emit({ type: "job", jobId: id });
 }
 
-export const requeueInterruptedPrep = () => db.query("UPDATE jobs SET status = 'triaged' WHERE status = 'prepping' RETURNING id").all().length;
+const closeGates = (ids: readonly number[]) => {
+  const list = JSON.stringify(ids);
+  db.query("UPDATE question_gates SET state = 'closed' WHERE state = 'open' AND job_id IN (SELECT value FROM json_each(?))").run(list);
+  db.query("UPDATE fill_state SET manual_gate = NULL WHERE manual_gate IS NOT NULL AND job_id IN (SELECT value FROM json_each(?))").run(list);
+};
+
+export function moveJob(id: number, from: Status | readonly Status[], move: Move, opts: { quiet?: boolean } = {}): boolean {
+  const sources: readonly Status[] = typeof from === "string" ? [from] : from;
+  const { status: target, ...columns } = move;
+  for (const source of sources) if (!canMove(source, target)) throw new Error(`illegal job transition ${source} → ${target}`);
+  if (target === "held" && !columns.hold_reason) throw new Error("a held job needs a hold_reason");
+  const fields: JobFields = { ...columns, hold_reason: target === "held" ? (columns.hold_reason ?? null) : null };
+  const keys = writableKeys(fields);
+  const sets = ["status = ?", ...keys.map(k => `${k} = ?`)].join(", ");
+  const moved = db.transaction(() => {
+    const row = db
+      .query<{ id: number }, (string | number | null)[]>(
+        `UPDATE jobs SET ${sets}, updated_at = datetime('now') WHERE id = ? AND status IN (SELECT value FROM json_each(?)) RETURNING id`,
+      )
+      .get(target, ...keys.map(k => fields[k] ?? null), id, JSON.stringify(sources));
+    if (!row) return false;
+    if (!PARKED.includes(target)) closeGates([id]);
+    return true;
+  })();
+  if (moved && !opts.quiet) emit({ type: "job", jobId: id });
+  return moved;
+}
+
+function moveWhere(from: Status, target: Status, sql: string): number {
+  if (!canMove(from, target)) throw new Error(`illegal job transition ${from} → ${target}`);
+  return db.transaction(() => {
+    const ids = db
+      .query<{ id: number }, [string, string]>(sql)
+      .all(target, from)
+      .map(r => r.id);
+    if (!PARKED.includes(target)) closeGates(ids);
+    return ids.length;
+  })();
+}
+
+export const requeueInterruptedPrep = () => moveWhere("prepping", "triaged", "UPDATE jobs SET status = ?, hold_reason = NULL WHERE status = ? RETURNING id");
 
 export const releaseHeldJobs = () =>
-  db.query("UPDATE jobs SET status = 'found', note = NULL, updated_at = datetime('now') WHERE status = 'held' RETURNING id").all().length;
+  moveWhere("held", "found", "UPDATE jobs SET status = ?, note = NULL, hold_reason = NULL, updated_at = datetime('now') WHERE status = ? RETURNING id");
 export const releaseTargetHolds = () =>
-  db
-    .query(
-      "UPDATE jobs SET status = 'found', note = NULL, updated_at = datetime('now') WHERE status = 'held' AND (note LIKE 'not a practice job:%' OR note LIKE 'held back %') RETURNING id",
-    )
-    .all().length;
+  moveWhere(
+    "held",
+    "found",
+    "UPDATE jobs SET status = ?, note = NULL, hold_reason = NULL, updated_at = datetime('now') WHERE status = ? AND hold_reason IN ('triage', 'target') RETURNING id",
+  );
+
+export const deferredJobs = () => db.query<Job, []>("SELECT * FROM jobs WHERE deferred_at IS NOT NULL").all();
 
 export interface StatusChange {
   from_status: Status;

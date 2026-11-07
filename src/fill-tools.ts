@@ -2,9 +2,9 @@ import { resolveAccount } from "./accounts";
 import { CAUSE_GUIDE, recordBlocker, WORKER_CAUSES } from "./blockers";
 import { connectTab } from "./cdp-tab";
 import type { JobBrowser } from "./chrome";
-import { db, notifyJobChange, writeJob, type Job } from "./db";
+import { db, moveJob, notifyJobChange, type Job } from "./db";
 import { errorMessage } from "./errors";
-import { clearFillFlags, endVerification, isSubmitting } from "./fill-state";
+import { isSubmitting, resetFillPhase } from "./fill-state";
 import {
   checkpointFrom,
   confirmSubmission,
@@ -32,6 +32,8 @@ import {
 import { to } from "./status";
 import { gmailTools } from "./worker-tools";
 
+const STALE_WORKER = "ERROR: stale or parked fill worker; no action recorded.";
+
 export interface FillContext {
   job: Job;
   session: FillSession;
@@ -49,7 +51,6 @@ async function verifyStatus(rt: FillRuntime, ctx: FillContext, args: ToolArgs): 
 
   if (outcome === "unresolved") {
     const cp = await checkpointFrom(rt, session, args).catch(() => session.checkpoint);
-    endVerification(job.id);
     return await parkFill(
       rt,
       session,
@@ -195,11 +196,13 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
       handler: args => {
         if (isVerification || isSubmitting(job.id)) return "ERROR: an authorized or ambiguous submission cannot be skipped; report it as usual.";
         const requires = arg.oneOf(args, "requires", Object.keys(SKIPPED_FOR) as (keyof typeof SKIPPED_FOR)[]);
-        db.transaction(() => {
+        const skipped = db.transaction(() => {
+          if (!moveJob(job.id, "filling", to.skipped(`requires ${SKIPPED_FOR[requires]}: ${arg.str(args, "note")}`), { quiet: true })) return false;
           cancelJobGates(job.id);
-          clearFillFlags(job.id);
-          writeJob(job.id, to.skipped(`requires ${SKIPPED_FOR[requires]}: ${arg.str(args, "note")}`));
+          resetFillPhase(job.id);
+          return true;
         })();
+        if (!skipped) return STALE_WORKER;
         notifyJobChange(job.id);
         endSession(session, "application skipped by the worker");
         return "Recorded: application skipped. Stop now.";
@@ -228,12 +231,13 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
           if (!ownsFill(rt, session)) throw err;
           reason += `\nCurrent navigation could not be verified; checkpoint is the last observed draft: ${errorMessage(err)}`;
         }
-        recordBlocker(job.id, cause, reason);
-        if (isVerification) {
-          endVerification(job.id);
-          return parkFill(rt, session, { kind: "submission_ambiguous", text: `Verification handoff: ${reason}` }, checkpoint);
-        }
-        return parkFill(rt, session, { kind: "manual", text: reason }, checkpoint);
+        return parkFill(
+          rt,
+          session,
+          isVerification ? { kind: "submission_ambiguous", text: `Verification handoff: ${reason}` } : { kind: "manual", text: reason },
+          checkpoint,
+          { cause, detail: reason },
+        );
       },
     },
     report_result: {
@@ -257,16 +261,20 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
           stopFailedFill(rt, session, note, cause ?? "no_response");
           return "Submission ambiguity recorded; automatic retry forbidden.";
         }
-        db.transaction(() => {
+        const move =
+          outcome === "submitted" || outcome === "already_applied"
+            ? to.submitted(note)
+            : outcome === "closed"
+              ? to.skipped(`posting closed: ${note}`)
+              : to.failed(note);
+        const recorded = db.transaction(() => {
+          if (!moveJob(job.id, "filling", move, { quiet: true })) return false;
           cancelJobGates(job.id);
-          clearFillFlags(job.id);
-          if (outcome === "submitted" || outcome === "already_applied") writeJob(job.id, to.submitted(note));
-          else if (outcome === "closed") writeJob(job.id, to.skipped(`posting closed: ${note}`));
-          else {
-            writeJob(job.id, to.failed(note));
-            recordBlocker(job.id, cause ?? "other", note);
-          }
+          resetFillPhase(job.id);
+          if (outcome === "failed") recordBlocker(job.id, cause ?? "other", note, null);
+          return true;
         })();
+        if (!recorded) return STALE_WORKER;
         notifyJobChange(job.id);
         endSession(session, `result reported: ${outcome}`);
         return "Recorded.";
@@ -303,7 +311,7 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
   };
   for (const tool of Object.values(tools)) {
     const handler = tool.handler;
-    tool.handler = args => (ownsFill(rt, session) ? handler(args) : "ERROR: stale or parked fill worker; no action recorded.");
+    tool.handler = args => (ownsFill(rt, session) ? handler(args) : STALE_WORKER);
   }
   return tools;
 }

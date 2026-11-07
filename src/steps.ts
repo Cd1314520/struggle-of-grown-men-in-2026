@@ -1,5 +1,5 @@
-import { db, getJob, notifyJobChange, writeJob, type Job } from "./db";
-import { to, type Status } from "./status";
+import { db, getJob, moveJob, notifyJobChange, type Job } from "./db";
+import { canMove, SENT, to, type Status } from "./status";
 
 export const STEP_KINDS = ["questionnaire", "assessment", "schedule", "interview", "info_request", "other"] as const;
 export type StepKind = (typeof STEP_KINDS)[number];
@@ -77,7 +77,7 @@ export function addStep(job: Pick<Job, "id" | "status">, step: NewStep): { id: n
           .get(job.id, step.message_id ?? "", step.kind);
         return { id: existing?.id ?? 0, added: false };
       }
-      if (job.status === "submitted") writeJob(job.id, to.outcome("interview", title));
+      if (job.status === "submitted" && !moveJob(job.id, "submitted", to.outcome("interview", title), { quiet: true })) return { id: inserted.id, added: true };
       return { id: inserted.id, added: true };
     })
     .immediate();
@@ -137,23 +137,35 @@ export function removeStep(id: number) {
   if (!step) return;
   db.transaction(() => {
     db.query("DELETE FROM application_steps WHERE id = ?").run(id);
-    if (getJob(step.job_id)?.status === "interview" && !jobSteps(step.job_id).length) writeJob(step.job_id, to.outcome("submitted", `removed: ${step.title}`));
+    if (getJob(step.job_id)?.status === "interview" && !jobSteps(step.job_id).length)
+      moveJob(step.job_id, "interview", to.outcome("submitted", `removed: ${step.title}`), { quiet: true });
   }).immediate();
   notifyJobChange(step.job_id);
 }
 
-export function recordOutcome(jobId: number, outcome: "reopen" | "offer" | "rejected_by_company" | "withdrawn", note: string) {
-  db.transaction(() => {
-    if (outcome === "reopen") {
-      writeJob(jobId, to.outcome(jobSteps(jobId).length ? "interview" : "submitted", note));
-      return;
-    }
-    writeJob(jobId, to.outcome(outcome, note));
-    db.query(
-      "UPDATE application_steps SET state = ?, closed_at = ?, updated_at = datetime('now') WHERE job_id = ? AND state IN (SELECT value FROM json_each(?))",
-    ).run(outcome === "withdrawn" ? "cancelled" : "closed", new Date().toISOString(), jobId, JSON.stringify(OPEN));
-  }).immediate();
-  notifyJobChange(jobId);
+const CLOSED_OUTCOMES: readonly Status[] = ["offer", "rejected_by_company", "withdrawn"];
+
+export function recordOutcome(jobId: number, outcome: "reopen" | "offer" | "rejected_by_company" | "withdrawn", note: string): boolean {
+  const moved = db
+    .transaction(() => {
+      if (outcome === "reopen") return moveJob(jobId, CLOSED_OUTCOMES, to.outcome(jobSteps(jobId).length ? "interview" : "submitted", note), { quiet: true });
+      if (
+        !moveJob(
+          jobId,
+          SENT.filter(s => canMove(s, outcome)),
+          to.outcome(outcome, note),
+          { quiet: true },
+        )
+      )
+        return false;
+      db.query(
+        "UPDATE application_steps SET state = ?, closed_at = ?, updated_at = datetime('now') WHERE job_id = ? AND state IN (SELECT value FROM json_each(?))",
+      ).run(outcome === "withdrawn" ? "cancelled" : "closed", new Date().toISOString(), jobId, JSON.stringify(OPEN));
+      return true;
+    })
+    .immediate();
+  if (moved) notifyJobChange(jobId);
+  return moved;
 }
 
 export interface NextStep {

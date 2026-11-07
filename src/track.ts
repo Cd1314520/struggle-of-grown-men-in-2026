@@ -132,7 +132,7 @@ export async function trackMailbox(run: RunWorker) {
             if (!job) return "ERROR: unknown application id.";
             const status = arg.oneOf(args, "status", ENDINGS),
               note = arg.str(args, "note");
-            recordOutcome(job.id, status, note);
+            if (!recordOutcome(job.id, status, note)) return "ERROR: that application cannot take this outcome now.";
             job.status = status;
             logEvent("mail", `${status}: ${note}`, job.id, "track");
             return "Recorded.";

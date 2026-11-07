@@ -115,7 +115,7 @@ export function runOmp(opts: WorkerOptions): WorkerHandle {
         if (!f.success) {
           log("error", `omp rejected ${f.command ?? "?"}: ${String(f.error)}`);
           if (f.command === "prompt" || f.command === "set_host_tools") {
-            result = { status: "error", error: String(f.error) };
+            result ??= { status: "error", error: String(f.error) };
             closeInput();
           }
         }
@@ -152,7 +152,7 @@ export function runOmp(opts: WorkerOptions): WorkerHandle {
         }
         break;
       case "prompt_result":
-        result = {
+        result ??= {
           status: isStatus(f.status) ? f.status : "error",
           ...(f.error instanceof Object && "message" in f.error ? { error: String(f.error.message) } : {}),
         };

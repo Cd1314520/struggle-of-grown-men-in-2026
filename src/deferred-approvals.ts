@@ -1,14 +1,17 @@
 import { existsSync } from "node:fs";
 import { autoApply, reconsiderAutoApproval } from "./auto";
-import { db, employerApplications, getJob, openedAt, kvDelete, kvEntries, kvGet, kvSet, logEvent, notifyJobChange, updateJob, writeJob } from "./db";
+import { db, deferredJobs, employerApplications, logEvent, moveJob, notifyJobChange, openedAt, updateJob } from "./db";
 import { countOne, usedToday } from "./limits";
 import { profileProblems } from "./profile";
 import { workingPdf } from "./resume";
-import { to } from "./status";
+import { applicationStarted, to } from "./status";
 
-const DEFERRED_PREFIX = "auto.deferred.";
-export const deferApproval = (jobId: number) => kvSet(`${DEFERRED_PREFIX}${jobId}`, new Date().toISOString());
-export const forgetDeferredApproval = (jobId: number) => kvDelete(`${DEFERRED_PREFIX}${jobId}`);
+export const deferApproval = (jobId: number) => {
+  updateJob(jobId, { deferred_at: new Date().toISOString() });
+};
+export const forgetDeferredApproval = (jobId: number) => {
+  updateJob(jobId, { deferred_at: null });
+};
 
 export function pumpDeferredApprovals() {
   if (profileProblems().length > 0) return;
@@ -18,35 +21,15 @@ export function pumpDeferredApprovals() {
   const limit = rules.perDay;
   if (usedToday("auto") >= limit) return;
 
-  const opened = (key: string) => {
-    const job = getJob(Number(key.slice(DEFERRED_PREFIX.length)) || 0);
-    return job ? openedAt(job) : 0;
-  };
-  const rows = kvEntries(DEFERRED_PREFIX).sort((a, b) => opened(b.key) - opened(a.key));
+  const rows = deferredJobs().sort((a, b) => openedAt(b) - openedAt(a));
 
-  for (const row of rows) {
+  for (const job of rows) {
     if (usedToday("auto") >= limit) break;
 
-    const idStr = row.key.slice(DEFERRED_PREFIX.length);
-    const jobId = Number(idStr);
-    if (!Number.isInteger(jobId) || jobId <= 0) {
-      kvDelete(row.key);
-      continue;
-    }
-
-    const job = getJob(jobId);
-    if (!job) {
-      kvDelete(row.key);
-      continue;
-    }
-
     const pdf = workingPdf(job.id);
-    const hasFeedback = !!kvGet(`feedback.${job.id}`);
-    const isFrozen = !!(job.resume_sha || job.resume_frozen_at);
-    const isSubmitted = !!(job.submitted_at || job.status === "submitted");
 
-    if (job.status !== "awaiting_approval" || job.approved_by !== null || hasFeedback || isFrozen || isSubmitted || !existsSync(pdf)) {
-      kvDelete(row.key);
+    if (job.status !== "awaiting_approval" || job.approved_by !== null || job.hand_picked === 1 || applicationStarted(job) || !existsSync(pdf)) {
+      forgetDeferredApproval(job.id);
       continue;
     }
 
@@ -59,23 +42,30 @@ export function pumpDeferredApprovals() {
 
     if (result.approved && result.verdict) {
       const verdict = result.verdict;
-      db.transaction(() => {
-        countOne("auto");
-        writeJob(job.id, {
-          ...to.approved("auto"),
-          score: verdict.score,
-          checklist: JSON.stringify(verdict.items),
-          practice_assessment: verdict.practice ? JSON.stringify(verdict.practice) : null,
-        });
-        kvDelete(row.key);
+      const moved = db.transaction(() => {
+        const ok = moveJob(
+          job.id,
+          "awaiting_approval",
+          {
+            ...to.approved("auto"),
+            score: verdict.score,
+            checklist: JSON.stringify(verdict.items),
+            practice_assessment: verdict.practice ? JSON.stringify(verdict.practice) : null,
+            deferred_at: null,
+          },
+          { quiet: true },
+        );
+        if (ok) countOne("auto");
+        return ok;
       })();
+      if (!moved) continue;
       notifyJobChange(job.id);
       logEvent("auto", `Approved by reconsidered auto apply: ${verdict.reason}`, job.id, "prep");
     } else {
       if (result.approval.deferred === "daily_cap") {
         break;
       } else {
-        kvDelete(row.key);
+        forgetDeferredApproval(job.id);
         if (result.approval.note || result.reason) {
           updateJob(job.id, { note: result.approval.note ?? `needs your review: ${result.reason}` });
         }

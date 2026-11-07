@@ -5,18 +5,17 @@ import { homeOf, nearHome } from "./home";
 import { openGateKinds, type GateKind } from "./questions";
 import { parsePracticeAssessment, rubricOf } from "./practice";
 import { setAsideReason, type Reason } from "./reasons";
-import type { Status } from "./status";
+import { ASSESSING, FILL_STAGE, PARKED, SENT, type Status } from "./status";
 import { nextSteps, type NextStep } from "./steps";
 
 export const LIST_VIEWS = ["review", "pipeline", "applications", "held", "rejected"] as const;
 export type ListView = (typeof LIST_VIEWS)[number];
 export const isListView = (v: unknown): v is ListView => LIST_VIEWS.includes(v as ListView);
 
-export const SENT: readonly Status[] = ["submitted", "interview", "offer", "rejected_by_company", "withdrawn"];
 const VIEW_STATUSES: Record<ListView, readonly Status[]> = {
   review: ["awaiting_approval"],
-  pipeline: ["awaiting_submit", "needs_input", "needs_manual", "failed", "filling", "approved", "prepping", "locating", "triaged"],
-  applications: ["offer", "interview", "submitted", "rejected_by_company", "withdrawn"],
+  pipeline: [...FILL_STAGE, ...ASSESSING],
+  applications: SENT,
   held: ["held"],
   rejected: ["rejected"],
 };
@@ -72,7 +71,6 @@ const byCompany = (a: ListRow, b: ListRow) => a.company.localeCompare(b.company)
 const sentAt = (j: ListRow) => stamp(j.submitted_at ?? j.updated_at);
 
 const QUEUED: readonly Status[] = ["approved", "filling"];
-const UNASSESSED: readonly Status[] = ["triaged", "locating", "prepping"];
 const CLOSED: readonly Status[] = ["rejected_by_company", "withdrawn"];
 
 const SPECS: Record<ListView, Spec> = {
@@ -102,14 +100,14 @@ const SPECS: Record<ListView, Spec> = {
         ? "failed"
         : j.status === "needs_input" && j.gate === "question"
           ? "questions"
-          : ["awaiting_submit", "needs_input", "needs_manual"].includes(j.status)
+          : PARKED.includes(j.status)
             ? "needs_you"
             : QUEUED.includes(j.status)
               ? "applying"
               : "assessing",
     sorts: {
       default: (a, b) =>
-        (QUEUED.includes(a.status) && QUEUED.includes(b.status)) || (UNASSESSED.includes(a.status) && UNASSESSED.includes(b.status))
+        (QUEUED.includes(a.status) && QUEUED.includes(b.status)) || (ASSESSING.includes(a.status) && ASSESSING.includes(b.status))
           ? byNewest(a, b)
           : stamp(a.updated_at) - stamp(b.updated_at),
       newest: byNewest,
@@ -186,7 +184,7 @@ function viewRows(view: ListView): ListRow[] {
   for (const j of jobs) here.set(j.company, (here.get(j.company) ?? 0) + 1);
   const from = view === "held" || view === "rejected" ? lastMovedFrom(jobs.filter(j => !j.note).map(j => j.id)) : null;
   const spec = SPECS[view];
-  return jobs.map(({ practice_assessment, ...j }) => {
+  return jobs.map(({ practice_assessment, hold_reason, ...j }) => {
     const row: ListRow = {
       ...j,
       rubric: rubricOf(parsePracticeAssessment(practice_assessment), describing()),
@@ -195,7 +193,7 @@ function viewRows(view: ListView): ListRow[] {
       gate: gates.get(j.id) ?? null,
       appliedThere: applied.get(j.company) ?? 0,
       companyCount: here.get(j.company) ?? 1,
-      reason: from ? setAsideReason(j.note, from.get(j.id) ?? null) : null,
+      reason: from ? setAsideReason(j.note, from.get(j.id) ?? null, hold_reason) : null,
       group: "",
     };
     row.group = spec.of(row);

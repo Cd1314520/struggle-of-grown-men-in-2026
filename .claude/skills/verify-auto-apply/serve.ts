@@ -42,7 +42,8 @@ config.limits.applySpreadHours = 0;
 config.chrome.vncPort = 0;
 config.chrome.cdpPort = PORT + 2;
 
-const { db, getJob, insertJob, logEvent, updateJob } = await import("../../../src/db");
+const { db, getJob, insertJob, logEvent, moveJob, updateJob } = await import("../../../src/db");
+const { to } = await import("../../../src/status");
 const { MAIN, PDF_NAME } = await import("../../../src/resume");
 const { createHandler } = await import("../../../src/server");
 const { seedProfile } = await import("../../../src/profile");
@@ -202,10 +203,14 @@ function seed() {
     if (!id) throw new Error(`seed job ${i + 1} was not inserted`);
     copyFileSync(join(REPO, "tests/fixtures/sample-resume.pdf"), join(jobDir(id), PDF_NAME));
     writeFileSync(join(jobDir(id), MAIN), `// stand-in tailored resume source for job ${id}\n`);
-    updateJob(id, { status: s.status, score: s.score, rationale: `Seeded for verification: ${s.script} script.` });
-    if (s.status === "submitted") updateJob(id, { submitted_at: new Date(Date.now() - 2 * 86400_000).toISOString(), note: "seeded as sent" });
-    if (s.status === "held") updateJob(id, { note: "seeded as held" });
-    if (s.status === "failed") updateJob(id, { note: "seeded failure: stand-in worker stopped" });
+    updateJob(id, { score: s.score, rationale: `Seeded for verification: ${s.script} script.` });
+    if (s.status === "submitted") moveJob(id, "triaged", { ...to.submitted("seeded as sent"), submitted_at: new Date(Date.now() - 2 * 86400_000).toISOString() });
+    else if (s.status === "held") moveJob(id, "triaged", to.held("seeded as held", "user"));
+    else {
+      moveJob(id, "triaged", to.prepping());
+      if (s.status === "failed") moveJob(id, "prepping", to.failed("seeded failure: stand-in worker stopped"));
+      else moveJob(id, "prepping", to.awaitingApproval(null));
+    }
   });
   logEvent("system", `Verification seed: ${SEED.length} jobs`);
 }

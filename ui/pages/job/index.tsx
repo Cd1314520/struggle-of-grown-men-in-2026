@@ -1,5 +1,5 @@
 import { ArrowLeft, ChevronRight } from "lucide-react";
-import type { Status } from "../../../src/status";
+import { ASSESSING, FILL_STAGE, SENT, type Status } from "../../../src/status";
 import { Button, Workspace } from "../../components/ui";
 import { useJob } from "../../lib/api";
 import { href, useRoute, type Page as Section } from "../../lib/router";
@@ -8,9 +8,8 @@ import { JobDetail } from "./detail";
 function homeOf(status: Status): readonly [label: string, link: string] | null {
   const at = (page: Section, ...parts: string[]) => href(page, ...parts);
   if (status === "awaiting_approval") return ["Review", at("review")];
-  if (["awaiting_submit", "needs_input", "needs_manual", "failed", "filling", "approved", "prepping", "locating", "triaged"].includes(status))
-    return ["Pipeline", at("pipeline")];
-  if (["submitted", "interview", "offer", "rejected_by_company", "withdrawn"].includes(status)) return ["Applications", at("applications")];
+  if (FILL_STAGE.includes(status) || ASSESSING.includes(status)) return ["Pipeline", at("pipeline")];
+  if (SENT.includes(status)) return ["Applications", at("applications")];
   if (status === "held") return ["Held", at("archive", "held")];
   if (status === "rejected") return ["Rejected", at("archive", "rejected")];
   return null;
