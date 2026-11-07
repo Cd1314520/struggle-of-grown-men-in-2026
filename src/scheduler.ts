@@ -293,13 +293,13 @@ export class Scheduler {
   cancelImport(): boolean {
     if (!this.importRun?.handle) return false;
     this.importRun.cancelled = true;
-    this.importRun.handle.abort();
+    this.importRun.handle.abort("import cancelled");
     return true;
   }
 
-  abortFill(jobId: number) {
+  abortFill(jobId: number, reason: string) {
     const session = this.rt.sessions.get(jobId);
-    if (session) endSession(session);
+    if (session) endSession(session, reason);
     cancelJobGates(jobId);
   }
 
@@ -437,7 +437,7 @@ export class Scheduler {
       .catch(async (err: unknown) => {
         stopFailedFill(this.rt, session, `fill: ${errorMessage(err)}`);
         if (session.handle) {
-          session.handle.abort();
+          session.handle.abort("fill crashed; parked for manual recovery");
           await session.handle.done;
         }
       })

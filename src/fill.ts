@@ -168,7 +168,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   if (isVerification) {
     if (session.active && capacity && ownsFill(rt, session)) {
       updateJob(job.id, to.verifyAgain(`verification stopped by model provider capacity; checking again (${result.error})`));
-      endSession(session);
+      endSession(session, "model provider at capacity; verification will retry");
     } else if (session.active) {
       parkGate(
         job.id,
@@ -186,7 +186,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   if (capacity && !isSubmitting(job.id) && ownsFill(rt, session)) {
     updateJob(job.id, to.resumeFill(`Resuming the same draft: the model provider was at capacity (${result.error})`));
     queueDraftRecovery(job.id);
-    endSession(session);
+    endSession(session, "model provider at capacity; resuming the same draft");
     return;
   }
   stopFailedFill(rt, session, `Worker ended without a verified outcome (${result.error ?? result.status}).`);

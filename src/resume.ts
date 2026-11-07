@@ -32,6 +32,8 @@ export function stockPages(): number | null {
 
 export const stockPdf = () => join(DATA, "stock", PDF_NAME);
 
+export const stockResumeSource = () => (existsSync(STOCK_MAIN) ? readFileSync(STOCK_MAIN, "utf8") : "");
+
 export interface StockResume {
   exists: boolean;
   pages: number | null;

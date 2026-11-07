@@ -94,7 +94,7 @@ function plain(e: Pick<ActivityItem, "kind" | "message">) {
   const m = e.message.replace(/\bTab job-\d+:\s*/g, "").replace(IDS, ""),
     cut = (s: string) => s.replace(/^\w+:\s*/, "");
   if (/^Chrome started|^Gmail connected|^\w+ worker aborted:\s*$|^Closed this application's parked browser tab/.test(m)) return null;
-  const worker = /^(\w+) worker (aborted|error): (.+)$/s.exec(m);
+  const worker = /^(\w+) worker (aborted|error|stopped): (.+)$/s.exec(m);
   if (worker) return `The ${worker[1] ?? ""} worker ${worker[2] === "error" ? "failed" : "stopped"}: ${worker[3] ?? ""}`;
   const lead = /^(\w+): /.exec(m);
   if (e.kind === "mail") {

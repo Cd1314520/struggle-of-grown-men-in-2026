@@ -91,7 +91,7 @@ export function runOmp(opts: WorkerOptions): WorkerHandle {
 
   let lastText = "";
   let result = null as WorkerResult | null;
-  let abortRequested = false as boolean;
+  let abortReason = null as string | null;
 
   const closeInput = () => void proc.stdin.end();
   const onFrame = (f: Frame) => {
@@ -192,15 +192,15 @@ export function runOmp(opts: WorkerOptions): WorkerHandle {
       const tail = (await stderr).trim().split("\n").slice(-5).join("\n");
       result = { status: "error", error: `omp exited with code ${code} before finishing. ${tail}` };
     }
-    if (result.status !== "completed")
-      log(result.status === "aborted" && abortRequested ? "system" : "error", `${opts.name} worker ${result.status}: ${result.error ?? ""}`);
+    if (result.status === "aborted" && abortReason !== null) log("system", `${opts.name} worker stopped: ${abortReason}`);
+    else if (result.status !== "completed") log("error", `${opts.name} worker ${result.status}: ${result.error || "no error details reported"}`);
     return { ...result, lastText };
   })();
 
   return {
     done,
-    abort: () => {
-      abortRequested = true;
+    abort: (reason?: string) => {
+      abortReason ??= reason?.trim() || "stopped by the host";
       result ??= { status: "aborted" };
       send({ type: "abort" });
       setTimeout(() => {

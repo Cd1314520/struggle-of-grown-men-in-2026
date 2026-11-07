@@ -5,7 +5,10 @@ const SENIOR = /\b(senior|sr|staff|principal|lead|manager|director|head of|vice 
 const HARDWARE =
   /\b(fpga|asic|rtl|vlsi|pcb|firmware)\b|\bembedded (software|systems?|linux|firmware|engineer|test)\b|\bhardware ((test|design|validation|reliability) )?engineer|\belectrical (hardware )?engineer/i;
 
-const DEAD_ENDS: [RegExp, string][] = [[/(^|\.)paycomonline\.(net|com)$/, "Paycom's applicant portal refuses to create the candidate's account"]];
+const DEAD_ENDS: [RegExp, string][] = [
+  [/(^|\.)paycomonline\.(net|com)$/, "Paycom's applicant portal refuses to create the candidate's account"],
+  [/(^|\.)lever\.co$/, "Lever's hCaptcha rejects this machine's submissions"],
+];
 
 export function deadEnd(url: string): string | null {
   let host: string;

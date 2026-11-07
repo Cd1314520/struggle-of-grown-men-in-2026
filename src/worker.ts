@@ -69,7 +69,7 @@ export interface WorkerOptions {
 
 export interface WorkerHandle {
   done: Promise<WorkerResult & { lastText: string }>;
-  abort: () => void;
+  abort: (reason?: string) => void;
 }
 
 export type HarnessId = "omp" | "claude-code";

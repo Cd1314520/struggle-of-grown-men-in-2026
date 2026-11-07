@@ -205,21 +205,21 @@ function jobAction(scheduler: Scheduler, job: Job, action: string, text: string)
     case "reject":
       if (job.status === "rejected") return "already rejected";
       if (wasSent(job)) return "this application was already sent; it cannot be rejected here";
-      scheduler.abortFill(job.id);
+      scheduler.abortFill(job.id, "application rejected by you");
       updateJob(job.id, to.rejected(text || null));
       break;
     case "hold":
       if (job.status === "held") return "already held";
       if (job.status === "rejected") return "rejected; reconsider it first";
       if (wasSent(job)) return "this application was already sent; it cannot be held";
-      scheduler.abortFill(job.id);
+      scheduler.abortFill(job.id, "application held by you");
       updateJob(job.id, to.held(text || "held by you"));
       break;
     case "redo":
       if (job.status !== "awaiting_approval") return "the resume can only be changed while the job is awaiting approval";
       if (job.resume_sha) return "this application has already started with its frozen resume; the resume can no longer be changed";
       if (!text) return "feedback text required";
-      scheduler.abortFill(job.id);
+      scheduler.abortFill(job.id, "resume redo requested by you");
       kvSet(`feedback.${job.id}`, text);
       updateJob(job.id, to.triaged("redo requested"));
       break;
@@ -231,7 +231,7 @@ function jobAction(scheduler: Scheduler, job: Job, action: string, text: string)
       break;
     case "mark_submitted":
       if (wasSent(job)) return "already recorded as submitted";
-      scheduler.abortFill(job.id);
+      scheduler.abortFill(job.id, "application marked submitted by you");
       updateJob(job.id, to.submitted(text || "submitted manually"));
       break;
     case "mark_offer":

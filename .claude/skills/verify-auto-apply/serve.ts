@@ -108,6 +108,8 @@ async function actOut(opts: WorkerOptions, stopped: () => boolean) {
       question: "What is your desired annual base salary in USD?",
       context: "Compensation section of the stand-in application form. Required field.",
       options: [],
+      why: "fact_missing",
+      missing: "A salary figure for this role in the answer bank",
     });
     if (!going(reply)) return;
   }

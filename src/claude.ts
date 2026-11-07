@@ -186,7 +186,7 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
 
   let lastText = "";
   let result = null as WorkerResult | null;
-  let abortRequested = false as boolean;
+  let abortReason = null as string | null;
   let limited = null as string | null;
 
   const stop = () => {
@@ -268,18 +268,16 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
       const tail = (await stderr).trim().split("\n").slice(-5).join("\n");
       result = { status: "error", error: `${limited ? `${limited}. ` : ""}claude exited with code ${code} before finishing. ${tail}`.trim() };
     }
-    if (result.status !== "completed")
-      log(
-        result.status === "aborted" && abortRequested ? "system" : "error",
-        `${opts.name} worker ${result.status}: ${result.error ?? ""} (Claude Code session ${sessionId})`,
-      );
+    if (result.status === "aborted" && abortReason !== null) log("system", `${opts.name} worker stopped: ${abortReason} (Claude Code session ${sessionId})`);
+    else if (result.status !== "completed")
+      log("error", `${opts.name} worker ${result.status}: ${result.error || "no error details reported"} (Claude Code session ${sessionId})`);
     return { ...result, lastText };
   })();
 
   return {
     done,
-    abort: () => {
-      abortRequested = true;
+    abort: (reason?: string) => {
+      abortReason ??= reason?.trim() || "stopped by the host";
       result ??= { status: "aborted" };
       stop();
     },

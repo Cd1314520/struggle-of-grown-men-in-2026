@@ -196,7 +196,14 @@ const navigation = {
   step: "Requisition 1 / questions",
   notes: "Use candidate home; verify saved draft",
 };
-const question = { ...navigation, question: "Required salary?", context: "Employer 1 / annual USD base salary", options: [] };
+const question = {
+  ...navigation,
+  question: "Required salary?",
+  context: "Employer 1 / annual USD base salary",
+  options: [],
+  why: "fact_missing",
+  missing: "Required salary",
+};
 function call(worker: SimulatedWorker, name: string, args: Record<string, unknown>) {
   return must(worker.options.tools[name], `host tool ${name}`).handler(args);
 }

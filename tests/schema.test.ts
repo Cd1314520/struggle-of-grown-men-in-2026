@@ -281,7 +281,7 @@ describe("schema migrations", () => {
           ('m1', 'Acme', 'Relocate?', 'Required', '["Yes","No"]', 'No', 'g1', 'b'),
           ('m9', 'Gone Co', 'Clearance?', 'Required', '[]', 'None', 'missing', 'z');
       `);
-      expect(migrate(db).map(m => m.name)).toEqual(["answer bank"]);
+      expect(migrate(db, MIGRATIONS.slice(0, 7)).map(m => m.name)).toEqual(["answer bank"]);
       expect(
         db.query("SELECT job_id, employer, title, question, context, options, answer, answered_at, filed_at FROM banked_answers ORDER BY id").all(),
       ).toEqual([
@@ -319,6 +319,22 @@ describe("schema migrations", () => {
           "INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, created_at) VALUES ('g4', 1, 'question', 'x', 'y', 'Acme', 't', '', '[]', 'open', 'f')",
         ),
       ).toThrow(/UNIQUE/);
+    });
+  });
+
+  describe("gate reasons (version 8)", () => {
+    it("adds the reason and the missing detail to gates and queued questions, empty for the old ones", () => {
+      const db = memory();
+      migrate(db, MIGRATIONS.slice(0, 7));
+      db.run(`
+        INSERT INTO jobs (id, url, source, company, title, status) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'Engineer', 'needs_input');
+        INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, created_at)
+          VALUES ('g1', 1, 'question', 'job:1:m1', 'm1', 'Acme', 'Relocate?', '', '[]', 'open', 'a');
+        INSERT INTO queued_questions (job_id, match_key, text, context, options, queued_at) VALUES (1, 'm1', 'Relocate?', '', '[]', 'a');
+      `);
+      expect(migrate(db).map(m => m.name)).toEqual(["gate reasons"]);
+      expect(db.query("SELECT why, missing FROM question_gates").all()).toEqual([{ why: null, missing: null }]);
+      expect(db.query("SELECT why, missing FROM queued_questions").all()).toEqual([{ why: null, missing: null }]);
     });
   });
 

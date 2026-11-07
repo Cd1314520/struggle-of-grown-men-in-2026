@@ -65,16 +65,25 @@ describe("recheck", () => {
       ["answer_question", { number: 2, answer: "Mister", basis: "low-stakes" }],
       ["answer_question", { number: 2, answer: "Mr.", basis: "low-stakes" }],
       ["answer_question", { number: 3, answer: "No", basis: "Are you Hispanic or Latino?" }],
+      ["recheck_done", { summary: "too early" }],
+      ["leave_question", { number: 1, reason: "  " }],
+      ["leave_question", { number: 1, reason: "needs the number itself" }],
       ["recheck_done", { summary: "answered 2, left SSN" }],
     ], replies, prompts));
     assert.ok(prompts[0].includes("1. Gamma") && prompts[0].includes("3. Acme"));
     assert.ok(prompts[0].includes("Hispanic or Latino?\\nNo."));
+    assert.ok(prompts[0].includes("## Resume") && prompts[0].includes("#show"));
     assert.ok(replies[0].startsWith("ERROR") && replies[1].startsWith("ERROR"));
+    assert.ok(replies[4].startsWith("ERROR") && replies[4].includes("question 1"));
+    assert.ok(replies[5].startsWith("ERROR"));
+    assert.equal(replies[6], "Left for the candidate.");
     assert.equal(getGate(title.id).answer, "Mr.");
     assert.equal(getGate(hispanic.id).answer, "No");
     assert.equal(getGate(ssn.id).state, "open");
     assert.equal(getJob(1).status, "approved");
     assert.equal(getJob(3).status, "needs_input");
+    const left = db.query("SELECT message FROM events WHERE job_id = 3 AND worker = 'recheck'").all().map(e => e.message);
+    assert.deepEqual(left, ['Left for you: "Social Security Number" — needs the number itself']);
     `);
   });
 
@@ -90,12 +99,36 @@ describe("recheck", () => {
     assert.equal(recheckDue(), false);
     kvSet("recheck.triedAt", "2000-01-01T00:00:00Z");
     assert.equal(recheckDue(), true);
-    await recheckOpenQuestions(worker([["recheck_done", { summary: "left it" }]], []));
+    await recheckOpenQuestions(worker([["leave_question", { number: 1, reason: "needs the candidate" }], ["recheck_done", { summary: "left it" }]], []));
     assert.equal(recheckDue(), false);
     writeFileSync(process.env.AUTO_APPLY_PROFILE + "/answers.md", "### Title\\nMr.\\n");
     assert.equal(recheckDue(), false);
     settled();
     assert.equal(recheckDue(), true);
+    `);
+  });
+
+  it("also runs for question gates it has not considered, and only those", () => {
+    scenario(`
+    job(1, "Acme"); job(2, "Beta");
+    parkGate(1, ask("Title", ["Mr.", "Ms."]), null);
+    db.query("UPDATE question_gates SET created_at = '1999-01-01T00:00:00Z' WHERE job_id = 1").run();
+    const prompts = [];
+    assert.equal(recheckDue(), false);
+    kvSet("recheck.seenAt", "2000-01-01T00:00:00Z");
+    assert.equal(recheckDue(), true);
+    await recheckOpenQuestions(worker([["leave_question", { number: 1, reason: "needs the candidate" }], ["recheck_done", { summary: "left it" }]], [], prompts));
+    assert.equal(recheckDue(), false);
+    parkGate(2, ask("Pronouns", []), null);
+    assert.equal(recheckDue(), false);
+    kvSet("recheck.considered", "2000-01-01T00:00:00Z");
+    db.query("UPDATE question_gates SET created_at = '2000-06-01T00:00:00Z' WHERE job_id = 2").run();
+    assert.equal(recheckDue(), true);
+    await recheckOpenQuestions(worker([["leave_question", { number: 1, reason: "no pronouns in the details" }], ["recheck_done", { summary: "left it" }]], [], prompts));
+    assert.ok(prompts[1].includes("Pronouns") && !prompts[1].includes("Question: Title"));
+    assert.equal(recheckDue(), false);
+    const events = db.query("SELECT message FROM events WHERE job_id = 2 AND worker = 'recheck'").all().map(e => e.message);
+    assert.deepEqual(events, ['Left for you: "Pronouns" — no pronouns in the details']);
     `);
   });
 });
