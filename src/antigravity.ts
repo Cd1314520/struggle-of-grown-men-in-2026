@@ -14,7 +14,7 @@ import { config, PROMPTS } from "./config";
 import { logEvent } from "./db";
 import { errorMessage } from "./errors";
 import type { CatalogModel } from "./models";
-import { AGY_PREFIX, durationMs, type WorkerHandle, type WorkerOptions, type WorkerResult } from "./worker";
+import { AGY_PREFIX, durationMs, type Builtin, type WorkerHandle, type WorkerOptions, type WorkerResult } from "./worker";
 
 // Overridable so a test can stand in a fake, which runs under Bun. The installer puts agy in
 // %LOCALAPPDATA%\agy\bin, which a service's PATH may not include.
@@ -91,6 +91,16 @@ export function stepOfTool(name: string, params: Record<string, unknown> = {}): 
   return stepOf(name, params);
 }
 
+// agy has no flag that hands a worker only some tools, and --dangerously-skip-permissions approves
+// them all, but its deny rules hold in every mode. They come per run through --settings, never
+// saved. A worker given no tool that writes files may not write them, and one given neither those
+// nor bash may not run commands either, since a command can write files too.
+export function denyRules(builtins: Builtin[]): string[] {
+  const writes = builtins.some(b => b === "write" || b === "edit");
+  if (writes) return [];
+  return builtins.includes("bash") ? ["write_file(*)"] : ["write_file(*)", "command(*)"];
+}
+
 // Workers that share a working directory take turns there, since the MCP config is one file in it.
 const turns = new Map<string, Promise<unknown>>();
 const active = new Set<Bun.Subprocess>();
@@ -160,6 +170,8 @@ export function runAntigravity(opts: WorkerOptions): WorkerHandle {
     // argument as its value (agy 1.5.2 then exits 2).
     const args = [...exe, "--input-format", "stream-json", "--output-format", "stream-json", "--dangerously-skip-permissions", "--disable-slash-commands"];
     if (model && model !== "default") args.push("--model", model);
+    const deny = denyRules(opts.builtins);
+    if (deny.length) args.push("--settings", JSON.stringify({ permissions: { deny } }));
 
     let lastText = "";
     let conversation = "";

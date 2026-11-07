@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agyCatalog, parseAgyModels, runAntigravity, stepOfTool } from "../src/antigravity";
+import { agyCatalog, denyRules, parseAgyModels, runAntigravity, stepOfTool } from "../src/antigravity";
 import { lastEventId, workerEvents } from "../src/db";
 import { isCapacityError } from "../src/errors";
 import { harnessOf, S, schema, usesPlaywright, type HostTool, type WorkerOptions } from "../src/worker";
@@ -81,6 +81,19 @@ describe("an agy worker", () => {
     expect(host["timeoutSeconds"]).toBe(172800);
     expect(host["tools"]).toEqual({ report_result: { eager: true } });
     expect(mcp?.mcpServers["browser"]).toBeUndefined();
+  });
+
+  it("denies writing files to a worker given no file-writing tool, and commands too without bash", async () => {
+    expect(denyRules([])).toEqual(["write_file(*)", "command(*)"]);
+    expect(denyRules(["read", "web_search"])).toEqual(["write_file(*)", "command(*)"]);
+    expect(denyRules(["read", "bash"])).toEqual(["write_file(*)"]);
+    expect(denyRules(["read", "write"])).toEqual([]);
+    expect(denyRules(["read", "write", "edit", "bash"])).toEqual([]);
+    await run({ tool: "report_result", args: {} }, { tools: report, builtins: [] }).done;
+    const settings = JSON.parse(flag(given().argv, "--settings") ?? "{}") as { permissions?: { deny?: string[] } };
+    expect(settings.permissions?.deny).toEqual(["write_file(*)", "command(*)"]);
+    await run({ tool: "report_result", args: {} }, { tools: report, builtins: ["read", "write"] }).done;
+    expect(given().argv).not.toContain("--settings");
   });
 
   it("takes the MCP config out of the working directory afterwards, leaving one that was there", async () => {
