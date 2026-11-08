@@ -34,6 +34,12 @@ describe("capacity refusals", () => {
     expect(isCapacityError("the tool crashed")).toBe(false);
   });
 
+  it("count agy running out of its Google quota", () => {
+    const agy = "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h57m57s.";
+    expect(isCapacityError(agy)).toBe(true);
+    expect(isCapacityError(`Worker ended without a verified outcome (${agy}).`)).toBe(true);
+  });
+
   it("count a harness that is not installed or not signed in, so the next model takes the work", () => {
     expect(isCapacityError("agy is not installed")).toBe(true);
     expect(isCapacityError("agy is not signed in (run agy once in a terminal to sign in)")).toBe(true);

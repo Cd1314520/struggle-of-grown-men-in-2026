@@ -58,4 +58,12 @@ describe("limitResetsAt, for a wait given as a span", () => {
     expect(resetTime("Try again in 1 hour 30 minutes.", now)).toBe(now.getTime() + 90 * 60_000);
     expect(resetTime("Try again in 3 days and 4 hours.", now)).toBe(now.getTime() + 3 * 86_400_000 + 4 * 3_600_000);
   });
+
+  it("reads agy's short form", () => {
+    const now = new Date("2026-10-31T12:00:00.000Z");
+    const agy = "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h57m57s.";
+    expect(resetTime(agy, now)).toBe(now.getTime() + 3_600_000 + 57 * 60_000 + 57_000);
+    expect(resetTime("Resets in 45s.", now)).toBe(now.getTime() + 45_000);
+    expect(resetTime("Resets in 2d3h.", now)).toBe(now.getTime() + 2 * 86_400_000 + 3 * 3_600_000);
+  });
 });

@@ -19,7 +19,7 @@ export function settled(write: () => unknown): void {
 // computer wakes from sleep).
 export const isCapacityError = (message: string | null | undefined): boolean =>
   !!message &&
-  /at capacity|rate[ _-]?limit|too many requests|\b429\b|overloaded|usage limit|hit your (?:\w+ )?limit|quota (?:exceeded|exhausted)|exceeded (?:your |the )?(?:\w+ )?quota|resource[ _-]?exhausted|\b(?:agy|codex|claude|omp) is not (?:installed|signed in)|authentication failed or timed out/i.test(
+  /at capacity|rate[ _-]?limit|too many requests|\b429\b|overloaded|usage limit|hit your (?:\w+ )?limit|quota (?:exceeded|exhausted|reached)|exceeded (?:your |the )?(?:\w+ )?quota|resource[ _-]?exhausted|\b(?:agy|codex|claude|omp) is not (?:installed|signed in)|authentication failed or timed out/i.test(
     message,
   );
 
@@ -28,8 +28,10 @@ export const isCapacityError = (message: string | null | undefined): boolean =>
 // - Claude Code's "..., resets 2026-10-31T05:00:00.000Z)" (src/claude.ts);
 // - Codex's "try again at 11:58 PM." (this machine's local time, the next one to come) or "try again
 //   at Nov 3rd, 2026 11:58 PM.";
-// - "try again in 2 hours" / "in 1 hour 30 minutes".
+// - "try again in 2 hours" / "in 1 hour 30 minutes";
+// - agy's "Resets in 1h57m57s."
 const UNIT_MS: Record<string, number> = { second: 1000, minute: 60_000, hour: 3_600_000, day: 86_400_000 };
+const SHORT_UNIT_MS: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
 export function limitResetsAt(message: string | null | undefined, now = new Date()): number | null {
   if (!message) return null;
   const future = (at: number) => (at > now.getTime() ? at : null);
@@ -46,6 +48,12 @@ export function limitResetsAt(message: string | null | undefined, now = new Date
     at.setHours((Number(clock[1]) % 12) + (clock[3]?.toUpperCase() === "PM" ? 12 : 0), Number(clock[2]), 0, 0);
     if (at.getTime() <= now.getTime()) at.setDate(at.getDate() + 1);
     return at.getTime();
+  }
+  const short = /\bresets in ((?:\d+[dhms])+)/i.exec(message)?.[1];
+  if (short) {
+    let ms = 0;
+    for (const [, n, unit] of short.matchAll(/(\d+)([dhms])/gi)) ms += Number(n) * (SHORT_UNIT_MS[(unit ?? "").toLowerCase()] ?? 0);
+    return ms > 0 ? now.getTime() + ms : null;
   }
   const wait = /try again in ((?:\s*(?:and\s+)?\d+(?:\.\d+)?\s*(?:second|minute|hour|day)s?,?)+)/i.exec(message)?.[1];
   if (!wait) return null;
