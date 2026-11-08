@@ -1,12 +1,25 @@
 // What a caught value says, whatever was thrown.
 export const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
+// Runs a write to a worker's stdin and ignores its failure, thrown or rejected. A worker that dies
+// while its prompt is going in fails on its own (its exit is reported); left unhandled, the broken
+// pipe would take the whole server down.
+export function settled(write: () => unknown): void {
+  try {
+    void Promise.resolve(write()).catch(() => undefined);
+  } catch {
+    // the pipe is already closed
+  }
+}
+
 // The model provider turned the request away for load or quota, not because of the job: the same
 // work can run again once it has capacity. A harness that is not installed or not signed in counts
-// too, so the work moves to the next model in the stage's chain instead of failing every job.
+// too, so the work moves to the next model in the stage's chain instead of failing every job, and so
+// does agy failing its sign-in check (it says this when the network is down, as just after the
+// computer wakes from sleep).
 export const isCapacityError = (message: string | null | undefined): boolean =>
   !!message &&
-  /at capacity|rate[ _-]?limit|too many requests|\b429\b|overloaded|usage limit|hit your (?:\w+ )?limit|quota (?:exceeded|exhausted)|exceeded (?:your |the )?(?:\w+ )?quota|resource[ _-]?exhausted|\b(?:agy|codex|claude|omp) is not (?:installed|signed in)/i.test(
+  /at capacity|rate[ _-]?limit|too many requests|\b429\b|overloaded|usage limit|hit your (?:\w+ )?limit|quota (?:exceeded|exhausted)|exceeded (?:your |the )?(?:\w+ )?quota|resource[ _-]?exhausted|\b(?:agy|codex|claude|omp) is not (?:installed|signed in)|authentication failed or timed out/i.test(
     message,
   );
 

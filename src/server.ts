@@ -55,6 +55,14 @@ import { isListView, listJobs } from "./listing";
 import { stats } from "./stats";
 import { addContact, changeContact, importLinkedInExport, jobOptions, referralsState, syncReferralMail } from "./outreach";
 
+// The app runs unattended and nothing restarts it: an error nobody caught (a socket or pipe that broke
+// when the computer slept, say) is logged with its stack rather than ending the server.
+const survive = (what: string) => (err: unknown) => {
+  logEvent("error", `${what}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`.slice(0, 2000));
+};
+process.on("unhandledRejection", survive("unhandled rejection"));
+process.on("uncaughtException", survive("uncaught exception"));
+
 const PROFILE_FILES = ["targets.md", "rubric.yml", MAIN, "resume-notes.md", "answers.md", "personal.yml", "companies.yml", "employers.yml", "referral.yml"];
 const safeThresholds = () => {
   try {

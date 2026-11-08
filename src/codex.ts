@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { browserServer, serveHostTools, stepOf } from "./claude";
 import { config, DATA, PROMPTS } from "./config";
 import { logEvent } from "./db";
-import { errorMessage } from "./errors";
+import { errorMessage, settled } from "./errors";
 import type { CatalogModel } from "./models";
 import { CODEX_PREFIX, durationMs, modelEffort, type WorkerHandle, type WorkerOptions, type WorkerResult } from "./worker";
 
@@ -169,8 +169,8 @@ export function runCodex(opts: WorkerOptions): WorkerHandle {
   const env: Record<string, string | undefined> = { ...process.env, ...opts.env, CODEX_HOME: home, [tokenVar]: token };
   const proc = Bun.spawn(args, { cwd: opts.cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
   active.add(proc);
-  void proc.stdin.write(readFileSync(join(PROMPTS, "system.md"), "utf8") + NOTE + opts.prompt);
-  void proc.stdin.end();
+  settled(() => proc.stdin.write(readFileSync(join(PROMPTS, "system.md"), "utf8") + NOTE + opts.prompt));
+  settled(() => proc.stdin.end());
 
   let lastText = "";
   let threadId = "";

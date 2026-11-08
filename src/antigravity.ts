@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { browserServer, serveHostTools, stepOf } from "./claude";
 import { config, PROMPTS } from "./config";
 import { logEvent } from "./db";
-import { errorMessage } from "./errors";
+import { errorMessage, settled } from "./errors";
 import type { CatalogModel } from "./models";
 import { AGY_PREFIX, durationMs, type Builtin, type WorkerHandle, type WorkerOptions, type WorkerResult } from "./worker";
 
@@ -187,15 +187,11 @@ export function runAntigravity(opts: WorkerOptions): WorkerHandle {
     const child = proc;
     active.add(child);
     const prompt = readFileSync(join(PROMPTS, "system.md"), "utf8") + NOTE + (opts.browser ? OWN_BROWSER_NOTE : "") + opts.prompt;
-    void child.stdin.write(JSON.stringify({ event: "user", message: { content: prompt } }) + "\n");
-    void child.stdin.flush();
+    settled(() => child.stdin.write(JSON.stringify({ event: "user", message: { content: prompt } }) + "\n"));
+    settled(() => child.stdin.flush());
     // The session ends when stdin closes, so it stays open until the turn has its result.
     const endInput = () => {
-      try {
-        void child.stdin.end();
-      } catch {
-        // already closed
-      }
+      settled(() => child.stdin.end());
     };
     const timer = opts.maxTime
       ? setTimeout(() => {

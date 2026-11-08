@@ -10,7 +10,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, DATA, PROMPTS } from "./config";
 import { logEvent } from "./db";
-import { errorMessage } from "./errors";
+import { errorMessage, settled } from "./errors";
 import type { CatalogModel } from "./models";
 import {
   CLAUDE_PREFIX,
@@ -214,8 +214,8 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
   delete env["CLAUDECODE"]; // set when the app itself was started from a Claude Code session
   const proc = Bun.spawn(args, { cwd: opts.cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
   active.add(proc);
-  void proc.stdin.write(opts.prompt);
-  void proc.stdin.end();
+  settled(() => proc.stdin.write(opts.prompt));
+  settled(() => proc.stdin.end());
 
   let lastText = "";
   // Assigned from callbacks, which control-flow narrowing cannot see.

@@ -30,6 +30,11 @@ if (argv.some(a => a === "-p" || a === "--print" || a === "--prompt")) {
   console.error(`Error: -p took "${argv[argv.indexOf("-p") + 1] ?? ""}" as its prompt, so the intended prompt was left as an argument and ignored.`);
   process.exit(2);
 }
+// Dies at once, its prompt unread, as agy does when it cannot reach its sign-in (no network).
+if (process.env["FAKE_AGY_DIES"]) {
+  console.error("authentication failed or timed out");
+  process.exit(1);
+}
 const reader = Bun.stdin.stream().getReader();
 const dec = new TextDecoder();
 let buf = "";

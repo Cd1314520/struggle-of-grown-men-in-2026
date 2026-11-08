@@ -178,6 +178,31 @@ describe("an agy worker", () => {
     expect(isCapacityError(result.error)).toBe(true);
   });
 
+  it("fails only that worker, as capacity, when agy dies before reading a long prompt", async () => {
+    const seen: unknown[] = [];
+    const note = (e: unknown) => seen.push(e);
+    process.on("unhandledRejection", note);
+    process.env["FAKE_AGY_DIES"] = "1";
+    try {
+      const results = await Promise.all(
+        [1, 2, 3].map(
+          () =>
+            run({}, { cwd: mkdtempSync(join(dir, "dies-")), tools: report, prompt: `${"x".repeat(2 * 1024 * 1024)}\n{}`, env: { FAKE_AGY_DIES: "1" } }).done,
+        ),
+      );
+      for (const result of results) {
+        expect(result.status).toBe("error");
+        expect(result.error).toContain("authentication failed or timed out");
+        expect(isCapacityError(result.error)).toBe(true);
+      }
+      await Bun.sleep(300);
+      expect(seen).toEqual([]);
+    } finally {
+      delete process.env["FAKE_AGY_DIES"];
+      process.off("unhandledRejection", note);
+    }
+  });
+
   it("reports a quota refusal as the provider being at capacity", async () => {
     const result = await run({ tool: "report_result", args: {}, limited: true }, { tools: report }).done;
     expect(result.status).toBe("error");
