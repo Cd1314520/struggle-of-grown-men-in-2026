@@ -5,7 +5,7 @@ from ..util import DimensionResult, fuzzy_contains, normalize
 
 
 def _window(text: str, anchor: str, radius: int = 600) -> str:
-    """Return ~radius chars around the first occurrence of anchor."""
+    """Text from radius/4 before the first occurrence of anchor to radius after it."""
     cf = text.casefold()
     idx = cf.find(anchor.casefold())
     if idx == -1:

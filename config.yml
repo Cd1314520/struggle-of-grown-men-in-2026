@@ -14,9 +14,9 @@ vncUrl: null
 # The dedicated application mailbox. Connecting any other Google account is refused.
 mailbox: null
 
-# One daily plaintext questions digest to this same connected mailbox, never another recipient.
-# Each unchanged group is notified once; adding jobs does not re-notify it. Send-now in Settings
-# bypasses this schedule, not deduplication. Uncertain sends reconcile against Sent, never blindly retry.
+# One daily plaintext digest, sent to this same connected mailbox and no other recipient: new question groups
+# and employer steps due within 48 hours. Each unchanged group is notified once; adding jobs does not re-notify it.
+# Send-now in Settings bypasses the schedule, not deduplication. An uncertain send is looked for in Sent before any re-send.
 questionDigest:
   enabled: true
   time: "09:00"
@@ -60,8 +60,8 @@ models:
 
 # Scoring weights and thresholds live in profile/rubric.yml.
 
-# The bar for the approvals the app gives itself (approval: auto). A practice job must also be proven
-# one: its employer judged not a target. Anything that misses the bar waits for you in Review.
+# The bar for the approvals the app gives itself (approval: auto). The employer must also have been judged
+# under `targets` (with holdBack: true, judged not a target). Anything that misses the bar waits for you in Review.
 autoApply:
   minScore: 60 # align with the practice interview-fit threshold; score alone never makes a job practice
   allowConcerns: true # expected dealbreakers are the point; hard requirements and evidence gates still apply
@@ -89,13 +89,13 @@ feeds:
 # board if it has one, otherwise an agent searching the web) and applied to there. One with no
 # posting of the employer's own is skipped. Neither site permits automated reading, so requests are
 # kept few; a refusal pauses that site for 6 hours. minutes: 0 turns a site off.
-# Nationwide, since relocation is fine; the distance does not narrow a country-wide search.
+# Nationwide, since relocation is fine.
 boards:
   location: United States
   distance: 25 # miles
   queries: [software engineer, AI engineer, AI agent engineer]
   initialHours: 72 # how far back the first scan looks; later scans ask only for what is new since the last
-  linkedin: { minutes: 60, pages: 2 } # newest first, 10 a page, per query: 3 to 6 requests an hour
+  linkedin: { minutes: 60, pages: 2 } # newest first, 10 a page, pages per query
   indeed: { minutes: 60 } # one request per query, up to 100 postings each
 
 # Concurrency. prep = assessments at once. fill = applications at once, each in its own Chrome

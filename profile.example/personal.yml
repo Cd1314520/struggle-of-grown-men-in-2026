@@ -1,13 +1,13 @@
 # Example: copied into profile/ the first time the app started. Replace every placeholder with your own
 # details; nothing is applied while one is left. Application forms are filled from this file. Email is
-# taken from the connected Gmail mailbox. Leave a field blank to have the agent ask you when a form needs it.
+# taken from the connected Gmail mailbox.
 first_name: TODO-FILL
 middle_name:
 last_name: TODO-FILL
 preferred_name:
 phone: "TODO-FILL" # as you want it typed, e.g. "+1 (555) 010-0100"
 address:
-  street: # optional; many forms accept a blank or "Available on request"
+  street: # optional
   city: TODO-FILL
   state: TODO-FILL # an abbreviation or a name
   postal_code: "TODO-FILL"

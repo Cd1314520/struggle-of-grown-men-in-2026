@@ -4,10 +4,10 @@
 # How a job's score is computed. The agent never picks a number: it answers each statement below
 # with yes / no / unclear (plus a quote from the posting), and the app does the arithmetic.
 #
-#   label            short name shown in the app's at-a-glance view
+#   label            short name shown in the app
 #   required: true   a "no" rules the job out, whatever the score ("unclear" does not)
-#   screen: false    a requirement the cheap pre-read leaves to the full assessment: a judgment, or
-#                    one the cheap model was seen to get wrong; other requirements are screened
+#   screen: false    a requirement the cheap pre-read leaves to the full assessment; other
+#                    requirements are screened
 #   weight: N        points earned when the answer is "yes"; a negative weight is a penalty
 #   score            = points earned / total positive weight * 100
 #   unclear          earns this fraction of the weight (the posting did not say)
