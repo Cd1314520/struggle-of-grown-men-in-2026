@@ -33,34 +33,26 @@ const SORTS = [
   { value: "updated", label: "Recently updated" },
   { value: "company", label: "Company" },
 ];
-const EMPTY: Record<string, readonly [title: string, description: string]> = {
-  all: ["No applications sent yet", "Applications show up here once they are submitted."],
+const EMPTY: Record<string, readonly [title: string, description?: string]> = {
+  all: ["No applications sent yet"],
   offer: ["No offers yet", "Mark an application as an offer from its Next steps."],
-  your_move: ["Nothing waiting on you", "When an employer asks for something, an assessment or a time to talk, it lands here."],
-  upcoming: ["Nothing booked", "Interviews and calls with a time show up here."],
-  waiting: ["Not waiting on anyone", "Applications where you've done your part and the employer owes a reply."],
-  quiet: ["Nothing has gone quiet", "Applications that have waited on the employer for a while after a step wait here."],
-  no_reply: ["Every application has had a reply", "Applications with no word back yet wait here."],
-  closed: ["Nothing closed", "Declined and withdrawn applications move here."],
+  your_move: ["Nothing waiting on you"],
+  upcoming: ["Nothing booked"],
+  waiting: ["Not waiting on anyone"],
+  quiet: ["Nothing has gone quiet"],
+  no_reply: ["Every application has had a reply"],
+  closed: ["Nothing closed"],
 };
 
 function Kpis({ counts }: { counts: Summary["counts"] | undefined }) {
-  const n = (s: string) => counts?.[s] ?? 0,
-    show = (v: number) => (counts ? v.toLocaleString() : "–");
+  const n = (s: string) => counts?.[s] ?? 0;
   const sent = SENT.reduce((sum, s) => sum + n(s), 0),
     replied = n("interview") + n("offer") + n("rejected_by_company");
   return (
     <WorkspaceStrip
       items={[
-        { label: "Sent", value: show(sent) },
-        { label: "In process", value: show(n("interview")) },
-        {
-          label: "Reply rate",
-          value: sent ? `${Math.round((replied / sent) * 100)}%` : "–",
-          ...(sent ? { hint: `${replied.toLocaleString()} of ${sent.toLocaleString()} replied` } : {}),
-        },
-        { label: "Declined", value: show(n("rejected_by_company")) },
-        { label: "Offers", value: show(n("offer")) },
+        { label: "Replied", value: counts ? replied.toLocaleString() : "–", ...(sent ? { hint: `of ${sent.toLocaleString()} sent` } : {}) },
+        ...(n("offer") > 0 ? [{ label: "Offers", value: n("offer").toLocaleString() }] : []),
       ]}
     />
   );
@@ -87,10 +79,6 @@ export function ApplicationsPage() {
   const labelOf = new Map(groups.map(g => [g.key, g]));
   const empty = EMPTY[segment];
   const quiet = groups.find(g => g.key === "quiet")?.count ?? 0;
-  const emptyText =
-    segment === "quiet" && summary
-      ? ([empty?.[0] ?? "", `Applications that have waited on the employer for ${summary.quietDays} days or more after a step wait here.`] as const)
-      : empty;
 
   const list = (
     <Workspace
@@ -103,7 +91,6 @@ export function ApplicationsPage() {
       bar={{
         title: "Applications",
         count: data?.all,
-        hint: "Everything you've sent, and whose move it is on each.",
         search: (
           <SearchInput
             ref={search}
@@ -136,8 +123,10 @@ export function ApplicationsPage() {
         ),
       }}
       notice={
+        !compact &&
         segment === "all" &&
-        quiet > 0 && (
+        quiet > 0 &&
+        !headed && (
           <ListNotice
             tone="warning"
             icon={<MessageCircleWarning />}
@@ -176,7 +165,7 @@ export function ApplicationsPage() {
             }}
           />
         ) : (
-          <EmptyState icon={<Inbox />} title={emptyText?.[0] ?? "Nothing here"} description={emptyText?.[1]} className="pt-24" />
+          <EmptyState icon={<Inbox />} title={empty?.[0] ?? "Nothing here"} description={empty?.[1]} className="pt-24" />
         )
       ) : (
         rows.map((r, i) => {
@@ -195,7 +184,7 @@ export function ApplicationsPage() {
                   r.next ? (
                     <NextLabel next={r.next} company={r.company} />
                   ) : closed ? (
-                    `Applied ${date(sent)}`
+                    `Sent ${date(sent)}`
                   ) : (
                     r.location && <span title={r.location}>{place(r.location)}</span>
                   )

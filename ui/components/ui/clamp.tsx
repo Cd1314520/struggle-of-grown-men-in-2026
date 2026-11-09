@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "../../lib/cn";
 
@@ -42,8 +43,10 @@ export function Clamp({
           onClick={() => {
             setOpen(!open);
           }}
-          className="mt-1 text-sm font-medium text-fg-muted hover:text-fg touch:-my-2 touch:py-2"
+          aria-expanded={open}
+          className="mt-1 inline-flex items-center gap-1 text-sm text-fg-muted hover:text-fg touch:-my-2 touch:py-2"
         >
+          <ChevronRight aria-hidden className={cn("size-3.5 transition-transform", open && "rotate-90")} />
           {open ? "Show less" : "Show more"}
         </button>
       )}

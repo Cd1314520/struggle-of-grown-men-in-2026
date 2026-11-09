@@ -83,12 +83,12 @@ export function SectionNav<K extends string>({
               }}
               className={cn(
                 "flex min-h-8 shrink-0 flex-col justify-center rounded-md px-2.5 py-1.5 text-left text-sm font-medium whitespace-nowrap transition-colors touch:min-h-9 lg:whitespace-normal",
-                on ? "bg-subtle text-fg" : "text-fg-muted hover:bg-subtle hover:text-fg",
+                on ? "bg-muted text-fg" : "text-fg-muted hover:bg-subtle hover:text-fg",
                 item.tone === "danger" && "text-danger-text",
               )}
             >
               <span>{item.label}</span>
-              {item.hint && <span className="hidden text-xs font-normal text-fg-muted lg:block">{item.hint}</span>}
+              {item.hint && <span className="hidden text-xs font-normal text-fg-subtle lg:block">{item.hint}</span>}
             </Item>
           );
         })}

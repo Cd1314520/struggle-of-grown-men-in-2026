@@ -1,14 +1,14 @@
-import { Copy, RefreshCw, Send } from "lucide-react";
+import { Copy, RefreshCw, Send, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import type { Summary } from "../../../src/api-types";
 import type { DigestStatus } from "../../../src/digest";
-import { Button, Disclosure, StatusLabel, Time, Tooltip } from "../../components/ui";
+import { Button, ListNotice, StatusLabel, Time, Tooltip } from "../../components/ui";
 import { api, queryClient } from "../../lib/api";
 import { plural } from "../../lib/format";
 import type { Tone } from "../../lib/labels";
 import { ConfigRow } from "./field";
-import { SavedLocally, SettingFold, SettingRow, SettingsGroup, SettingsPanel } from "./parts";
+import { SettingRow, SettingsGroup, SettingsPanel } from "./parts";
 
 function Gmail({ s }: { s: Summary }) {
   const copy = async () => {
@@ -53,14 +53,16 @@ function Gmail({ s }: { s: Summary }) {
         description="The dedicated mailbox applications are sent from. Connecting any other Google account is refused."
         field={{ kind: "text", type: "email", nullable: true, placeholder: "you@example.com" }}
       />
-      <SettingRow stack label="OAuth redirect URI" description="Google must list this address for the connection to work.">
-        <code className="min-w-0 truncate font-mono text-xs text-fg">{s.redirectUri}</code>
-        <Tooltip content="Copy">
-          <Button size="icon-sm" variant="ghost" aria-label="Copy the redirect URI" onClick={() => void copy()}>
-            <Copy />
-          </Button>
-        </Tooltip>
-      </SettingRow>
+      {!s.gmail.connected && (
+        <SettingRow stack label="OAuth redirect URI" description="Google must list this address for the connection to work.">
+          <code className="min-w-0 truncate font-mono text-xs text-fg">{s.redirectUri}</code>
+          <Tooltip content="Copy">
+            <Button size="icon-sm" variant="ghost" aria-label="Copy the redirect URI" onClick={() => void copy()}>
+              <Copy />
+            </Button>
+          </Tooltip>
+        </SettingRow>
+      )}
     </>
   );
 }
@@ -93,7 +95,7 @@ function nextDigest(d: DigestStatus) {
   };
   const now = clock(new Date());
   const sentToday = !!d.lastSentAt && clock(new Date(d.lastSentAt)).day >= now.day;
-  return sentToday ? `Tomorrow ${d.time}` : now.time >= d.time ? `Due now: today's ${d.time} window is open` : `Today ${d.time}`;
+  return sentToday ? `tomorrow ${d.time}` : now.time >= d.time ? "due now" : `today ${d.time}`;
 }
 
 export function Mail({ s }: { s: Summary }) {
@@ -125,69 +127,75 @@ export function Mail({ s }: { s: Summary }) {
       setBusy(false);
     }
   };
-  const [tone, label] = d.enabled ? (DIGEST_STATE[d.deliveryState] ?? ["neutral", d.deliveryState]) : (["neutral", "Off"] as const);
+  const quiet = d.deliveryState === "sent" || d.deliveryState === "idle" || d.deliveryState === "ready";
+  const [tone, label]: readonly [Tone, string] = !d.enabled
+    ? ["neutral", "Off"]
+    : quiet
+      ? d.undeliveredGroups
+        ? ["info", `${plural(d.undeliveredGroups, "group")} waiting`]
+        : ["success", "Nothing waiting"]
+      : (DIGEST_STATE[d.deliveryState] ?? ["neutral", d.deliveryState]);
+  const troubled = !!d.lastError || d.deliveryState === "failed" || d.deliveryState === "abandoned" || d.deliveryState === "uncertain";
   return (
     <SettingsPanel
       id="mail"
       title="Mail & digest"
-      footer={
-        <>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" icon={<Send />} loading={busy} disabled={busy || !d.enabled || !d.recipient} onClick={() => void run(true)}>
-              {busy ? "Sending or reconciling" : "Send now"}
-            </Button>
-            <Button size="sm" variant="ghost" icon={<RefreshCw />} disabled={busy} onClick={() => void run(false)}>
-              Refresh status
-            </Button>
-          </div>
-          <SavedLocally />
-        </>
+      notice={
+        d.enabled &&
+        troubled && (
+          <ListNotice tone="warning" icon={<TriangleAlert />}>
+            <span role="alert">
+              {DIGEST_STATE[d.deliveryState]?.[1] ?? "Digest problem"}
+              {d.lastError ? `: ${d.lastError}` : "."}
+            </span>
+          </ListNotice>
+        )
       }
     >
       <Gmail s={s} />
       <SettingsGroup title="Daily questions digest" />
-      <SettingRow label="Status" description="One email a day with the questions waiting on you and the employers' steps falling due.">
-        <StatusLabel tone={tone} label={label} pulse={d.deliveryState === "sending"} className="text-fg" />
+      <SettingRow
+        stack
+        label="Status"
+        description={
+          <>
+            {d.enabled ? `Next ${nextDigest(d)}` : "One email a day with the questions waiting on you and steps falling due"}
+            {d.lastSentAt ? (
+              <>
+                {" · "}
+                <Time at={d.lastSentAt} prefix="last sent " />
+              </>
+            ) : (
+              " · never sent"
+            )}
+            {d.recipient && d.recipient !== s.gmail.address && ` · to ${d.recipient}`}
+            {!d.recipient && <span className="block text-warning-text">No verified mailbox to send to.</span>}
+          </>
+        }
+      >
+        <StatusLabel tone={tone} label={label} pulse={d.deliveryState === "sending"} className="mr-auto text-fg sm:mr-0" />
+        <Button size="sm" icon={<Send />} loading={busy} disabled={busy || !d.enabled || !d.recipient} onClick={() => void run(true)}>
+          {busy ? "Sending or reconciling" : "Send now"}
+        </Button>
+        <Tooltip content="Refresh status">
+          <Button size="icon-sm" variant="ghost" aria-label="Refresh status" disabled={busy} onClick={() => void run(false)}>
+            <RefreshCw />
+          </Button>
+        </Tooltip>
       </SettingRow>
-      <ConfigRow path="questionDigest.enabled" label="Send the digest" field={{ kind: "bool" }} />
-      <ConfigRow path="questionDigest.time" label="Send at" description="In the digest's time zone." field={{ kind: "time" }} />
-      <ConfigRow path="questionDigest.timeZone" label="Time zone" field={{ kind: "zone" }} />
-      <SettingRow label="Recipient" description="Only the verified, connected mailbox. Never anyone else.">
-        <span className={d.recipient ? "truncate" : "text-fg-muted"}>{d.recipient ?? "No verified connected mailbox"}</span>
-      </SettingRow>
-      <SettingRow label="Next send" description={`Daily at ${d.time}, ${d.timeZone} time.`}>
-        <span className={d.enabled ? "" : "text-fg-muted"}>{d.enabled ? nextDigest(d) : "Disabled"}</span>
-      </SettingRow>
-      <SettingRow label="Waiting to go out" description={d.lastSentAt ? <Time at={d.lastSentAt} prefix="Last sent " /> : "Never sent."}>
-        <span className="tabular font-medium">{plural(d.undeliveredGroups, "group")}</span>
-      </SettingRow>
-      {d.lastError && (
-        <SettingRow label="Last error">
-          <span role="alert" className="text-danger-text">
-            {d.lastError}
-          </span>
-        </SettingRow>
-      )}
       {result && (
         <p role="status" className="animate-in py-3 text-sm text-fg">
           {result}
         </p>
       )}
-      <SettingFold>
-        <Disclosure id="settings-digest" summary="How the digest works">
-          <div className="space-y-2">
-            <p>
-              Each send holds only groups not delivered before, and the employers' steps still to do that fall due within 48 hours (each once per deadline).
-              Delivery goes only to the verified configured or connected Gmail mailbox, never an arbitrary recipient. The message contains grouped prompts,
-              counts and links, not answer values or credentials.
-            </p>
-            <p>
-              Send now bypasses the daily schedule, not delivery deduplication. Adding another application to an unchanged notified group does not send it
-              again. An uncertain send is reconciled with Sent mail before any retry.
-            </p>
-          </div>
-        </Disclosure>
-      </SettingFold>
+      <ConfigRow
+        path="questionDigest.enabled"
+        label="Send the digest"
+        description="Only new questions, and steps due within 48 hours."
+        field={{ kind: "bool" }}
+      />
+      <ConfigRow path="questionDigest.time" label="Send at" field={{ kind: "time" }} />
+      <ConfigRow path="questionDigest.timeZone" label="Time zone" field={{ kind: "zone" }} />
     </SettingsPanel>
   );
 }

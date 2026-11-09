@@ -23,6 +23,7 @@ export function ActivityPage() {
       </TabsList>
     ),
     run: <RunMenu s={s} size="sm" />,
+    summary: s,
   };
   return (
     <Tabs

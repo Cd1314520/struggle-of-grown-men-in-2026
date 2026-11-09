@@ -1,4 +1,4 @@
-import { FileCog, RefreshCw, TriangleAlert } from "lucide-react";
+import { RefreshCw, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import type { CatalogModel, ModelCatalog, ModelStage } from "../../../src/api-types";
@@ -7,34 +7,24 @@ import { api, queryClient, refreshAll, useModels } from "../../lib/api";
 import { SettingRow, SettingsGroup, SettingsPanel } from "./parts";
 
 export const STAGES: readonly { stage: ModelStage; label: string; description: string; core: boolean }[] = [
-  {
-    stage: "triage",
-    label: "Triage",
-    description: "Reads raw titles in batches (triage.batch, 100 by default), once enough have gathered. A fast, cheap model is right.",
-    core: true,
-  },
-  {
-    stage: "screen",
-    label: "Screen",
-    description: "Reads each posting for plain dealbreakers before the full assessment, when screen.readPostings is on. Cheap and quick.",
-    core: true,
-  },
-  { stage: "prep", label: "Assess and tailor", description: "Scores each posting against the rubric and tailors the resume. Quality shows here.", core: true },
-  { stage: "fill", label: "Fill", description: "Fills application forms in the browser. Needs a capable model that reads pages well.", core: true },
-  { stage: "track", label: "Track mail", description: "Reads replies in the mailbox and records next steps and outcomes.", core: false },
+  { stage: "triage", label: "Triage", description: "Reads raw titles in batches (triage.batch), once enough have gathered.", core: true },
+  { stage: "screen", label: "Screen", description: "Checks each posting for plain dealbreakers, when screen.readPostings is on.", core: true },
+  { stage: "prep", label: "Assess and tailor", description: "Scores postings against the rubric and tailors the resume.", core: true },
+  { stage: "fill", label: "Fill", description: "Fills application forms in the browser.", core: true },
+  { stage: "track", label: "Track mail", description: "Reads replies and records next steps and outcomes.", core: false },
   { stage: "discover", label: "Discover", description: "Searches the web for more companies and boards to watch.", core: false },
   { stage: "locate", label: "Locate", description: "Finds the employer's own posting for a LinkedIn or Indeed job.", core: false },
   {
     stage: "recheck",
     label: "Recheck questions",
-    description: "Adds the answers you keep to your answers, and answers parked questions the profile or resume settles, as they arrive.",
+    description: "Answers parked questions the profile or resume settles.",
     core: false,
   },
   { stage: "import", label: "Resume import", description: "Turns uploaded files into your Typst resume.", core: false },
   {
     stage: "interview",
     label: "Interview prep",
-    description: "Writes what to brush up on for an interview step: topics, likely questions and company background.",
+    description: "Writes the brief for an interview step.",
     core: false,
   },
 ];
@@ -93,7 +83,7 @@ function StageRow({
         empty="No model matches. Type its full name to use it anyway."
         custom={typed => `Use “${typed}”`}
         disabled={saving}
-        className="w-full sm:w-64"
+        className="w-full sm:w-72"
       />
     </SettingRow>
   );
@@ -127,7 +117,7 @@ export function Models() {
     <SettingsPanel
       id="models"
       title="Models"
-      description="Which model each kind of agent work runs on. A claude-code model runs through Claude Code (claude -p) as signed in on this machine, a codex model through Codex (codex exec) as signed in for this app; any other through omp. The list is what the three can reach here."
+      description="claude-code/* runs through Claude Code, codex/* through Codex, antigravity/* through agy; the rest through omp. Used from each stage's next run."
       actions={
         data && (
           <Button size="sm" variant="ghost" icon={<RefreshCw />} loading={refreshing} onClick={() => void refresh()} className="-mr-2.5 touch:-mr-3">
@@ -147,16 +137,7 @@ export function Models() {
           </div>
         )
       }
-      footer={
-        <span className="inline-flex items-start gap-1.5">
-          <FileCog className="mt-1 size-3.5 shrink-0 text-fg-subtle" />
-          <span>
-            Saved to <code className="font-mono text-xs">config.local.yml</code> and used from each stage&apos;s next run.
-            {models.length > 0 &&
-              ` ${models.length} models from ${new Set(models.map(m => m.provider)).size} providers; prices are dollars per million tokens in and out.`}
-          </span>
-        </span>
-      }
+      footer={models.length > 0 && <span>Prices are dollars per million tokens, in / out.</span>}
     >
       {isPending ? (
         <SkeletonRows lead={false} rows={4} className="-mx-(--list-x)" />

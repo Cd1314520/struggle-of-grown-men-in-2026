@@ -1,10 +1,10 @@
-import { ArrowUpRight, Building2, ChevronDown, ChevronUp, Clock, Globe, Maximize2, MapPin, SearchX, X } from "lucide-react";
+import { ArrowUpRight, Building2, ChevronDown, ChevronUp, Clock, Maximize2, MapPin, SearchX, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { JobDetail as Job } from "../../../src/api-types";
 import { Button, CompanyMark, EmptyState, Score, Skeleton, StatusLabel, Tabs, TabsContent, TabsList, TabsTrigger, Time, Tooltip } from "../../components/ui";
 import { ApiError, useJob, useSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
-import { host, place } from "../../lib/format";
+import { place } from "../../lib/format";
 import { useHotkeys } from "../../lib/hotkeys";
 import { href } from "../../lib/router";
 import { useJobActions } from "./actions";
@@ -12,7 +12,8 @@ import { Activity } from "./activity";
 import { DecisionBar, DecisionCard, useDecision, useDecisionKeys } from "./decision";
 import { Fit } from "./fit";
 import { InterviewPrep } from "./interview";
-import { decisionOf, fitLeads, headerStatus, rubricOf, setAsideOf, thresholdOf, type Phase } from "./model";
+import { SENT } from "../../../src/status";
+import { decisionOf, fitLeads, headerStatus, rubricOf, setAsideOf, thresholdOf, type DecisionKind, type Phase } from "./model";
 import { Overview } from "./overview";
 import { Posting } from "./posting";
 import { NextSteps } from "./process";
@@ -53,16 +54,23 @@ function Fact({ icon, children, title }: { icon: ReactNode; children: ReactNode;
   );
 }
 
-function Header({ job, threshold, onScore }: { job: Job; threshold: number | null; onScore: () => void }) {
+const STATED: readonly (DecisionKind | null)[] = ["process", "held", "rejected", "skipped", null];
+
+function Header({ job, kind, threshold, onScore }: { job: Job; kind: DecisionKind | null; threshold: number | null; onScore: () => void }) {
   const status = headerStatus(job);
   const others = job.siblings.length;
+  const sentThere = job.siblings.filter(s => SENT.includes(s.status)).length;
   const aside = job.status === "held" || job.status === "rejected" ? setAsideOf(job) : null;
   const fit = threshold != null ? `Fit score, needs ${threshold}` : "Fit score";
   const label = job.score != null ? `Fit ${job.score}, open the Fit tab` : undefined;
+  const merged = aside?.label.toLowerCase().startsWith(status.label.toLowerCase()) ? aside : null;
+  const shown = merged?.label ?? (aside ? `${status.label}: ${aside.label}` : status.label);
+  const stated = STATED.includes(kind);
+  const big = fitLeads(kind);
+  const needs = big && threshold != null;
   return (
     <header className="@container">
       <div className="flex items-start gap-4">
-        <CompanyMark name={job.company} size="lg" className="mt-0.5 hidden @xl:inline-flex" />
         <div className="min-w-0 flex-1">
           <a
             href={job.url}
@@ -71,28 +79,23 @@ function Header({ job, threshold, onScore }: { job: Job; threshold: number | nul
             className="group inline-flex max-w-full items-center gap-1 text-sm font-medium text-fg-muted hover:text-fg touch:-my-1.5 touch:py-1.5"
             title="Open the original posting"
           >
-            <CompanyMark name={job.company} size="sm" className="mr-1 @xl:hidden" />
             <span className="truncate">{job.company}</span>
             <ArrowUpRight className="size-3.5 shrink-0 text-fg-subtle group-hover:text-fg" />
           </a>
           <h1 className="mt-1 text-2xl font-semibold tracking-[-0.015em] text-balance break-words text-fg">{job.title}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-fg-muted @xl:mt-3 @xl:gap-y-1.5">
-            <StatusLabel tone={status.tone} label={status.label} pulse={status.pulse} className="text-fg @xl:hidden" />
-            {aside && (
-              <span title={aside.detail ?? undefined} className="min-w-0 text-fg">
-                {aside.label}
-              </span>
-            )}
+            {stated && <StatusLabel tone={status.tone} label={shown} pulse={status.pulse} className="text-fg @xl:hidden" />}
             {job.score != null && (
               <button
                 type="button"
                 onClick={onScore}
                 title={fit}
                 aria-label={label}
-                className="inline-flex items-baseline gap-1.5 rounded-md outline-offset-2 hover:text-fg touch:-my-1.5 touch:py-1.5 @xl:hidden"
+                className={cn("inline-flex items-baseline gap-1.5 rounded-md outline-offset-2 hover:text-fg touch:-my-1.5 touch:py-1.5", big && "@xl:hidden")}
               >
                 Fit
                 <Score value={job.score} threshold={threshold} className="text-base" />
+                {needs && <span className="text-fg-muted">needs {threshold}</span>}
               </button>
             )}
             <span className={job.location ? "contents" : "hidden @xl:contents"}>
@@ -100,27 +103,44 @@ function Header({ job, threshold, onScore }: { job: Job; threshold: number | nul
                 {place(job.location)}
               </Fact>
             </span>
-            <Fact icon={<Clock />}>{job.submitted_at ? <Time at={job.submitted_at} prefix="Applied " /> : <Time at={job.found_at} prefix="Found " />}</Fact>
-            <span className="hidden min-w-0 @xl:contents">
-              <Fact icon={<Globe />}>{host(job.url)}</Fact>
-              {others > 0 && (
-                <Fact icon={<Building2 />}>
-                  {others} other {others === 1 ? "role" : "roles"} at {job.company}
-                </Fact>
+            <Fact icon={<Clock />}>
+              {job.submitted_at ? (
+                <Time at={job.submitted_at} prefix={status.label === "Applied" ? "" : "Applied "} />
+              ) : (
+                <Time at={job.found_at} prefix="Found " />
               )}
-            </span>
+            </Fact>
+            {sentThere > 0 ? (
+              <span className="text-warning-text">
+                <Fact icon={<Building2 />}>
+                  Applied to {sentThere} other {sentThere === 1 ? "role" : "roles"} here
+                </Fact>
+              </span>
+            ) : (
+              others > 0 && (
+                <span className="hidden min-w-0 @xl:contents">
+                  <Fact icon={<Building2 />}>
+                    +{others} {others === 1 ? "role" : "roles"} here
+                  </Fact>
+                </span>
+              )
+            )}
           </div>
+          {aside?.detail && <p className="mt-2 text-sm text-fg-muted">{aside.detail}</p>}
         </div>
-        <div className="hidden shrink-0 flex-col items-end gap-3 @xl:flex">
-          <StatusLabel tone={status.tone} label={status.label} pulse={status.pulse} className="text-fg" />
-          {job.score != null && (
-            <Tooltip content={fit}>
-              <button type="button" onClick={onScore} className="rounded-md outline-offset-4" aria-label={label}>
-                <Score value={job.score} threshold={threshold} size="lg" className="items-end" />
-              </button>
-            </Tooltip>
-          )}
-        </div>
+        {(stated || (big && job.score != null)) && (
+          <div className="hidden shrink-0 flex-col items-end gap-3 @xl:flex">
+            {stated && <StatusLabel tone={status.tone} label={shown} pulse={status.pulse} className="text-fg" />}
+            {big && job.score != null && (
+              <Tooltip content={fit}>
+                <button type="button" onClick={onScore} className="flex flex-col items-end gap-1 rounded-md outline-offset-4" aria-label={label}>
+                  <Score value={job.score} threshold={threshold} size="lg" className="items-end" />
+                  {threshold != null && <span className="text-xs text-fg-muted">needs {threshold}</span>}
+                </button>
+              </Tooltip>
+            )}
+          </div>
+        )}
       </div>
     </header>
   );
@@ -129,7 +149,6 @@ function Header({ job, threshold, onScore }: { job: Job; threshold: number | nul
 function HeaderSkeleton() {
   return (
     <div className="flex items-start gap-4">
-      <Skeleton className="size-11 shrink-0 rounded-md" />
       <div className="flex-1 space-y-3">
         <Skeleton className="h-3.5 w-32" />
         <Skeleton className="h-6 w-3/5" />
@@ -232,7 +251,7 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
 
   const panel = layout === "panel";
   const pad = "px-4 sm:px-6";
-  const measure = "max-w-3xl";
+  const measure = "lg:max-w-3xl";
   const card =
     decision?.placement === "card" ? (
       <DecisionCard d={decision} job={job} busy={actions.busy} />
@@ -244,11 +263,12 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
 
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col", settling && "pointer-events-none")}>
-      <div className={cn(panel && "min-h-0 flex-1 overflow-y-auto overscroll-contain")} data-job-scroll>
+      <div className={cn("flex-1", panel && "min-h-0 overflow-y-auto overscroll-contain")} data-job-scroll>
         <div className={cn("pt-4 sm:pt-6", pad)}>
           <div className={measure}>
             <Header
               job={job}
+              kind={kind}
               threshold={threshold}
               onScore={() => {
                 open("fit");
@@ -257,11 +277,11 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
           </div>
         </div>
         {lead && (
-          <div className={cn("mt-5 border-y border-border bg-subtle/50 py-5 sm:mt-6", pad)}>
+          <div className={cn("mt-5 border-y border-border bg-subtle py-5 sm:mt-6", pad)}>
             <div className={measure}>{lead}</div>
           </div>
         )}
-        <Tabs value={tab} onValueChange={open} className="mt-4 sm:mt-6">
+        <Tabs value={tab} onValueChange={open} className="mt-5 sm:mt-6">
           <div className={cn("sticky z-10 bg-[var(--job-bg)]", panel ? "top-0" : "top-12 lg:top-[calc(3rem+1px)]", pad)}>
             <TabsList className={measure}>
               {TABS.map(([k, label]) => (
@@ -341,7 +361,7 @@ export function JobDetail({ id, layout, onClose, onActed, position }: JobDetailP
     <div
       ref={root}
       style={{ "--job-bg": "var(--surface)" } as CSSProperties}
-      className={cn("flex flex-col", panel && "h-full min-h-0 bg-[var(--job-bg)]")}
+      className={cn("flex flex-col", panel ? "h-full min-h-0 bg-[var(--job-bg)]" : "flex-1")}
       data-job={id}
     >
       {panel && <PanelBar job={loaded ? job : undefined} position={position} onClose={onClose} condensed={condensed} />}

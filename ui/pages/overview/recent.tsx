@@ -2,13 +2,15 @@ import { useQuery } from "@tanstack/react-query";
 import { History } from "lucide-react";
 import { EmptyState, ListBody, ListRow, Time } from "../../components/ui";
 import { api } from "../../lib/api";
+import { cn } from "../../lib/cn";
 import { plain, plural } from "../../lib/format";
 import { href } from "../../lib/router";
 import { feed, type FeedRow } from "../activity/feed";
 import { KindIcon } from "../activity/kind-icon";
-import { RailHead } from "./rail";
+import { RAIL_TITLE, RailHead } from "./rail";
 
-const SHOWN = 6;
+const SHOWN = 4;
+const ROUTINE = /^(Checked mail: No mail arrived|Folded \d+ duplicate postings?)/;
 
 function Item({ r }: { r: FeedRow }) {
   const many = r.jobs.length > 1;
@@ -18,7 +20,7 @@ function Item({ r }: { r: FeedRow }) {
       {...link}
       lead={<KindIcon row={r} />}
       title={plain(r.text)}
-      titleClassName="font-normal"
+      titleClassName={cn(RAIL_TITLE, "font-normal")}
       secondary={many ? plural(r.jobs.length, "job") : (r.job?.company ?? undefined)}
       fact={<Time at={r.at} short />}
     />
@@ -27,9 +29,13 @@ function Item({ r }: { r: FeedRow }) {
 
 export function Recent() {
   const { data } = useQuery({ queryKey: ["activity", "overview"], queryFn: () => api.activity({ feed: "highlights", limit: 60 }) });
-  const rows = data ? feed(data.items).slice(0, SHOWN) : undefined;
+  const rows = data
+    ? feed(data.items)
+        .filter(r => !ROUTINE.test(r.text))
+        .slice(0, SHOWN)
+    : undefined;
   return (
-    <ListBody label="Recent activity" loading={!rows} className="border-t border-border">
+    <ListBody label="Recent activity" loading={!rows} className="border-b border-border">
       <RailHead label="Recent activity" link={{ href: "#activity", label: "View all" }} />
       {rows &&
         (rows.length ? (

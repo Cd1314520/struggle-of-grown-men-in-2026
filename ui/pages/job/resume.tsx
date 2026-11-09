@@ -1,4 +1,4 @@
-import { Download, ExternalLink, FileText, Lock } from "lucide-react";
+import { Download, ExternalLink, FileText } from "lucide-react";
 import { useState } from "react";
 import type { JobDetail } from "../../../src/api-types";
 import { Button, Disclosure, Section, Skeleton, Time } from "../../components/ui";
@@ -32,16 +32,20 @@ function Diff({ diff }: { diff: string }) {
 function Page({ job }: { job: JobDetail }) {
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const frame = "relative aspect-[8.5/11] w-full overflow-hidden rounded-sm bg-white shadow-md ring-1 ring-border";
-  if (!job.hasPdf || failed)
+  if (failed)
     return (
-      <div className={cn(frame, "flex flex-col items-center justify-center gap-2 bg-subtle text-center")}>
+      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border px-6 py-10 text-center">
         <FileText className="size-6 text-fg-subtle" />
-        <p className="text-sm text-fg-muted">{job.hasPdf ? "The preview could not be rendered." : "No resume file for this job."}</p>
+        <p className="text-sm text-fg-muted">The preview could not be rendered.</p>
       </div>
     );
   return (
-    <a href={`/api/jobs/${job.id}/resume.pdf`} target="_blank" rel="noopener noreferrer" className={cn(frame, "block transition-shadow hover:shadow-lg")}>
+    <a
+      href={`/api/jobs/${job.id}/resume.pdf`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="relative block aspect-[8.5/11] w-full overflow-hidden rounded-sm bg-white shadow-md ring-1 ring-border transition-shadow hover:shadow-lg"
+    >
       {!loaded && <Skeleton className="absolute inset-0 rounded-none" />}
       <img
         src={`/api/jobs/${job.id}/resume.png?v=${job.resume_sha ?? job.updated_at}`}
@@ -61,45 +65,34 @@ function Page({ job }: { job: JobDetail }) {
 export function Resume({ job }: { job: JobDetail }) {
   const changes = resumeChangesOf(job.resume_changes);
   return (
-    <div className="grid grid-cols-1 gap-8 @3xl:grid-cols-[minmax(0,1fr)_340px]">
+    <div className={cn("grid grid-cols-1 gap-8", job.hasPdf && "@3xl:grid-cols-[minmax(0,1fr)_340px]")}>
       <div className="flex min-w-0 flex-col gap-8">
-        <Section title="What changed" description={changes.length ? "Against your base resume, for this posting." : undefined}>
+        {job.resumeFrozen && (
+          <p className="text-sm text-fg-muted" title={job.resume_sha ?? undefined}>
+            {job.submitted_at ? "This is the resume that was sent" : "Locked for this application"}
+            {job.resume_frozen_at && (
+              <>
+                , <Time at={job.resume_frozen_at} prefix="frozen " />
+              </>
+            )}
+          </p>
+        )}
+        <Section title="What changed">
           {changes.length ? (
-            <ol className="flex flex-col gap-3">
-              {changes.map((c, i) => (
-                <li key={c} className="flex gap-3 text-base text-fg">
-                  <span className="tabular mt-px flex size-5 shrink-0 items-center justify-center rounded-full bg-subtle text-2xs font-medium text-fg-muted">
-                    {i + 1}
-                  </span>
-                  <span className="min-w-0">{c}</span>
-                </li>
+            <ul className="flex list-disc flex-col gap-2 pl-5 text-base text-fg marker:text-fg-subtle">
+              {changes.map(c => (
+                <li key={c}>{c}</li>
               ))}
-            </ol>
+            </ul>
           ) : (
             <p className="text-base text-fg-muted">Nothing recorded. This is your base resume.</p>
           )}
+          {!job.hasPdf && <p className="mt-4 text-sm text-fg-muted">{job.resumeFrozen ? "No PDF on file." : "No PDF yet."}</p>}
         </Section>
-        {job.resumeFrozen && (
-          <div className="flex items-start gap-3 text-sm">
-            <Lock className="mt-0.5 size-4 shrink-0 text-fg-subtle" />
-            <div className="min-w-0">
-              <p className="text-fg">{job.submitted_at ? "This is the resume that was sent." : "Locked for this application."}</p>
-              <p className="mt-0.5 flex flex-wrap gap-x-3 text-fg-muted">
-                {job.resume_frozen_at && <Time at={job.resume_frozen_at} prefix="Frozen " />}
-                {job.resume_sha && <code className="font-mono text-xs leading-5 text-fg">{job.resume_sha.slice(0, 10)}</code>}
-              </p>
-            </div>
-          </div>
-        )}
-        {job.diff && (
-          <Disclosure id="resume-diff" summary="Source diff against your base resume">
-            <Diff diff={job.diff} />
-          </Disclosure>
-        )}
       </div>
-      <div className="flex flex-col gap-3 @3xl:order-none">
-        <Page key={`${job.id}:${job.resume_sha ?? job.updated_at}`} job={job} />
-        {job.hasPdf && (
+      {job.hasPdf && (
+        <div className="flex flex-col gap-3 @3xl:mt-1">
+          <Page key={`${job.id}:${job.resume_sha ?? job.updated_at}`} job={job} />
           <div className="flex gap-2">
             <Button asChild className="flex-1">
               <a href={`/api/jobs/${job.id}/resume.pdf`} target="_blank" rel="noopener noreferrer">
@@ -114,8 +107,15 @@ export function Resume({ job }: { job: JobDetail }) {
               </a>
             </Button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+      {job.diff && (
+        <div className={cn("min-w-0", job.hasPdf && "@3xl:col-span-2")}>
+          <Disclosure id="resume-diff" summary="Source diff against your base resume" inset={false}>
+            <Diff diff={job.diff} />
+          </Disclosure>
+        </div>
+      )}
     </div>
   );
 }

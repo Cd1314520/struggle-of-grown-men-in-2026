@@ -30,6 +30,7 @@ export function Select<T extends string>({
   const current = options.find(o => o.value === value)?.label;
   const name = ariaLabel ?? (collapse && prefix && typeof current === "string" ? `${prefix}: ${current}` : prefix);
   const wide = collapse && "@max-[80rem]/bar:hidden";
+  const changed = collapse && value !== options[0]?.value;
   return (
     <S.Root
       value={value}
@@ -43,10 +44,12 @@ export function Select<T extends string>({
         className={cn(
           "inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-sm text-fg shadow-xs transition-[background-color,border-color,box-shadow] outline-none hover:border-border-strong hover:bg-subtle focus-visible:border-accent focus-visible:ring-3 focus-visible:ring-accent/15 disabled:pointer-events-none disabled:opacity-50 data-[state=open]:border-border-strong data-[state=open]:bg-subtle touch:h-10",
           collapse && "@max-[80rem]/bar:w-8 @max-[80rem]/bar:justify-center @max-[80rem]/bar:px-0 touch:@max-[80rem]/bar:w-10",
+          changed &&
+            "@max-[80rem]/bar:border-accent/25 @max-[80rem]/bar:bg-accent-soft @max-[80rem]/bar:hover:border-accent/40 @max-[80rem]/bar:hover:bg-accent-soft",
           className,
         )}
       >
-        {collapse && <ArrowUpDown aria-hidden className="hidden size-4 text-fg-muted @max-[80rem]/bar:block" />}
+        {collapse && <ArrowUpDown aria-hidden className={cn("hidden size-4 @max-[80rem]/bar:block", changed ? "text-accent-text" : "text-fg-muted")} />}
         {prefix && <span className={cn("text-fg-subtle", wide)}>{prefix}</span>}
         <span className={cn("contents", wide)}>
           <S.Value />
@@ -60,14 +63,14 @@ export function Select<T extends string>({
           position="popper"
           sideOffset={4}
           collisionPadding={8}
-          className="z-50 min-w-[var(--radix-select-trigger-width)] animate-pop overflow-hidden rounded-lg border border-border bg-surface p-1 shadow-lg"
+          className="z-50 min-w-[var(--radix-select-trigger-width)] animate-pop overflow-hidden rounded-lg border border-border-strong bg-surface p-1 shadow-lg"
         >
           <S.Viewport>
             {options.map(o => (
               <S.Item
                 key={o.value}
                 value={o.value}
-                className="relative flex h-8 cursor-pointer items-center rounded-md pr-8 pl-2 text-sm text-fg outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-subtle touch:h-10"
+                className="relative flex h-8 cursor-pointer items-center rounded-md pr-8 pl-2 text-sm text-fg outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-muted touch:h-10"
               >
                 <S.ItemText>{o.label}</S.ItemText>
                 <S.ItemIndicator className="absolute right-2">

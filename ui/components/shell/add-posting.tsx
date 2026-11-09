@@ -1,4 +1,3 @@
-import { Link2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, ApiError, refreshAll } from "../../lib/api";
@@ -32,7 +31,6 @@ export function AddPostingDialog() {
       close(false);
       void refreshAll();
       toast.success("Posting added", {
-        description: "It will be assessed shortly.",
         action: {
           label: "Open",
           onClick: () => {
@@ -56,7 +54,6 @@ export function AddPostingDialog() {
           field.current?.focus();
         }}
         title="Add a posting"
-        description="Paste a job posting URL. It is assessed like any posting a scan finds."
         footer={
           <>
             <Button
@@ -79,21 +76,17 @@ export function AddPostingDialog() {
           }}
           className="flex flex-col gap-3"
         >
-          <div className="relative">
-            <Link2 className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-fg-subtle" />
-            <Input
-              ref={field}
-              id="addurl"
-              inputMode="url"
-              placeholder="https://boards.greenhouse.io/…"
-              aria-label="Job URL"
-              value={url}
-              onChange={e => {
-                setUrl(e.target.value);
-              }}
-              className="h-9 pl-8"
-            />
-          </div>
+          <Input
+            ref={field}
+            id="addurl"
+            inputMode="url"
+            placeholder="https://boards.greenhouse.io/…"
+            aria-label="Job URL"
+            value={url}
+            onChange={e => {
+              setUrl(e.target.value);
+            }}
+          />
           {known !== null && (
             <Callout
               tone="neutral"

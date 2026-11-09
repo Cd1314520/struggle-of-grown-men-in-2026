@@ -1,6 +1,6 @@
 import { useSettings } from "../../lib/api";
 import { ConfigRow, type FieldKind } from "./field";
-import { SavedLocally, SettingsGroup, SettingsPanel } from "./parts";
+import { SettingsGroup, SettingsPanel } from "./parts";
 
 const minutes = { kind: "number", unit: "min" } as const;
 const perDay = { kind: "number", unit: "a day" } as const;
@@ -8,31 +8,11 @@ const port = { kind: "number", min: 1 } as const;
 
 export function Schedule() {
   return (
-    <SettingsPanel
-      id="schedule"
-      title="Schedule & limits"
-      description="When the app runs on its own and how much it may do in a day. Daily caps reset at midnight UTC."
-      footer={<SavedLocally />}
-    >
+    <SettingsPanel id="schedule" title="Schedule & limits" description="Daily caps reset at midnight UTC.">
       <SettingsGroup title="Runs" />
-      <ConfigRow
-        path="schedule.scanMinutes"
-        label="Scan every"
-        description="Re-reads every watched board and feed. Only new postings cost anything. 0 runs it only from the button."
-        field={minutes}
-      />
-      <ConfigRow
-        path="schedule.discoverMinutes"
-        label="Discover every"
-        description="An agent searches the web for more companies and postings to watch. 0 turns it off."
-        field={minutes}
-      />
-      <ConfigRow
-        path="schedule.trackMinutes"
-        label="Read mail every"
-        description="Reads the mailbox for replies to applications. 0 turns it off."
-        field={minutes}
-      />
+      <ConfigRow path="schedule.scanMinutes" label="Scan every" description="Watched boards and feeds. 0: only from Scan now." field={minutes} />
+      <ConfigRow path="schedule.discoverMinutes" label="Discover every" description="0 turns it off." field={minutes} />
+      <ConfigRow path="schedule.trackMinutes" label="Read mail every" description="0 turns it off." field={minutes} />
       <SettingsGroup title="Daily caps" />
       <ConfigRow path="limits.prepPerDay" label="Assessments" field={perDay} />
       <ConfigRow
@@ -50,7 +30,7 @@ export function Schedule() {
       <ConfigRow
         path="limits.applySpreadHours"
         label="Spread new applications over"
-        description="New applications start at most one per this many hours divided by the daily cap. Postings opened in the last day skip the wait. 0 starts them as fast as browsers allow."
+        description="Starts are spaced by these hours over the daily cap. Postings under a day old skip the wait; 0: no spacing."
         field={{ kind: "number", step: 0.5, unit: "hours" }}
       />
       <SettingsGroup title="At once" />
@@ -65,7 +45,7 @@ export function Schedule() {
       <ConfigRow
         path="retention.chatterDays"
         label="Keep agents' step-by-step records"
-        description="Each step, tool call and message. 0 keeps them for good. Approvals, gates, errors, mail and your own actions are never removed."
+        description="0 keeps them for good. Approvals, gates, errors, mail and your actions are always kept."
         field={{ kind: "number", unit: "days" }}
       />
     </SettingsPanel>
@@ -81,22 +61,24 @@ const titled = (key: string) =>
     .replace(/([A-Z])/g, " $1")
     .toLowerCase();
 const FEED_NAMES: Record<string, string> = { remotive: "Remotive", jobicy: "Jobicy", remoteok: "RemoteOK" };
+const FEED_PARAMS: Record<string, string> = {
+  count: "Postings read per request.",
+  geo: "Region filter.",
+  tags: "Only postings with these tags.",
+  categories: "Only postings in these categories.",
+  industries: "Only postings in these industries.",
+};
 
 export function Sources() {
   const { data } = useSettings();
   const feeds = (data?.values["feeds"] ?? {}) as Record<string, Record<string, unknown>>;
   return (
-    <SettingsPanel
-      id="sources"
-      title="Sources"
-      description="Where scans read postings beyond the watched company boards. Each is read no more often than its own minutes; 0 turns it off."
-      footer={<SavedLocally />}
-    >
+    <SettingsPanel id="sources" title="Sources" description="Postings beyond the watched company boards. 0 minutes turns a source off.">
       <SettingsGroup title="LinkedIn and Indeed" />
       <ConfigRow
         path="boards.queries"
         label="Searches"
-        description="Each search is read logged out, newest first. A posting that passes triage is applied to on the employer's own site."
+        description="Read logged out, newest first; applied to on the employer's own site."
         field={{ kind: "list", placeholder: "software engineer, AI engineer" }}
       />
       <ConfigRow path="boards.location" label="Location" field={{ kind: "text", placeholder: "United States" }} />
@@ -107,12 +89,7 @@ export function Sources() {
         description="Later scans ask only for what is new since the last."
         field={{ kind: "number", unit: "hours" }}
       />
-      <ConfigRow
-        path="boards.linkedin.minutes"
-        label="LinkedIn every"
-        description="Neither site permits automated reading, so requests are kept few; a refusal pauses that site for 6 hours."
-        field={minutes}
-      />
+      <ConfigRow path="boards.linkedin.minutes" label="LinkedIn every" description="A refusal pauses the site for 6 hours." field={minutes} />
       <ConfigRow path="boards.linkedin.pages" label="LinkedIn pages per search" description="10 postings a page." field={{ kind: "number", min: 1 }} />
       <ConfigRow path="boards.indeed.minutes" label="Indeed every" description="One request per search, up to 100 postings each." field={minutes} />
       {Object.entries(feeds).map(([name, feed]) => (
@@ -127,11 +104,11 @@ function FeedRows({ name, feed }: { name: string; feed: Record<string, unknown> 
   return (
     <>
       <SettingsGroup title={label} />
-      <ConfigRow path={`feeds.${name}.minutes`} label={`${label} every`} field={minutes} />
+      <ConfigRow path={`feeds.${name}.minutes`} label="Every" field={minutes} />
       {Object.entries(feed)
         .filter(([key]) => key !== "minutes")
         .map(([key, value]) => (
-          <ConfigRow key={key} path={`feeds.${name}.${key}`} label={titled(key)} field={paramField(value)} />
+          <ConfigRow key={key} path={`feeds.${name}.${key}`} label={titled(key)} description={FEED_PARAMS[key]} field={paramField(value)} />
         ))}
     </>
   );
@@ -139,18 +116,18 @@ function FeedRows({ name, feed }: { name: string; feed: Record<string, unknown> 
 
 export function Server() {
   return (
-    <SettingsPanel id="server" title="Server" description="Where the app is reached, and the resume project it compiles." footer={<SavedLocally />}>
+    <SettingsPanel id="server" title="Server">
       <SettingsGroup title="Addresses" />
       <ConfigRow
         path="publicUrl"
         label="Public address"
-        description="How you reach the app from elsewhere (a tailnet address, say). The app refuses requests to names it doesn't know, and the Gmail sign-in returns here. Empty: http://localhost and the port."
+        description="A tailnet address, say. Other names are refused, and Gmail sign-in returns here. Empty: localhost."
         field={{ kind: "text", type: "url", nullable: true, mono: true, placeholder: "https://…" }}
       />
       <ConfigRow
         path="vncUrl"
         label="Live view address"
-        description="How you reach the browsers' live view. Empty: http://localhost and the VNC port."
+        description="Empty: localhost and the live view port."
         field={{ kind: "text", type: "url", nullable: true, mono: true, placeholder: "https://…" }}
       />
       <ConfigRow path="port" label="Port" description="The public address must still lead here." field={port} />

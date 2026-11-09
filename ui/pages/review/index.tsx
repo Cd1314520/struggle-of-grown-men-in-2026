@@ -1,14 +1,14 @@
-import { ArrowRight, Inbox, PanelRight } from "lucide-react";
+import { ArrowRight, Inbox } from "lucide-react";
 import { useRef, type ReactNode } from "react";
 import { FilterMenu, GroupSegments, ListDetail, NoMatch, useOpenRecord } from "../../components/list";
-import { Button, CompanyMark, EmptyState, ListGroup, Pagination, SearchInput, Select, SkeletonRows, Workspace } from "../../components/ui";
+import { Button, EmptyState, ListGroup, Pagination, SearchInput, Select, SkeletonRows, Workspace } from "../../components/ui";
 import { useSummary } from "../../lib/api";
 import { plural, unent } from "../../lib/format";
 import { useListParams } from "../../lib/list-params";
 import { TABLET, useMedia, WIDE } from "../../lib/media";
 import { setParams } from "../../lib/router";
 import { JobDetail } from "../job/detail";
-import { QueueRow } from "./queue-row";
+import { AppliedHere, QueueRow } from "./queue-row";
 import { thresholdOf } from "../job/model";
 
 const SORTS = [
@@ -16,6 +16,8 @@ const SORTS = [
   { value: "score", label: "Best fit" },
   { value: "company", label: "Company" },
 ] as const;
+
+const SHORT: Record<string, string> = { new: "New", today: "Today", week: "Week", older: "Older" };
 
 export function ReviewPage() {
   const wide = useMedia(WIDE),
@@ -40,18 +42,7 @@ export function ReviewPage() {
       open={openId !== null}
       onListClick={record.onListClick}
       detail={record.panel && <JobDetail key={record.panel.id} layout="panel" {...record.panel} />}
-      empty={
-        list && (
-          <EmptyState
-            icon={<PanelRight />}
-            title="No job open"
-            description={
-              list.total ? "Pick a job from the queue to see why it fits and decide on it." : "Nothing in the queue matches, so there is no job to open."
-            }
-            className="h-full"
-          />
-        )
-      }
+      empty={list && <EmptyState size="sm" title={list.total ? "No job open" : "No job matches"} className="h-full" />}
     >
       <Workspace
         frame="column"
@@ -63,13 +54,12 @@ export function ReviewPage() {
         bar={{
           title: "Review",
           count: list?.all,
-          ...(tablet && { noun: "waiting for you" }),
           search: (
             <SearchInput
               ref={search}
               value={lp.search}
               onValueChange={lp.setSearch}
-              placeholder={tablet ? "Search title, company or place" : "Search"}
+              placeholder={tablet && !wide ? "Search title, company or place" : "Search"}
               aria-label="Search the queue"
             />
           ),
@@ -94,7 +84,14 @@ export function ReviewPage() {
               />
             </>
           ),
-          segments: list && list.total > 0 && <GroupSegments label="When the posting opened" groups={list.groups} value={lp.group} onChange={lp.setGroup} />,
+          segments: list && list.all > 0 && (
+            <GroupSegments
+              label="When the posting opened"
+              groups={list.groups.map(g => ({ ...g, label: SHORT[g.key] ?? g.label }))}
+              value={lp.group}
+              onChange={lp.setGroup}
+            />
+          ),
         }}
         footer={list && <Pagination variant="footer" noun="jobs" offset={list.offset} limit={list.limit} total={list.total} onChange={record.setPage} />}
       >
@@ -110,23 +107,23 @@ export function ReviewPage() {
             let heading: ReactNode = null;
             if (byAge && job.group !== prev?.group) {
               const g = groups.get(job.group);
-              heading = <ListGroup label={g?.label ?? job.group} count={g?.count} />;
+              heading = <ListGroup label={g?.label ?? job.group} />;
             } else if (clustered && job.company !== prev?.company)
               heading = (
                 <ListGroup
-                  lead={
-                    <span className="mr-1 flex w-8 shrink-0 justify-center">
-                      <CompanyMark name={job.company} size="sm" />
+                  label={unent(job.company)}
+                  hint={
+                    <span className="flex items-center gap-2">
+                      <AppliedHere times={job.appliedThere} />
+                      <span className="tabular">{job.companyCount} in the queue</span>
                     </span>
                   }
-                  label={unent(job.company)}
-                  hint={`${job.companyCount} to review`}
                 />
               );
             return (
               <div key={job.id} className="contents">
                 {heading}
-                <QueueRow job={job} threshold={thresholdOf(job.rubric, summary)} underCompany={clustered} link={record.rowProps(job.id)} />
+                <QueueRow job={job} threshold={thresholdOf(job.rubric, summary)} underCompany={clustered} byAge={byAge} link={record.rowProps(job.id)} />
               </div>
             );
           })
@@ -149,7 +146,6 @@ function AllClear() {
       <EmptyState
         icon={<Inbox />}
         title="You're all caught up"
-        description="Nothing is waiting for approval. Jobs land here once they have been assessed and tailored."
         action={
           next.length > 0 && (
             <div className="flex flex-col items-center gap-2">

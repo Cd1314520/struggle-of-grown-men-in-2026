@@ -11,17 +11,6 @@ export const PROFILE_DESC: Record<string, string> = {
   "employers.yml": "Employers you have settled by hand: the ones you most want, and the ones that are fine to practise on.",
   "referral.yml": "The true facts referral messages are drafted from, and how the daily list of who to contact is chosen. Only the Referrals page reads it.",
 };
-export const PROFILE_GIST: Record<string, string> = {
-  "targets.md": "Roles, places and pay you want",
-  "rubric.yml": "How postings are scored",
-  "main.typ": "Your resume, in Typst",
-  "resume-notes.md": "Extra facts for tailoring",
-  "answers.md": "Answers to form questions",
-  "personal.yml": "Contact details and form fields",
-  "companies.yml": "Boards each scan reads",
-  "employers.yml": "Employers settled by hand",
-  "referral.yml": "Facts for referral messages",
-};
 export const PLACEHOLDER = "TODO-FILL";
 
 export const needsFilling = (problems: readonly string[], file: string) => problems.some(p => p === file || (p === "resume" && file.endsWith(".typ")));

@@ -26,7 +26,7 @@ export function Linkified({ text, className }: { text: string; className?: strin
           title={to}
           target="_blank"
           rel="noopener noreferrer"
-          className={cn("text-accent-text underline-offset-2 hover:underline", !named && "whitespace-nowrap")}
+          className={cn("text-accent-text underline-offset-2 hover:underline", !named && "[overflow-wrap:anywhere]")}
         >
           {named ? label : shortUrl(to)}
           <ArrowUpRight aria-hidden className="ml-px inline size-3 align-[-1px]" />

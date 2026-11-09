@@ -10,32 +10,37 @@ import { Calibration } from "./calibration";
 import { Funnel } from "./funnel";
 import { Health } from "./health";
 import { Kpis } from "./kpis";
-import { attentionRows, NeedsYou } from "./needs-you";
+import { NeedsYou, waitingCounts } from "./needs-you";
 import { Recent } from "./recent";
 import { Trend } from "./trend";
 import { Quiet } from "./quiet";
-import { Upcoming } from "./upcoming";
+import { Upcoming, YourMove, useYourMove } from "./upcoming";
 
-const greeting = (hour: number) => (hour < 5 ? "Good evening" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening");
+function headline(blocking: number, review: number) {
+  if (!blocking && !review) return "All clear";
+  const parts = [];
+  if (blocking) parts.push(`${num(blocking)} waiting on you`);
+  if (review) parts.push(`${num(review)} to review`);
+  return parts.join(", ");
+}
 
 export function OverviewPage() {
   const { data: s } = useSummary();
   const [starting, setStarting] = useState(false);
-  const waiting = s ? attentionRows(s).reduce((n, r) => n + r.count, 0) : 0;
+  const yourMove = useYourMove().data?.total ?? 0;
+  const waiting = s ? waitingCounts(s, yourMove) : null;
   const scanning = !!s?.running.scan || starting;
   const fresh = !!s && s.setupRemaining > 0 && !Object.values(s.counts).some(Boolean);
-  const hello = greeting(new Date().getHours()),
-    meta = s && (waiting ? `${num(waiting)} ${waiting === 1 ? "thing needs" : "things need"} you` : "All clear, nothing is waiting on you");
+  const meta = waiting ? headline(waiting.blocking, waiting.review) : undefined;
   return (
     <Workspace
       className="max-lg:[&_div:has(>[data-lead])]:flex-1"
       bar={{
-        title: hello,
+        title: "Overview",
         meta,
         controls: (
           <div data-lead className="min-w-0 lg:hidden">
-            <p className="truncate text-base font-semibold text-fg">{hello}</p>
-            {meta && <p className="truncate text-sm text-fg-muted">{meta}</p>}
+            {meta && <p className="text-sm leading-tight font-medium text-fg">{meta}</p>}
           </div>
         ),
         actions: (
@@ -97,16 +102,23 @@ export function OverviewPage() {
         className="xl:[&>aside]:w-96 2xl:[&>aside]:w-104"
         aside={
           <div className="@container/ws">
-            <Health summary={s} />
-            <Upcoming />
-            <Quiet />
+            <div className="max-lg:hidden">
+              <Upcoming />
+              <Quiet />
+            </div>
             <Recent />
+            <Health summary={s} />
           </div>
         }
       >
         <div className="flex flex-col">
           <NeedsYou summary={s} />
-          <Kpis summary={s} className="sm:order-first" />
+          <YourMove />
+          <div className="@container/ws lg:hidden">
+            <Upcoming />
+            <Quiet />
+          </div>
+          <Kpis summary={s} />
           <Trend />
           <Funnel />
           <Calibration />

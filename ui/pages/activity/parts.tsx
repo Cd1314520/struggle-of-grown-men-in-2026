@@ -1,6 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import type { Summary } from "../../../src/api-types";
 import { Button, ListFooter, Tooltip, type WorkspaceBarProps } from "../../components/ui";
 import { api } from "../../lib/api";
 import { cn } from "../../lib/cn";
@@ -11,13 +12,13 @@ import type { FeedJob } from "./feed";
 export interface ActivityHead {
   tabs: ReactNode;
   run: ReactNode;
+  summary: Summary | undefined;
 }
 
 export function activityBar(head: ActivityHead, own: Omit<WorkspaceBarProps, "title" | "tabs"> = {}): WorkspaceBarProps {
   return {
     title: "Activity",
     tabs: head.tabs,
-    hint: "What the agents did, and the runs you can start by hand.",
     ...own,
     actions: (
       <>
@@ -41,8 +42,8 @@ export function Clock({ at, className }: { at: string; className?: string }) {
 
 export function JobLink({ job, className }: { job: FeedJob; className?: string }) {
   return (
-    <a href={href("job", job.id)} className={cn("group/job flex min-w-0 items-baseline gap-1.5 text-sm touch:-my-2 touch:py-2", className)}>
-      <span className="max-w-full shrink-0 truncate font-medium text-fg-muted group-hover/job:text-fg">{job.company ?? `Job ${job.id}`}</span>
+    <a href={href("job", job.id)} className={cn("group/job flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-sm touch:-my-2 touch:py-2", className)}>
+      <span className="max-w-full truncate font-medium text-fg-muted group-hover/job:text-fg">{job.company ?? `Job ${job.id}`}</span>
       {job.title && <span className="truncate text-fg-muted group-hover/job:text-fg">{job.title}</span>}
     </a>
   );

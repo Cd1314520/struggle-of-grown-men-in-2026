@@ -17,7 +17,7 @@ const METRICS: Record<Metric, { tab: string; title: string; unit: [one: string, 
 const HEIGHT = 200,
   TOP = 12,
   BOTTOM = 26,
-  LEFT = 36,
+  LEFT = 32,
   RIGHT = 4;
 
 const dayDate = (d: string) => new Date(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, Number(d.slice(8, 10)));
@@ -77,12 +77,15 @@ function Chart({ stats, metric }: { stats: Stats; metric: Metric }) {
           role="img"
           tabIndex={0}
           aria-label={`${METRICS[metric].title} per day over the last ${days.length} days. Use the arrow keys to read each day.`}
-          className="block touch-pan-y outline-none"
+          className="block touch-pan-y rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
           onPointerMove={onMove}
           onPointerLeave={() => {
             setActive(null);
           }}
           onKeyDown={onKey}
+          onFocus={ev => {
+            if (ev.currentTarget.matches(":focus-visible")) setActive(days.length - 1);
+          }}
           onBlur={() => {
             setActive(null);
           }}
@@ -90,7 +93,7 @@ function Chart({ stats, metric }: { stats: Stats; metric: Metric }) {
           {grid.map(t => (
             <g key={t}>
               <line x1={LEFT} x2={width - RIGHT} y1={y(t)} y2={y(t)} className="stroke-border" strokeWidth={1} shapeRendering="crispEdges" />
-              <text x={LEFT - 8} y={y(t)} dy="0.32em" textAnchor="end" className="tabular fill-fg-subtle text-xs">
+              <text x={0} y={y(t)} dy="0.32em" className="tabular fill-fg-subtle text-xs">
                 {compact(t)}
               </text>
             </g>
@@ -142,13 +145,11 @@ function Chart({ stats, metric }: { stats: Stats; metric: Metric }) {
 export function Trend() {
   const { data: st } = useStats();
   const [metric, setMetric] = useState<Metric>("applied");
-  const total = st ? st[metric].reduce((a, b) => a + b, 0) : 0;
-  const unit = METRICS[metric].unit;
   return (
     <WorkspaceSection
-      className={LABEL_HEAD}
+      className={cn(LABEL_HEAD, "max-sm:hidden")}
       title={METRICS[metric].title}
-      description={st ? `${num(total)} ${total === 1 ? unit[0] : unit[1]} in the last 30 days` : "Last 30 days"}
+      description={st ? `${num(st[metric].reduce((a, b) => a + b, 0))} in the last 30 days` : "Last 30 days"}
       actions={
         <Segments
           aria-label="Metric"

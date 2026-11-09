@@ -57,7 +57,7 @@ export function Combobox({
         disabled={!!disabled}
         aria-label={ariaLabel}
         className={cn(
-          "inline-flex h-8 min-w-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-sm text-fg shadow-xs transition-[background-color,border-color,box-shadow] outline-none hover:border-border-strong hover:bg-subtle focus-visible:border-accent focus-visible:ring-3 focus-visible:ring-accent/15 disabled:pointer-events-none disabled:opacity-50 data-[state=open]:border-border-strong data-[state=open]:bg-subtle touch:h-10",
+          "inline-flex h-8 min-w-0 items-center gap-1.5 rounded-md border border-border-strong bg-surface px-2.5 text-sm text-fg shadow-xs transition-[background-color,border-color,box-shadow] outline-none hover:border-fg-subtle/50 hover:bg-subtle focus-visible:border-accent focus-visible:ring-3 focus-visible:ring-accent/15 disabled:pointer-events-none disabled:opacity-50 data-[state=open]:border-border-strong data-[state=open]:bg-subtle touch:h-10",
           className,
         )}
       >
@@ -71,7 +71,7 @@ export function Combobox({
           align="end"
           sideOffset={4}
           collisionPadding={8}
-          className="z-50 w-[min(26rem,calc(100vw-1rem))] animate-pop overflow-hidden rounded-lg border border-border bg-surface shadow-lg"
+          className="z-50 w-[min(26rem,calc(100vw-1rem))] animate-pop overflow-hidden rounded-lg border border-border-strong bg-surface shadow-lg"
         >
           <Command loop>
             <Command.Input
@@ -97,7 +97,7 @@ export function Combobox({
                         onSelect={() => {
                           pick(o.value);
                         }}
-                        className="flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-sm text-fg outline-none select-none data-[selected=true]:bg-subtle touch:h-10"
+                        className="flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-sm text-fg outline-none select-none data-[selected=true]:bg-muted touch:h-10"
                       >
                         <Check className={cn("size-3.5 shrink-0 text-accent-text", o.value !== value && "invisible")} />
                         <span className="min-w-0 flex-1 truncate">{o.label}</span>
@@ -113,7 +113,7 @@ export function Combobox({
                   onSelect={() => {
                     pick(typed);
                   }}
-                  className="flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-sm text-fg outline-none select-none data-[selected=true]:bg-subtle touch:h-10"
+                  className="flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-sm text-fg outline-none select-none data-[selected=true]:bg-muted touch:h-10"
                 >
                   <CornerDownLeft className="size-3.5 shrink-0 text-fg-subtle" />
                   <span className="min-w-0 flex-1 truncate">{custom(typed)}</span>

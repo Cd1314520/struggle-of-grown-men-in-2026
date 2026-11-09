@@ -1,9 +1,8 @@
-import { CompanyMark, ListBody, ListRow } from "../../components/ui";
+import { ListBody } from "../../components/ui";
 import { useJobList } from "../../lib/api";
-import { brief, plain } from "../../lib/format";
-import { href } from "../../lib/router";
-import { NextPhrase } from "../applications/next-step";
-import { RailHead } from "./rail";
+import { cn } from "../../lib/cn";
+import { CLOSED, RailHead } from "./rail";
+import { StepRow } from "./upcoming";
 
 const SHOWN = 5;
 
@@ -13,21 +12,11 @@ export function Quiet() {
   const total = quiet.data?.total ?? 0;
   if (!total) return null;
   return (
-    <ListBody label="Gone quiet" className="border-t border-border">
+    <ListBody label="Gone quiet" className={cn("border-b border-border", CLOSED)}>
       <RailHead label="Gone quiet" count={total} link={total > SHOWN && { href: "#applications?group=quiet", label: "View all" }} />
-      {quiet.data?.rows.map(
-        r =>
-          r.next && (
-            <ListRow
-              key={r.id}
-              href={href("applications", r.id)}
-              lead={<CompanyMark name={r.company} />}
-              title={<span title={`${plain(r.next.label)}\n${r.company}, ${r.title}`}>{brief(r.next.label, r.company)}</span>}
-              secondary={r.company}
-              fact={<NextPhrase next={r.next} short />}
-            />
-          ),
-      )}
+      {quiet.data?.rows.map(r => (
+        <StepRow key={r.id} r={r} />
+      ))}
     </ListBody>
   );
 }
