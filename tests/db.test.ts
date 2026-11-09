@@ -694,6 +694,27 @@ describe("postings, duplicates and sources", () => {
   `);
   });
 
+  it("after a full pass, rechecks only employers with a new or changed job", () => {
+    scenario(`
+    job(1, { company: "Acme", title: "Analyst", status: "skipped" });
+    job(2, { company: "Beta", title: "Analyst", status: "skipped" });
+    store.dedupeExisting();
+    db.run("UPDATE jobs SET updated_at = datetime('now', '-1 day')");
+    store.kvSet("dedupe.swept", JSON.stringify({ id: 2, at: db.query("SELECT datetime('now', '-1 hour') AS at").get().at }));
+
+    job(3, { company: "Acme", title: "Analyst", status: "skipped" });
+    db.run("UPDATE jobs SET updated_at = datetime('now', '-1 day') WHERE id = 3");
+    db.run("INSERT INTO jobs (id, url, source, company, title, status, company_key, updated_at) VALUES (4, 'https://ats.example/jobs/4', 'test', 'Beta', 'Analyst', 'skipped', 'beta', datetime('now', '-1 day'))");
+    db.run("UPDATE kv SET value = json_set(value, '$.id', 4) WHERE key = 'dedupe.swept'");
+    store.dedupeExisting();
+    assert.deepEqual(ids(db.query("SELECT id FROM jobs ORDER BY id").all()), [1, 2, 4]);
+
+    store.writeJob(4, { title: "Analyst" });
+    store.dedupeExisting();
+    assert.deepEqual(ids(db.query("SELECT id FROM jobs ORDER BY id").all()), [1, 2]);
+  `);
+  });
+
   it("folds a duplicate whose listing is the better one to apply through", () => {
     scenario(`
     job(1, { company: "Acme", title: "Data Engineer", source: "linkedin", url: "https://www.linkedin.com/jobs/view/1", status: "triaged" });
