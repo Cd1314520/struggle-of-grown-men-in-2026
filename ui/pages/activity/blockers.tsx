@@ -1,5 +1,3 @@
-// Blockers: every time an application stopped short of being sent, and why. They stay after the job is
-// cleared away, so the stops a site outage caused can be found again and retried.
 import { ExternalLink, ShieldCheck } from "lucide-react";
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import type { BlockerCause, ListedBlocker } from "../../../src/blockers";
@@ -31,46 +29,35 @@ import { activityBar, Fold, JobLink, type ActivityHead } from "./parts";
 
 const PAGE = 50;
 const isCause = (c: string | null): c is BlockerCause => !!c && c in CAUSE;
-// The detail with its own job's id taken out (a path to that job's files) and any UUID, so stops that say the
-// same thing about different jobs compare equal: "open '…/jobs/…/resume.pdf'".
 const gist = (b: ListedBlocker) =>
   b.detail.replace(new RegExp(`\\b${b.job_id}\\b`, "g"), "…").replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "…");
 
-// One stop, or a run of them in a row with the same cause and the same words but for the job (an outage that
-// stopped 57 applications): those read as one row, with the jobs folded under it. The job (or the run's
-// employers), then the cause and where the job is now; the detail under them, folding open; when as the fact.
 function Row({ run }: { run: readonly ListedBlocker[] }) {
   const b = run[0];
   if (!b) return null;
   const many = run.length > 1;
-  // A run whose jobs have since moved on to different places has no one status to show.
   const status = run.every(x => x.status === b.status) && <JobStatus status={b.status} className="shrink-0" />;
   const employers = [...new Set(run.map(x => x.company))];
   return (
     <ListRow
-      // The employer's mark; a run, how many it stopped.
       lead={many ? <ListIcon icon={num(run.length)} /> : <CompanyMark name={b.company} />}
       titleLines="none"
       title={
         many ? (
           <span className="line-clamp-1">{plural(run.length, "application")}</span>
         ) : (
-          // Taller than its line on touch, so the one link a stop has is a thumb's width.
           <a href={href("job", b.job_id)} className="block hover:underline hover:underline-offset-2 touch:-my-2 touch:py-2">
             <span className="line-clamp-2 @4xl/ws:line-clamp-1">{b.title}</span>
           </a>
         )
       }
       secondary={many ? employers.join(", ") : b.company}
-      // The cause and where the job is now on one line, the cause giving way: never the status alone on a line.
       gist={
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium text-fg">{CAUSE[b.cause]}</span>
           {status}
         </span>
       }
-      // The detail folds open, which the row's own clamped snippet cannot: its clamp is lifted for this one, and
-      // its measure, so the words run to the time as every other list's do.
       className="[&_div:has(>[data-fold])]:line-clamp-none [&_div:has(>[data-fold])]:max-w-none"
       snippet={
         <div data-fold>
@@ -88,8 +75,6 @@ function Row({ run }: { run: readonly ListedBlocker[] }) {
           )}
         </div>
       }
-      // The posting's link beside the time, not after it, so every row's time sits at the gutter. Shown on
-      // hover, as row actions are; always on touch.
       fact={
         <>
           {!many && (
@@ -142,7 +127,6 @@ export function Blockers({ head }: { head: ActivityHead }) {
   }, [all, cause, search]);
   const page = shown.slice(offset, offset + PAGE);
 
-  // Days as labels; inside a day, a run of the same stop in the same words as one row.
   const rows: ReactNode[] = [];
   let day = "",
     run: ListedBlocker[] = [];

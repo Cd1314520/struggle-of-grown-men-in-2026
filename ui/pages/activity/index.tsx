@@ -1,6 +1,3 @@
-// Activity: is the pipeline healthy and what happened since the last look. The feed by day, the stops that
-// kept applications from going out, and the raw log, each a sheet under one bar: the tabs, the tab's own
-// search and filters, and the runs the owner can start by hand in a menu at the far right.
 import { Tabs, TabsList, TabsTrigger } from "../../components/ui";
 import { useSummary } from "../../lib/api";
 import { navigate, useRoute } from "../../lib/router";
@@ -31,7 +28,6 @@ export function ActivityPage() {
     <Tabs
       value={tab}
       onValueChange={v => {
-        // Each tab keeps its own filters, so switching starts clean.
         navigate(v === "highlights" ? "activity" : `activity/${v}`, { replace: true });
       }}
     >

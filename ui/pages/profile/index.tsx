@@ -1,5 +1,3 @@
-// Profile: the files the agents read about the owner. The list says what each is for and which still need
-// filling in; the file shows rendered, with an editor behind Edit.
 import { FilePen, FileText, Pencil, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -29,7 +27,6 @@ import { draftStore, needsFilling, PLACEHOLDER, PROFILE_DESC, PROFILE_GIST } fro
 
 const label = (file: string) => PROFILE_LABEL[file] ?? file;
 
-// The file's section head: its name, what it is for, and Edit (or Save and Cancel).
 interface Head {
   title: ReactNode;
   description: ReactNode;
@@ -37,7 +34,6 @@ interface Head {
   notice: ReactNode;
 }
 
-// companies.yml as a list: its search in the section's head, the rows edge to edge, the pages under them.
 function Companies({ boards, head }: { boards: readonly Board[]; head: Head }) {
   const b = useBoards(boards);
   return (
@@ -63,7 +59,6 @@ function Companies({ boards, head }: { boards: readonly Board[]; head: Head }) {
   );
 }
 
-// A markdown file's first heading, when it only repeats the panel's title ("# Targets").
 const withoutTitle = (text: string, title: string) =>
   text.replace(/^\s*#\s+(.+)\n+/, (line, h: string) => (h.trim().toLowerCase() === title.toLowerCase() ? "" : line));
 
@@ -91,9 +86,8 @@ function FileView({ file, needs }: { file: string; needs: boolean }) {
       queryClient.setQueryData(["profile", file], draft);
       draftStore.clear(file);
       toast.success(`Saved ${file}`);
-      void refreshAll(); // the setup notice and the nav badge follow the files
+      void refreshAll();
     } catch {
-      // the request showed why; the words stay in the editor
     } finally {
       setSaving(false);
     }
@@ -138,8 +132,6 @@ function FileView({ file, needs }: { file: string; needs: boolean }) {
   };
   if (boards && !editing) return <Companies boards={boards} head={head} />;
   return (
-    // Its head keeps to the file's measure, so Edit ends where the words do; Companies' rows run edge to edge
-    // and so does its head.
     <WorkspaceSection flush title={head.title} description={head.description} actions={head.actions} className="border-b-0 [&>div:first-child]:max-w-[56rem]">
       {head.notice}
       <div className="border-t border-border">
@@ -195,7 +187,6 @@ export function ProfilePage() {
   const file = files.find(f => f === parts[0]) ?? files.find(f => needsFilling(problems, f)) ?? files[0];
   const [leaving, setLeaving] = useState<string | null>(null);
 
-  // A link that leaves this file while it has unsaved words asks first.
   useEffect(() => {
     const onClick = (ev: MouseEvent) => {
       const a = ev.target instanceof Element ? ev.target.closest<HTMLAnchorElement>("a[href^='#']") : null;
@@ -248,7 +239,6 @@ export function ProfilePage() {
 
   return (
     <Workspace
-      // Below lg the bar holds nothing but the h1 (the top bar names the page): its rule would double the top bar's.
       className="max-lg:[&>:first-child]:border-b-0"
       bar={{ title: "Profile", hint: "What the agents know about you. Every assessment, resume and application reads from these files." }}
       notice={

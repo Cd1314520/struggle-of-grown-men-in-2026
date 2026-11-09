@@ -98,7 +98,6 @@ function WorkspaceMenu() {
   );
 }
 
-// What the machine is doing, at the foot of the sidebar: how it applies, the last scan, and a way to scan now.
 function SystemStatus({ summary }: { summary: Summary | undefined }) {
   if (!summary) return null;
   const scanning = summary.running.scan;
@@ -120,7 +119,6 @@ function SystemStatus({ summary }: { summary: Summary | undefined }) {
                   toast.success("Scan started");
                   void refreshAll();
                 },
-                // The request already showed the server's refusal (e.g. the profile isn't filled in).
                 () => undefined,
               );
             }}
@@ -135,7 +133,6 @@ function SystemStatus({ summary }: { summary: Summary | undefined }) {
   );
 }
 
-// An icon button in the sidebar's head, as Linear's search and new issue.
 const HEAD_BUTTON =
   "flex size-7 shrink-0 items-center justify-center rounded-md text-fg-muted transition-colors hover:bg-muted/60 hover:text-fg touch:size-10 [&_svg]:size-4";
 

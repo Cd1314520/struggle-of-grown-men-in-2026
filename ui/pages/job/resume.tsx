@@ -1,4 +1,3 @@
-// The Resume tab: what changed from the base resume, the first page as it will be sent, and the source diff.
 import { Download, ExternalLink, FileText, Lock } from "lucide-react";
 import { useState } from "react";
 import type { JobDetail } from "../../../src/api-types";
@@ -30,10 +29,9 @@ function Diff({ diff }: { diff: string }) {
   );
 }
 
-// The first page as an image, framed like the sheet of paper it is.
 function Page({ job }: { job: JobDetail }) {
   const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false); // the page renders on the server the first time: shimmer until it arrives
+  const [loaded, setLoaded] = useState(false);
   const frame = "relative aspect-[8.5/11] w-full overflow-hidden rounded-sm bg-white shadow-md ring-1 ring-border";
   if (!job.hasPdf || failed)
     return (

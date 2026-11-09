@@ -1,6 +1,3 @@
-// One setting from config.yml as a row of the page, with the control its value takes. A change is saved to
-// config.local.yml as soon as it is made (a typed value when the field is left, or on Enter); Reset hands
-// the setting back to config.yml. One the app reads only at start says it waits for a restart.
 import { RotateCcw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -14,7 +11,6 @@ export type FieldKind =
   | { kind: "number"; min?: number; step?: number; unit?: string }
   | { kind: "pair"; min?: number; step?: number; unit?: string }
   | { kind: "text"; type?: "text" | "url" | "email"; nullable?: boolean; placeholder?: string; mono?: boolean; short?: boolean }
-  // Free text over several lines; empty saves null.
   | { kind: "words"; placeholder?: string }
   | { kind: "list"; placeholder?: string }
   | { kind: "choice"; options: readonly Option[] }
@@ -26,11 +22,9 @@ const isSection = (v: unknown): v is Record<string, unknown> => !!v && typeof v 
 const getIn = (v: unknown, path: readonly string[]) => path.reduce<unknown>((at, key) => (isSection(at) ? at[key] : undefined), v);
 const under = (path: string, prefixes: readonly string[]) => prefixes.some(p => path === p || path.startsWith(`${p}.`));
 
-// The time zones Intl knows, read once.
 let zones: { value: string; label: string }[] | null = null;
 const zoneOptions = () => (zones ??= Intl.supportedValuesOf("timeZone").map(z => ({ value: z, label: z.replaceAll("_", " ") })));
 
-// A typed value, kept as text while it is edited and sent when the field is left or Enter is pressed.
 function Typed({
   value,
   parse,
@@ -49,11 +43,9 @@ function Typed({
   placeholder?: string;
   min?: number;
   step?: number;
-  // A box of several lines: Enter starts a new one, Ctrl/⌘+Enter saves.
   multiline?: boolean;
 }) {
   const [draft, setDraft] = useState(value);
-  // A value saved (or changed elsewhere) since replaces the text.
   const [shown, setShown] = useState(value);
   if (shown !== value) {
     setShown(value);
@@ -247,7 +239,6 @@ function Control({
   }
 }
 
-// What to ask before a change is saved, and what to do once it is.
 export interface Confirm {
   title: string;
   description: string;
@@ -256,8 +247,6 @@ export interface Confirm {
   then?: () => Promise<unknown>;
 }
 
-// `path`: the setting's keys, dotted ("schedule.scanMinutes"). `confirm`, when it gives one for the
-// new value, is asked first; a reset to config.yml's value is not asked about.
 export function ConfigRow({
   path,
   label,
@@ -289,7 +278,6 @@ export function ConfigRow({
       void refreshAll();
       return true;
     } catch {
-      // the request showed why; the value stays as it was
       return false;
     } finally {
       setBusy(false);

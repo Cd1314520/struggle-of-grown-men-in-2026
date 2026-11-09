@@ -1,5 +1,3 @@
-// The resume import's life, in a fresh process with throwaway state: the caller sets AUTO_APPLY_DATA,
-// AUTO_APPLY_PROFILE and AUTO_APPLY_RESUME_DIR. The worker is a stand-in that writes what an agent would.
 import assert from "node:assert/strict";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -15,7 +13,6 @@ copyFileSync(join(ROOT, "basic-resume", "resume.typ"), join(RESUME_DIR, "resume.
 writeFileSync(STOCK_MAIN, "// the old resume\n");
 writeFileSync(join(PROFILE, "resume-notes.md"), "# Resume notes\n");
 
-// A stand-in worker: `act` does in the working directory what the agent would, then the run ends.
 const worker =
   (act: (opts: WorkerOptions) => Promise<string | null> | string | null, status: "completed" | "aborted" = "completed"): RunWorker =>
   opts => ({
@@ -26,14 +23,12 @@ const finish = (opts: WorkerOptions) => opts.tools["finish_import"]?.handler({ s
 const compiled = () => ({ pages: 1, error: null });
 const upload = (name: string, text: string) => Object.assign(new Blob([text]), { name });
 
-// Uploads land under sources/ with safe names, and nothing changes until a draft is accepted.
 assert.equal(await imp.beginImport([upload("../My Resume.txt", "Jane Doe, engineer"), upload("My Resume.txt", "more")], "one page"), null);
 assert.equal(imp.importState().status, "running");
 assert.equal(await imp.beginImport([upload("x.txt", "x")], ""), "an import is already running");
 const work = join(DATA, "resume-import", "work");
 assert.deepEqual(readdirSync(join(work, "sources")).sort(), ["My Resume (2).txt", "My Resume.txt"]);
 
-// The template must come back untouched, and the host says so rather than accepting the draft.
 let replies: string[] = [];
 await imp.runImport(
   worker(async opts => {
@@ -58,7 +53,6 @@ assert.equal(state.pages, 1);
 assert.equal(state.notesChanged, true);
 assert.equal(readFileSync(STOCK_MAIN, "utf8"), "// the old resume\n");
 
-// A revision that ends without a draft leaves the import failed, with the agent's last words.
 assert.equal(imp.reviseImport("drop the summary"), null);
 await imp.runImport(
   worker(opts => {
@@ -73,7 +67,6 @@ assert.equal(state.status, "failed");
 assert.equal(state.error, "could not compile");
 assert.equal(imp.acceptImport(true), "there is no draft to use");
 
-// Asked again, it finishes; accepting installs the draft and the notes, keeping what they replaced.
 assert.equal(imp.reviseImport("drop the summary"), null);
 replies = [];
 await imp.runImport(
@@ -93,7 +86,6 @@ assert.equal(history.filter(f => f.endsWith("-resume-notes.md")).length, 1);
 assert.equal(imp.importState().status, "idle");
 assert.ok(!existsSync(work));
 
-// A first run cancelled leaves nothing behind.
 assert.equal(await imp.beginImport([upload("cv.md", "# Jane")], ""), null);
 const control = { handle: null, cancelled: false };
 await imp.runImport(
@@ -107,7 +99,6 @@ await imp.runImport(
 assert.equal(imp.importState().status, "idle");
 assert.ok(!existsSync(work));
 
-// A run the app was restarted in the middle of is failed, not left running for ever.
 assert.equal(await imp.beginImport([upload("cv.md", "# Jane")], ""), null);
 imp.interruptedImport();
 assert.equal(imp.importState().status, "failed");

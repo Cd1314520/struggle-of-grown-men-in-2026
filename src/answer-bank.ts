@@ -1,8 +1,3 @@
-// The answer bank: profile/answers.md, which every agent filling a form answers from. An answer the
-// candidate keeps on the Questions page waits in banked_answers until an agent files it: the agent
-// works out what the answer says beyond the form it was given on, and edits answers.md to say it,
-// widening an entry already there or adding one. Once answers.md has changed, recheck (recheck.ts)
-// answers the parked questions it now settles, however they are worded.
 import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, DATA, PROFILE, readProfile } from "./config";
@@ -13,16 +8,12 @@ import { markFiled, unfiledAnswers, type BankedAnswer } from "./questions";
 import { arg, S, schema, type RunWorker } from "./worker";
 import { render, workDir } from "./worker-tools";
 
-// Answers per worker: one read of the bank shared, and few enough that each gets thought about.
 const BATCH = 25;
-// A run that did not finish is tried again after this long, not on every tick.
 const RETRY_MINUTES = 60;
-// answers.md as it stood before each run that changed it.
 const HISTORY = join(DATA, "answer-bank");
 
 const waiting = () => unfiledAnswers(BATCH);
 
-// Whether answers wait to be filed, and no unfinished run is waiting out its retry.
 export const bankDue = () => unfiledAnswers(1).length > 0 && due("bank.failedAt", RETRY_MINUTES);
 
 const keptList = (kept: readonly BankedAnswer[]) =>
@@ -38,7 +29,6 @@ const keptList = (kept: readonly BankedAnswer[]) =>
     )
     .join("\n\n");
 
-// Replaces the one occurrence of `old` in `text`, or adds `next` at the end when `old` is empty.
 export function editText(text: string, old: string, next: string): string {
   if (!old) return `${text.trimEnd()}\n\n${next.trim()}\n`;
   const at = text.indexOf(old);
@@ -49,7 +39,7 @@ export function editText(text: string, old: string, next: string): string {
 
 async function fileBatch(run: RunWorker, kept: readonly BankedAnswer[], stamp: string) {
   let edits = 0;
-  let finished = false as boolean; // set from the tool callback
+  let finished = false as boolean;
   const file = join(PROFILE, "answers.md");
   const { done } = run({
     name: "bank",
@@ -101,7 +91,6 @@ async function fileBatch(run: RunWorker, kept: readonly BankedAnswer[], stamp: s
   return { edits, finished };
 }
 
-// Files every waiting answer into answers.md. Returns whether the file changed.
 export async function fileKeptAnswers(run: RunWorker): Promise<boolean> {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   let edits = 0;

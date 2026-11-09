@@ -17,7 +17,6 @@ import { useShell } from "./state";
 
 const TABS: readonly Page[] = ["overview", "review", "questions", "pipeline"];
 
-// The phone's tab bar: the four places worked in daily, and the menu for the rest.
 function TabBar() {
   const { page } = useRoute();
   const { data: s } = useSummary();
@@ -67,7 +66,6 @@ function TopBar() {
   return (
     <header className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-border bg-surface/95 px-3 backdrop-blur lg:hidden">
       <Logo />
-      {/* #job/<id> is the one page off the nav; its back link, just below, names its section. */}
       <span className="flex-1 truncate text-base font-semibold text-fg">{navItem(page)?.label ?? "Job"}</span>
       <button
         type="button"
@@ -114,8 +112,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const shell = useShell();
   const { page } = useRoute();
   const theme = useTheme();
-  // "G then O" goes to Overview, and so on. Listened for before the page's own keys, so the second
-  // letter never also reaches the page (where A approves).
   useEffect(() => {
     let pending = 0;
     const onKey = (ev: KeyboardEvent) => {
@@ -153,8 +149,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   ]);
   return (
     <div className="min-h-dvh bg-canvas">
-      {/* As in Linear: the nav sits on the canvas, and from lg the page is a panel inset from the window's
-          edges, rounded and hairlined, scrolling inside itself (lib/scroller.ts). */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 bg-canvas lg:block">
         <SidebarContent />
       </aside>
@@ -180,8 +174,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Toaster
         theme={theme}
         position="bottom-right"
-        // Above an open job's decision bar (docked or floating), so a toast never covers the next job's Approve.
-        // On a phone a job's own page floats its bar over the tab bar, so toasts sit above both.
         offset={{ bottom: 88, right: 16 }}
         mobileOffset={{ bottom: page === "job" ? 136 : 72 }}
         toastOptions={{
@@ -189,7 +181,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             toast: "!rounded-lg !border !border-border !bg-surface !text-fg !shadow-lg !font-sans !text-sm",
             description: "!text-fg-muted",
             actionButton: "!bg-accent !text-accent-fg !font-medium",
-            // The icon carries the tone; the toast itself stays a neutral surface.
             success: "[&_[data-icon]]:text-success-text",
             error: "[&_[data-icon]]:text-danger-text",
             warning: "[&_[data-icon]]:text-warning-text",

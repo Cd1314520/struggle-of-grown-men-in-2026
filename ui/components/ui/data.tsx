@@ -1,10 +1,8 @@
-// Small pieces that show one value: a score, an employer's mark, a time, a stat, a key-value list.
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
 import { ago, agoShort, dateTime, parseAt } from "../../lib/format";
 import { Tooltip } from "./tooltip";
 
-// A fit score: the number, coloured against the threshold, with a thin bar under it in the larger size.
 export function Score({
   value,
   threshold,
@@ -33,7 +31,6 @@ export function Score({
   );
 }
 
-// An employer's initials on a tint picked from its name, standing in for a logo.
 const TINTS = [
   "bg-[#eef0fe] text-[#4a4ac4] dark:bg-[#1e1e3a] dark:text-[#a5a5ff]",
   "bg-[#e9f7f0] text-[#1d7a52] dark:bg-[#11251c] dark:text-[#5fd39d]",
@@ -65,7 +62,6 @@ export function CompanyMark({ name, size = "md", className }: { name: string; si
   );
 }
 
-// "3h ago", with the exact time on hover. `short` is a row's fact: "3h", "2d", "now".
 export function Time({ at, short, className, prefix = "" }: { at: string | number | null | undefined; short?: boolean; className?: string; prefix?: string }) {
   if (!at) return null;
   const ms = typeof at === "number" ? at : parseAt(at);
@@ -79,8 +75,6 @@ export function Time({ at, short, className, prefix = "" }: { at: string | numbe
   );
 }
 
-// Label/value rows: two columns where there is room, and stacked (the label over its value) in less
-// than 28rem, a phone or a narrow panel, so a value never wraps a word to a line.
 export function Properties({
   items,
   className,

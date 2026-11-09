@@ -1,12 +1,7 @@
-// A role listed once per office is one job here, applied through one of its listings. This keeps that
-// one in the United States whenever the role is listed there.
 import { applyThrough, betterListing, jobSources, jobsInStatuses, logEvent, updateJob } from "./db";
 import { isSubmitting } from "./fill-state";
 import { NOT_STARTED } from "./status";
 
-// Moves jobs that would be applied to through a listing abroad onto their US listing, and sends them
-// back to be assessed against it: the score, the practice evidence and any draft belong to the other
-// posting. Safe to run on every start. Returns how many moved.
 export function preferUsListings() {
   let moved = 0;
   // Skipped jobs are most of the table and are never moved: leave them out of the read.

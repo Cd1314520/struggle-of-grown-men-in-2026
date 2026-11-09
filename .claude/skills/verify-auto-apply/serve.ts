@@ -1,11 +1,3 @@
-// Verification instance of auto-apply: the real HTTP handler and the real scheduler on a throwaway
-// port and data directory, with the outside world replaced by stand-ins. Started by ctl.sh; see SKILL.md.
-//
-// What is real: src/server.ts createHandler, src/scheduler.ts, the database and its migrations, every
-// status move, gate, answer and frozen resume, and the UI in ui/.
-// What is a stand-in: the agent runner and the browser (the two things a Scheduler takes as constructor
-// arguments), and outbound network, which is refused. Nothing here can reach the live Chrome on the
-// configured CDP port, a model, the mailbox or a job board.
 import { appendFileSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { JobBrowser } from "../../../src/chrome";
@@ -18,22 +10,19 @@ const PORT = Number(process.env["VERIFY_PORT"]);
 if (!STATE || !Number.isInteger(PORT) || PORT < 1024) throw new Error("VERIFY_STATE and VERIFY_PORT are required; start this through ctl.sh");
 if (resolve(STATE) === join(REPO, "data") || !resolve(STATE).includes("verify")) throw new Error(`Refusing to use ${STATE} as throwaway state`);
 
-// Set before any app module is loaded: src/config.ts reads these when it is imported.
 const DATA = join(STATE, "data");
 const PROFILE = join(STATE, "profile");
 const RESUME = join(STATE, "resume");
 for (const dir of [DATA, PROFILE, RESUME]) mkdirSync(dir, { recursive: true });
 Object.assign(process.env, {
-  NODE_ENV: "test", // config.yml alone: config.local.yml (the owner's addresses and mailbox) is not read
+  NODE_ENV: "test",
   AUTO_APPLY_DATA: DATA,
   AUTO_APPLY_PROFILE: PROFILE,
   AUTO_APPLY_RESUME_DIR: RESUME,
   AUTO_APPLY_PORT: String(PORT),
-  AUTO_APPLY_LOCAL_CONFIG: join(STATE, "config.local.yml"), // where Settings → Models writes; the owner's file is never touched
+  AUTO_APPLY_LOCAL_CONFIG: join(STATE, "config.local.yml"),
 });
 
-// Outbound network is refused outright. Scans, posting look-ups, Gmail and the CDP calls the server
-// makes for /api/browser/* all go through fetch, and none of them may leave this process.
 const refused: string[] = [];
 globalThis.fetch = Object.assign(
   (input: string | URL | Request) => {
@@ -45,13 +34,13 @@ globalThis.fetch = Object.assign(
 );
 
 const { config, jobDir } = await import("../../../src/config");
-config.schedule = { scanMinutes: 0, discoverMinutes: 0, trackMinutes: 0 }; // nothing runs unasked
-config.approval = "gated"; // every application waits at gate 1, and again at gate 2
+config.schedule = { scanMinutes: 0, discoverMinutes: 0, trackMinutes: 0 };
+config.approval = "gated";
 config.concurrency.fill = 1;
 config.fillPauseSeconds = [0, 0];
-config.limits.applySpreadHours = 0; // a new application starts as soon as the slot is free, not ~14 min apart
-config.chrome.vncPort = 0; // no links to the live browser views
-config.chrome.cdpPort = PORT + 2; // nothing listens here; the live Chrome's port is never named
+config.limits.applySpreadHours = 0;
+config.chrome.vncPort = 0;
+config.chrome.cdpPort = PORT + 2;
 
 const { db, getJob, insertJob, logEvent, updateJob } = await import("../../../src/db");
 const { MAIN, PDF_NAME } = await import("../../../src/resume");
@@ -59,9 +48,8 @@ const { createHandler } = await import("../../../src/server");
 const { seedProfile } = await import("../../../src/profile");
 const { Scheduler } = await import("../../../src/scheduler");
 
-// ---- stand-in browser: tabs exist only as names
 
-const tabs = new Map<string, string>(); // tab id -> url
+const tabs = new Map<string, string>();
 let nextTab = 0;
 const browser: Browser = {
   ensureChrome: () => Promise.resolve(),
@@ -82,14 +70,8 @@ const browser: Browser = {
   },
 };
 
-// ---- stand-in agent runner
-//
-// A fill worker acts out a fixed script through the same host tools a real one is given, so gates,
-// answers, approvals and outcomes are written by src/fill-tools.ts exactly as in production. The
-// script is chosen by a word in the posting URL (see SCRIPTS in SKILL.md). Any other worker (prep,
-// triage, locate, track) ends at once with an error: those need a model.
 const STEP_MS = 400;
-const handedOff = new Set<number>(); // jobs whose script already asked for browser help once
+const handedOff = new Set<number>();
 
 async function actOut(opts: WorkerOptions, stopped: () => boolean) {
   const call = async (name: string, args: Record<string, unknown> = {}) => {
@@ -100,7 +82,6 @@ async function actOut(opts: WorkerOptions, stopped: () => boolean) {
     try {
       reply = await tool.handler(args);
     } catch (err) {
-      // A tool refusing its arguments: logged, or the script's drift from the tools goes unseen.
       console.log(`[worker job ${opts.jobId}] ${name} threw: ${err instanceof Error ? err.message : String(err)}`);
       throw err;
     }
@@ -144,8 +125,6 @@ async function actOut(opts: WorkerOptions, stopped: () => boolean) {
   await call("report_result", { outcome: "submitted", note: "stand-in worker: confirmation page observed (no real site was contacted)" });
 }
 
-// The resume import's stand-in: the example resume as the draft, a line added to the notes, then the real
-// finish_import, which compiles the draft with the machine's typst. A note containing "fail" ends without a draft.
 async function importOut(opts: WorkerOptions) {
   await Bun.sleep(STEP_MS * 3);
   if (/fail/i.test(opts.prompt)) throw new Error("stand-in import asked to fail");
@@ -189,7 +168,6 @@ const runWorker: RunWorker = (opts): WorkerHandle => {
   };
 };
 
-// ---- seed data: only into an empty database
 
 const SEED: { script: string; title: string; status: "awaiting_approval" | "held" | "failed" | "submitted"; score: number }[] = [
   { script: "straight", title: "Backend Engineer (straight through)", status: "awaiting_approval", score: 84 },
@@ -205,7 +183,6 @@ const SEED: { script: string; title: string; status: "awaiting_approval" | "held
 function seed() {
   if (db.query<{ n: number }, []>("SELECT count(*) AS n FROM jobs").get()?.n) return;
   writeFileSync(join(RESUME, MAIN), "// stand-in stock resume source\n");
-  // The template the import's draft is written on, as a real install has it.
   for (const f of ["resume.typ", "main.example.typ"]) copyFileSync(join(REPO, "basic-resume", f), join(RESUME, f));
   SEED.forEach((s, i) => {
     const company = `Verify Co ${String.fromCharCode(65 + i)}`;
@@ -232,9 +209,8 @@ function seed() {
 }
 seed();
 
-// ---- serve
 
-seedProfile(); // the examples, as a fresh install's start copies them
+seedProfile();
 
 const scheduler = new Scheduler({ runWorker, browser });
 const handle = createHandler(scheduler);
@@ -244,7 +220,6 @@ const server = Bun.serve({
   port: PORT,
   idleTimeout: 0,
   fetch: req =>
-    // Not part of the app: lets the doctor tell this instance from the live one.
     new URL(req.url).pathname === "/__verify"
       ? Response.json({ verify: true, pid: process.pid, rev, repo: REPO, state: resolve(STATE), refusedOutbound: refused })
       : handle(req),
@@ -255,5 +230,5 @@ for (const sig of ["SIGINT", "SIGTERM"] as const)
     process.exit(0);
   });
 scheduler.start();
-writeFileSync(join(STATE, "server.pid"), String(process.pid)); // ctl.sh stops this pid and no other
+writeFileSync(join(STATE, "server.pid"), String(process.pid));
 console.log(`verify-auto-apply ready at http://127.0.0.1:${server.port} (state ${resolve(STATE)}, rev ${rev})`);

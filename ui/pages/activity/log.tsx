@@ -1,4 +1,3 @@
-// The full log: every entry as the workers wrote it, dense, by day.
 import { ScrollText } from "lucide-react";
 import { useMemo } from "react";
 import type { ActivityItem } from "../../../src/api-types";
@@ -10,7 +9,6 @@ import { activityBar, byDay, Clock, LoadOlder, useActivityPages, type ActivityHe
 
 const KINDS = ["step", "tool", "agent", "gate", "user", "auto", "error", "system", "mail", "recheck", "migration"] as const;
 const KIND_TEXT: Record<string, string> = { error: "text-danger-text", gate: "text-warning-text", user: "text-accent-text" };
-// The time and the worker and kind at fixed widths; the employer and the message flow after them, one line.
 const COLUMNS = "4.5rem 8rem";
 
 function Entry({ e }: { e: ActivityItem }) {
@@ -32,7 +30,6 @@ function Entry({ e }: { e: ActivityItem }) {
               {e.company ?? `Job ${e.job_id}`}
             </a>
           )}
-          {/* One line on a desktop, however many lines the message has (a checkpoint's JSON); two on touch. */}
           <Linkified text={e.message} className="whitespace-nowrap text-fg-muted touch:whitespace-normal" />
         </span>
       }

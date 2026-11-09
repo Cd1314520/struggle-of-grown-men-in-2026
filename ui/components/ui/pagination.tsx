@@ -1,11 +1,9 @@
-// The pager under a list: the range, a page box to jump with, and previous and next.
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../../lib/cn";
 import { Button } from "./button";
 import { ListFooter } from "./list";
 
-// The page number, typed to jump: Enter or leaving the box goes there, Escape puts it back.
 function PageField({ page, pages, onGo }: { page: number; pages: number; onGo: (page: number) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
   const go = () => {
@@ -34,7 +32,6 @@ function PageField({ page, pages, onGo }: { page: number; pages: number; onGo: (
             e.currentTarget.blur();
           }
         }}
-        // Wide enough for the last page's number, so the box never jumps as it is typed in.
         style={{ width: `calc(${String(pages).length}ch + 1.25rem)` }}
         className="tabular h-7 rounded-md border border-border bg-surface text-center text-sm text-fg shadow-xs transition-[border-color,box-shadow] outline-none hover:border-border-strong focus:border-accent focus:ring-3 focus:ring-accent/15 touch:h-9"
       />
@@ -43,8 +40,6 @@ function PageField({ page, pages, onGo }: { page: number; pages: number; onGo: (
   );
 }
 
-// "1–50 of 3,640 jobs", the page to jump to, and previous and next. One line in a narrow list pane or on a
-// phone, where previous and next keep only their arrows. `footer` is a list's ListFooter line.
 export function Pagination({
   offset,
   limit,
@@ -59,7 +54,7 @@ export function Pagination({
   total: number;
   onChange: (offset: number) => void;
   variant?: "plain" | "footer";
-  noun?: string; // after the total: "jobs"
+  noun?: string;
   className?: string;
 }) {
   if (total <= limit && offset === 0) return null;
@@ -70,7 +65,6 @@ export function Pagination({
     <Frame className={cn("@container", variant === "plain" && "flex items-center justify-between gap-3 px-1 py-3 text-sm text-fg-muted", className)}>
       <span className="tabular min-w-0 truncate whitespace-nowrap">
         {(offset + 1).toLocaleString()}–{end.toLocaleString()} of {total.toLocaleString()}
-        {/* Narrow, the page controls need the row: the range stays whole and the noun goes. */}
         {noun && <span className="@max-md:hidden"> {noun}</span>}
       </span>
       <div className="flex items-center gap-1.5">
@@ -88,7 +82,6 @@ export function Pagination({
         </Button>
         {pages > 1 && (
           <PageField
-            // A new page from outside (Next, a shortcut, a new search) starts the box over.
             key={offset}
             page={Math.floor(offset / limit) + 1}
             pages={pages}

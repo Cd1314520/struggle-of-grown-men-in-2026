@@ -1,5 +1,3 @@
-// The last 30 days as columns, one metric at a time: applications sent, replies, postings found.
-// Hand-drawn SVG at the container's pixel width, so text and bars are never scaled.
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { Stats } from "../../../src/api-types";
 import { Segments, Skeleton, WorkspaceSection } from "../../components/ui";
@@ -21,13 +19,11 @@ const HEIGHT = 200,
   LEFT = 36,
   RIGHT = 4;
 
-// A local day "YYYY-MM-DD" at its midnight.
 const dayDate = (d: string) => new Date(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, Number(d.slice(8, 10)));
 const short = (d: string) => dayDate(d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 const long = (d: string) => dayDate(d).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 const compact = (n: number) => (n >= 1000 ? `${n / 1000}K` : String(n));
 
-// Gridlines at round numbers: about four steps of 1, 2 or 5 times a power of ten.
 function ticks(max: number) {
   if (max <= 0) return [0, 1];
   const raw = max / 4,
@@ -37,7 +33,6 @@ function ticks(max: number) {
   return Array.from({ length: Math.round(top / step) + 1 }, (_, i) => Math.round(i * step * 100) / 100);
 }
 
-// A column with a rounded top and a square foot on the baseline.
 function column(x: number, y: number, w: number, h: number) {
   const r = Math.min(4, w / 2, h);
   return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
@@ -73,7 +68,6 @@ function Chart({ stats, metric }: { stats: Stats; metric: Metric }) {
     barW = Math.max(2, Math.min(24, slot * 0.62));
   const x = (i: number) => LEFT + i * slot + (slot - barW) / 2,
     y = (v: number) => TOP + plotH - (v / top) * plotH;
-  // Every seventh day back from today, so today is always labelled.
   const labelled = days.map((_, i) => (days.length - 1 - i) % 7 === 0);
   const unit = METRICS[metric].unit;
 

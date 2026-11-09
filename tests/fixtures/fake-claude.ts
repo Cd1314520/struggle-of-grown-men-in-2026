@@ -1,13 +1,10 @@
 #!/usr/bin/env bun
-// Stands in for `claude -p --output-format stream-json`: the prompt is a JSON plan of what to do. It
-// records the arguments it was given, calls the app's host-tool MCP server the way Claude Code would,
-// and prints stream-json events.
 interface Plan {
   tool?: string;
   args?: Record<string, unknown>;
-  hang?: boolean; // wait instead of calling the tool
-  failServer?: string; // report this MCP server as failed at init
-  limited?: boolean; // end refused by a usage limit
+  hang?: boolean;
+  failServer?: string;
+  limited?: boolean;
 }
 interface Server {
   url: string;

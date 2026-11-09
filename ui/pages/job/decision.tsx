@@ -1,6 +1,3 @@
-// The decision the app waits on for this job: what is asked, the one primary action, the rest behind ⋯.
-// A judgement on the fit (approve, hold, reconsider) sits in a bar under the content; a gate the agent
-// stopped at sits as a card above it. Each branch and safety rule here is the old gate's.
 import {
   ArrowRight,
   Clock,
@@ -56,13 +53,13 @@ import { useDraft, type JobActions } from "./actions";
 import { enteredOf, parsePending, setAsideOf, type DecisionKind } from "./model";
 
 interface Act {
-  key: string; // what `busy` names while it runs
+  key: string;
   label: string;
   run: () => void;
   icon?: ReactNode;
-  keyable?: boolean; // A may press it: never one that needs typed text, never Approve submission
+  keyable?: boolean;
   danger?: boolean;
-  href?: string; // a link out (the reserved browser) rather than a write
+  href?: string;
   shortcut?: string;
 }
 
@@ -76,10 +73,10 @@ export interface Decision {
   primary?: Act | undefined;
   secondary: Act[];
   menu: Act[];
-  why: string[]; // the policy behind the buttons, folded
-  evidence: boolean; // the saved page and checkpoint, folded
+  why: string[];
+  evidence: boolean;
   running?: boolean;
-  saveKey?: boolean; // the body's text box saves on ⌘/Ctrl+Enter: say so beside the button
+  saveKey?: boolean;
 }
 
 const CHECKPOINT_WHY =
@@ -94,11 +91,7 @@ const RUNNING_TITLE: Partial<Record<JobDetail["status"], string>> = {
   locating: "Finding the posting",
 };
 
-// ---- pieces of a gate's body
-
-// What the agent was asked, in the page's own words.
 function Asked({ text, context }: { text: string; context?: string | undefined }) {
-  // A question reads as a heading; a page of instructions the agent copied reads as text, folded.
   const long = text.length > 220 || text.split("\n").length > 3;
   const extra = context?.trim() && context.trim() !== text.trim() ? context.trim() : "";
   return (
@@ -123,10 +116,8 @@ function Asked({ text, context }: { text: string; context?: string | undefined }
   );
 }
 
-// A question's fixed choices. Picking one fills the answer rather than saving it, so it can still be edited.
 function Options({ options, value, onPick }: { options: readonly string[]; value?: string; onPick?: (o: string) => void }) {
   if (!options.length) return null;
-  // Short choices (Yes / No) sit side by side; sentences get a row each.
   const inline = options.length <= 4 && options.every(o => o.length <= 28);
   return (
     <div className={cn("flex gap-1.5", inline ? "flex-wrap" : "flex-col")} role={onPick ? "radiogroup" : undefined} aria-label="Options">
@@ -167,7 +158,6 @@ function Options({ options, value, onPick }: { options: readonly string[]; value
   );
 }
 
-// The note an earlier run left, folded: the lead line is the only current state.
 const PriorNote = ({ note }: { note: string | null }) =>
   note ? (
     <Disclosure id="prior-note" summary="Previous run note">
@@ -177,7 +167,6 @@ const PriorNote = ({ note }: { note: string | null }) =>
     </Disclosure>
   ) : null;
 
-// The summary a filled application is approved on: label/value rows, or the agent's words as they are.
 function Entered({ text }: { text: string }) {
   const e = enteredOf(text);
   if ("text" in e)
@@ -206,7 +195,6 @@ function Entered({ text }: { text: string }) {
   );
 }
 
-// An answer box that saves on ⌘/Ctrl+Enter.
 function AnswerBox({
   label,
   hint,
@@ -248,8 +236,6 @@ function AnswerBox({
 
 const words = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
 
-// ---- the decision for each kind of wait
-
 export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobActions): { decision: Decision | null; dialogs: ReactNode } {
   const { data: summary } = useSummary();
   const gate = job.gate;
@@ -264,10 +250,8 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
   const ambiguous = job.submissionAmbiguous;
   const checkpointWhy = job.checkpoint ? [CHECKPOINT_WHY] : [];
   const asked = gate?.createdAt ? `Asked ${ago(gate.createdAt)}` : "";
-  // An application that may already have gone out can only be resolved or rejected, never held.
   const hold: Act[] = ambiguous ? [] : [{ key: "hold", label: "Hold for later", icon: <Pause />, shortcut: "H", run: () => void a.act("hold") }];
   const reject = (label = "Reject"): Act => ({ key: "reject", label, icon: <X />, danger: true, shortcut: "X", run: () => void a.act("reject") });
-  // A verdict on whether it was sent is checked first, whichever way it goes.
   const markSubmitted = (label: string): Act => ({
     key: "mark_submitted",
     label,
@@ -311,7 +295,6 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       />
       <Dialog open={redoOpen} onOpenChange={setRedoOpen}>
         <DialogContent
-          // Focused here, not with autoFocus, so the dialog first records where focus was to return it on close.
           onOpenAutoFocus={e => {
             e.preventDefault();
             feedbackBox.current?.focus();
@@ -570,7 +553,6 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
           )}
         </div>
       ),
-      // Sending an application cannot be undone, so this one takes a click: A never presses it.
       primary: { key: "respond", label: "Approve submission", icon: <Send />, run: () => void a.act("respond", "approve") },
       secondary: changing
         ? []
@@ -589,7 +571,6 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       evidence,
     };
   } else if (kind === "manual" && gate) {
-    // Before the browser is reserved the next step is to take it; once it is, the next step is to give it back.
     const reserved = job.manualBrowserReserved;
     const handBack: Act = { key: "respond", label: "Hand control back", icon: <ArrowRight />, keyable: true, run: () => void a.act("respond", "done") };
     d = {
@@ -646,7 +627,6 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       menu: [reject()],
     };
   } else if (kind === "rejected" || kind === "skipped") {
-    // Reconsidering an application that may already have gone out could send it twice.
     const blocked = kind === "rejected" && ambiguous;
     d = {
       ...base,
@@ -658,7 +638,6 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       secondary: blocked ? [] : [{ key: "retry", label: "Reconsider", icon: <RotateCcw />, run: () => void a.act("retry") }],
     };
   } else if (kind === "running") {
-    // Only a worker on the job now makes its last step the current state; a queued job is waiting.
     const working = job.status === "filling" || job.status === "prepping" || job.status === "locating";
     const last = working ? job.events.find(e => e.kind === "step") : undefined;
     const resuming = job.checkpoint && (job.status === "approved" || job.status === "filling");
@@ -685,7 +664,6 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
   return { decision: d, dialogs };
 }
 
-// Why it was set aside, as the Archive's Reason column says it, with the whole note on hover.
 function SetAside({ job }: { job: JobDetail }) {
   const why = setAsideOf(job);
   if (!why) return null;
@@ -693,8 +671,6 @@ function SetAside({ job }: { job: JobDetail }) {
 }
 
 const toastTypeFirst = () => toast.error("Type something first.");
-
-// ---- how a decision shows
 
 function ActButton({
   act,
@@ -763,7 +739,6 @@ function MoreMenu({ acts, busy, label = "More actions" }: { acts: Act[]; busy: s
   );
 }
 
-// A presses the primary action when it may; X rejects and H holds when the decision offers them.
 export function useDecisionKeys(d: Decision | null, busy: string | null) {
   const find = (key: string) => d?.menu.find(x => x.key === key);
   useHotkeys([
@@ -821,8 +796,6 @@ function Evidence({ job }: { job: JobDetail }) {
   );
 }
 
-// A gate the agent stopped at, or the work in flight: the band above the job's tabs (detail.tsx frames it),
-// the one tinted block in a job.
 export function DecisionCard({ d, job, busy }: { d: Decision; job: JobDetail; busy: string | null }) {
   const hasActions = !!d.primary || d.secondary.length > 0;
   return (
@@ -871,11 +844,8 @@ export function DecisionCard({ d, job, busy }: { d: Decision; job: JobDetail; bu
   );
 }
 
-// A judgement on the fit: a bar under the content, so the reasons lead and the answer is always in reach.
-// With no room for its text the bar's buttons share its width.
 const FILL = "max-sm:h-9 @max-lg:flex-1 max-sm:[&_kbd]:hidden";
 
-// On a page of its own it docks at the foot of the window across the sheet, clear of the phone's tab bar.
 export function DecisionBar({ d, busy, docked }: { d: Decision; busy: string | null; docked: boolean }) {
   return (
     <div
@@ -885,10 +855,7 @@ export function DecisionBar({ d, busy, docked }: { d: Decision; busy: string | n
       )}
       data-decision={d.title}
     >
-      {/* The rule runs across the sheet; the buttons end where the job's content does. */}
       <div className="@container flex max-w-3xl items-center gap-3">
-        {/* Where the buttons leave too little room to read it (a phone, a narrow panel), the buttons fill the
-            bar: the header already says what the job waits on. */}
         <div className={cn("min-w-0 flex-1", (d.primary ?? d.secondary.length) && "hidden @lg:block")}>
           <p className="truncate text-sm font-medium text-fg">{d.title}</p>
           {d.lead && <div className="line-clamp-2 text-sm text-fg-muted">{d.lead}</div>}

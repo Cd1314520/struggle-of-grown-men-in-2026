@@ -1,7 +1,3 @@
-// One page of an application's browser, driven by the app itself over CDP: what the prefill script
-// needs of a tab (src/prefill.ts) when the fill worker's harness has no JavaScript session of its own
-// to run it in (Claude Code). It connects through the application's scoped proxy, so its clicks and
-// keystrokes are paced like the agent's.
 import type { Tab } from "./prefill";
 
 interface Reply {
@@ -14,7 +10,6 @@ interface Evaluated {
   exceptionDetails?: { text?: string; exception?: { description?: string } };
 }
 
-// Key name -> [code, Windows virtual key code, text it types].
 const KEYS: Record<string, [string, number, string?]> = {
   Enter: ["Enter", 13, "\r"],
   Tab: ["Tab", 9],

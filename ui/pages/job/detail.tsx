@@ -1,5 +1,3 @@
-// The open job: header, the decision the app waits on, and tabs. Shown beside or over a list (layout
-// "panel"), or as the whole page at #job/<id> (layout "page", on the page's sheet under its bar).
 import { ArrowUpRight, Building2, ChevronDown, ChevronUp, Clock, Globe, Maximize2, MapPin, SearchX, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { JobDetail as Job } from "../../../src/api-types";
@@ -23,9 +21,8 @@ import { Resume } from "./resume";
 export interface JobDetailProps {
   id: number;
   layout: "panel" | "page";
-  onClose?: (() => void) | undefined; // the panel's close button, and Esc
-  onActed?: ((action: string) => void) | undefined; // after a successful action; lists use it to move to the next job
-  // Where the job sits in the list beside it: `index` counts from 0 and shows as "3 of 246" with up/down.
+  onClose?: (() => void) | undefined;
+  onActed?: ((action: string) => void) | undefined;
   position?: { index: number; total: number; prev?: (() => void) | undefined; next?: (() => void) | undefined } | undefined;
 }
 
@@ -37,14 +34,11 @@ const TABS = [
   ["activity", "Activity"],
 ] as const;
 type Tab = (typeof TABS)[number][0];
-// The tab stays put while moving through a list, so comparing one tab across jobs is J, J, J.
 let lastTab: Tab = "overview";
 const rememberTab = (t: Tab) => {
   lastTab = t;
 };
 
-// After an action moves the list on, the next job's buttons land under the same pointer: they ignore
-// clicks for a moment so a double click cannot decide two jobs.
 let actedAt = 0;
 const markActed = () => {
   actedAt = Date.now();
@@ -62,13 +56,10 @@ function Fact({ icon, children, title }: { icon: ReactNode; children: ReactNode;
 function Header({ job, threshold, onScore }: { job: Job; threshold: number | null; onScore: () => void }) {
   const status = headerStatus(job);
   const others = job.siblings.length;
-  // Why a held or rejected job was set aside, beside its status at every width.
   const aside = job.status === "held" || job.status === "rejected" ? setAsideOf(job) : null;
   const fit = threshold != null ? `Fit score, needs ${threshold}` : "Fit score";
   const label = job.score != null ? `Fit ${job.score}, open the Fit tab` : undefined;
   return (
-    // One column under 36rem (a phone, a narrow panel): company, title, then one row of facts that holds
-    // the status and the score. From 36rem the status and the big score stand on the right.
     <header className="@container">
       <div className="flex items-start gap-4">
         <CompanyMark name={job.company} size="lg" className="mt-0.5 hidden @xl:inline-flex" />
@@ -104,7 +95,6 @@ function Header({ job, threshold, onScore }: { job: Job; threshold: number | nul
                 <Score value={job.score} threshold={threshold} className="text-base" />
               </button>
             )}
-            {/* "No location given" is not worth a line on a phone. */}
             <span className={job.location ? "contents" : "hidden @xl:contents"}>
               <Fact icon={<MapPin />} title={job.location ?? undefined}>
                 {place(job.location)}
@@ -150,8 +140,6 @@ function HeaderSkeleton() {
   );
 }
 
-// The panel's own bar: where the job is in the list, and the way out. The title joins it once the
-// header has scrolled away.
 function PanelBar({ job, position, onClose, condensed }: Pick<JobDetailProps, "position" | "onClose"> & { job: Job | undefined; condensed: boolean }) {
   return (
     <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2 sm:px-3">
@@ -231,7 +219,6 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
     })),
   );
 
-  // The job changed right after an action: hold clicks for a moment.
   const [settling, setSettling] = useState(() => Date.now() - actedAt < 1500);
   useEffect(() => {
     if (!settling) return;
@@ -245,9 +232,6 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
 
   const panel = layout === "panel";
   const pad = "px-4 sm:px-6";
-  // The record reads as one column at every width, on a page and in a panel: the header, the lead, the
-  // tabs and their rule, every tab's content and the decision bar's buttons share one left and one right
-  // edge. Only the band's tint and the rules between parts run on across the sheet.
   const measure = "max-w-3xl";
   const card =
     decision?.placement === "card" ? (
@@ -256,7 +240,6 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
       <NextSteps job={job} a={actions} />
     ) : null;
   const bar = decision?.placement === "bar" ? decision : null;
-  // A gate the agent stopped at leads, above the tabs; a judgement on the fit waits in the bar below it.
   const lead = !fitLeads(kind) && card;
 
   return (
@@ -273,14 +256,12 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
             />
           </div>
         </div>
-        {/* What the agent stopped at is a tinted band across the job, ruled above and below: no card. */}
         {lead && (
           <div className={cn("mt-5 border-y border-border bg-subtle/50 py-5 sm:mt-6", pad)}>
             <div className={measure}>{lead}</div>
           </div>
         )}
         <Tabs value={tab} onValueChange={open} className="mt-4 sm:mt-6">
-          {/* On a page it sticks under the page's bar (static below lg, where the shell's top bar is the one). */}
           <div className={cn("sticky z-10 bg-[var(--job-bg)]", panel ? "top-0" : "top-12 lg:top-[calc(3rem+1px)]", pad)}>
             <TabsList className={measure}>
               {TABS.map(([k, label]) => (
@@ -324,12 +305,11 @@ export function JobDetail({ id, layout, onClose, onActed, position }: JobDetailP
   const root = useRef<HTMLDivElement>(null);
   useHotkeys([onClose && { key: "Escape", run: onClose }]);
 
-  // The title joins the panel bar once the header has scrolled out of view.
   const loaded = job?.id === id;
   useEffect(() => {
     const scroller = root.current?.querySelector<HTMLElement>("[data-job-scroll]");
     if (!panel || !scroller) return;
-    scroller.scrollTo({ top: 0 }); // a new job opens at its top
+    scroller.scrollTo({ top: 0 });
     const on = () => {
       setCondensed(scroller.scrollTop > 96);
     };

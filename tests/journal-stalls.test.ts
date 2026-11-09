@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { mkdtempSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { runMonitor, loadState, observeAutoApplyActivity } from "../scripts/journal-stalls";
 
-/** Resolves with the Error a promise rejects with; fails the test if it settles any other way. */
 async function rejectionOf(promise: Promise<unknown>): Promise<Error> {
   try {
     await promise;
@@ -108,26 +107,18 @@ describe("Auto-Apply Journal & Stalls Monitor - Consumer Regression Tests", () =
     expect(res.changed).toBe(true);
     const journalText = readFileSync(journalPath, "utf8");
 
-    // Header preserved
     expect(journalText).toContain("# Auto-Apply Observation & Stalls Journal");
-    // Deterministic checkpoint comment
     expect(journalText).toContain("<!-- journal-checkpoint: watermark=11788 -->");
-    // Bootstrap tagged
     expect(journalText).toContain("[Bootstrap]");
-    // Job details in table
     expect(journalText).toContain("#8805");
     expect(journalText).toContain("ALTEN Technology USA");
-    // Gate event and verbatim text
     expect(journalText).toContain("Gate Event #11788");
     expect(journalText).toContain("By selecting YES, I consent to receive recruiting SMS messages");
-    // Categorization
     expect(journalText).toContain("Recruiting Communications & SMS Consent");
     expect(journalText).toContain("(1 application affected)");
-    // Neutral resolution label without emojis
     expect(journalText).not.toContain("⚠️");
     expect(journalText).not.toContain("ℹ️");
 
-    // State verification
     const state = loadState(statePath, journalPath);
     expect(state).not.toBeNull();
     expect(state?.lastEventId).toBe(11788);
@@ -152,12 +143,11 @@ describe("Auto-Apply Journal & Stalls Monitor - Consumer Regression Tests", () =
     const res2 = await runMonitor({ dbPath, journalPath, statePath, silent: true, help: false });
     expect(res2.changed).toBe(false);
     const text2 = readFileSync(journalPath, "utf8");
-    expect(text2).toBe(text1); // Exact byte equality, no duplicated entries
+    expect(text2).toBe(text1);
   });
 
   it("6. Aggregates recurring themes across distinct applications: second app yields count=2 and recurring label", async () => {
     const { dbPath, journalPath, statePath, db } = setupTestEnv();
-    // Job 1 has an SMS consent question
     db.run(`
       INSERT INTO jobs (id, url, source, company, title, status, approved_by, pending)
       VALUES (101, 'https://test/101', 'greenhouse', 'Co A', 'Dev', 'needs_input', 'auto', '{"kind":"question","text":"SMS consent"}')
@@ -170,7 +160,6 @@ describe("Auto-Apply Journal & Stalls Monitor - Consumer Regression Tests", () =
     let text = readFileSync(journalPath, "utf8");
     expect(text).toContain("Recruiting Communications & SMS Consent** (1 application affected)");
 
-    // Job 2 appears later and encounters another SMS consent question
     db.run(`
       INSERT INTO jobs (id, url, source, company, title, status, approved_by, pending)
       VALUES (102, 'https://test/102', 'greenhouse', 'Co B', 'Dev', 'needs_input', 'auto', '{"kind":"question","text":"SMS consent"}')
@@ -182,13 +171,11 @@ describe("Auto-Apply Journal & Stalls Monitor - Consumer Regression Tests", () =
     await runMonitor({ dbPath, journalPath, statePath, silent: true, help: false });
     text = readFileSync(journalPath, "utf8");
 
-    // Cumulative theme count must now be 2 and labeled recurring
     expect(text).toContain("Recruiting Communications & SMS Consent** (2 applications affected — recurring)");
   });
 
   it("7. Safely isolates approval intervals: old manual gate excluded, later auto gate captured", async () => {
     const { dbPath, journalPath, statePath, db } = setupTestEnv();
-    // Job 999: Old manual attempt at events 10-12
     db.run(`
       INSERT INTO jobs (id, url, source, company, title, status, approved_by)
       VALUES (999, 'https://test/999', 'board', 'Hybrid Corp', 'Eng', 'filling', 'auto')
@@ -197,7 +184,6 @@ describe("Auto-Apply Journal & Stalls Monitor - Consumer Regression Tests", () =
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (11, 999, 'fill', 'step', 'Old manual fill')`);
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (12, 999, 'fill', 'gate', 'question: Old manual question')`);
 
-    // Later auto-apply reassessment at event 50
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (50, 999, 'prep', 'auto', 'Approved by auto apply: fresh practice')`);
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (51, 999, 'fill', 'step', 'Fresh auto fill')`);
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (52, 999, 'fill', 'gate', 'question: New auto gate: Travel percentage?')`);
@@ -222,7 +208,6 @@ describe("Auto-Apply Journal & Stalls Monitor - Consumer Regression Tests", () =
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (11, 888, 'fill', 'step', 'Auto fill started')`);
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (12, 888, 'fill', 'gate', 'question: Auto era gate: salary expectation?')`);
 
-    // User approval at event 50 started manual interval
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (50, 888, 'prep', 'user', 'approve')`);
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (51, 888, 'fill', 'gate', 'question: Manual era gate: commute time?')`);
 
@@ -230,11 +215,8 @@ describe("Auto-Apply Journal & Stalls Monitor - Consumer Regression Tests", () =
     expect(res.changed).toBe(true);
 
     const journalText = readFileSync(journalPath, "utf8");
-    // Historical auto gate at 12 is captured
     expect(journalText).toContain("Gate Event #12");
     expect(journalText).toContain("Auto era gate: salary expectation?");
-    // Non-pending status labeled neutrally
-    // Manual era gate at 51 is excluded
     expect(journalText).not.toContain("Gate Event #51");
     expect(journalText).not.toContain("Manual era gate: commute time?");
   });
@@ -249,22 +231,17 @@ describe("Auto-Apply Journal & Stalls Monitor - Consumer Regression Tests", () =
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (2, 500, 'fill', 'step', 'Filling')`);
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (3, 500, 'fill', 'gate', 'question: Crash test question')`);
 
-    // Normal run
     await runMonitor({ dbPath, journalPath, statePath, silent: true, help: false });
     const journalText1 = readFileSync(journalPath, "utf8");
 
-    // Simulate crash where state file was deleted/lost, but journal already had the entry written
     unlinkSync(statePath);
 
-    // Re-run monitor
     const res = await runMonitor({ dbPath, journalPath, statePath, silent: true, help: false });
     expect(res.changed).toBe(true);
 
-    // Journal must NOT duplicate the entry
     const journalText2 = readFileSync(journalPath, "utf8");
     expect(journalText2).toBe(journalText1);
 
-    // State file must be restored with lastEventId=3
     const state = loadState(statePath, journalPath);
     expect(state?.lastEventId).toBe(3);
     expect(state?.reportedGateEventIds).toContain(3);
@@ -302,7 +279,6 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
     const corruptErr = await rejectionOf(runMonitor({ dbPath, journalPath, statePath, silent: true, help: false }));
     expect(corruptErr.message).toContain("State file corrupted");
 
-    // Invalid schema
     writeFileSync(statePath, JSON.stringify({ version: 999 }), "utf8");
     const schemaErr = await rejectionOf(runMonitor({ dbPath, journalPath, statePath, silent: true, help: false }));
     expect(schemaErr.message).toContain("Invalid schema");
@@ -346,18 +322,15 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
       VALUES (700, 'https://test/700', 'board', 'Triage Corp', 'Dev', 'approved', 'auto')
     `);
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (1, 700, 'prep', 'auto', 'Approved by auto apply: test')`);
-    // Gate logged by prep worker, NOT fill worker
     db.run(`INSERT INTO events (id, job_id, worker, kind, message) VALUES (2, 700, 'prep', 'gate', 'question: Prep gate?')`);
 
     const res = await runMonitor({ dbPath, journalPath, statePath, silent: true, help: false });
-    // No fill events at all, so excluded
     expect(res.changed).toBe(false);
   });
 
   it("14. Correctly attributes reconsidered auto-approvals, excludes prep-only, respects user cutoff, and discovers historical attempts past watermark", async () => {
     const { dbPath, journalPath, statePath, db } = setupTestEnv();
 
-    // Job 801: Reconsidered auto-approval entering fill with input stall (needs_input)
     db.run(`
       INSERT INTO jobs (id, url, source, company, title, status, approved_by, pending)
       VALUES (801, 'https://test/801', 'board', 'Reconsidered Input Corp', 'SWE', 'needs_input', 'auto', '{"text":"Consent to receive SMS messages?","shot":1760000000000}')
@@ -370,7 +343,6 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
       `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (52, 801, 'fill', 'gate', 'question: Consent to receive SMS messages?', '2026-10-10 05:02:00')`,
     );
 
-    // Job 802: Reconsidered auto-approval entering fill with manual stall (needs_manual)
     db.run(`
       INSERT INTO jobs (id, url, source, company, title, status, approved_by)
       VALUES (802, 'https://test/802', 'board', 'Reconsidered Manual Corp', 'SRE', 'needs_manual', 'auto')
@@ -383,7 +355,6 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
       `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (62, 802, 'fill', 'gate', 'manual: Cloudflare captcha challenge detected on form', '2026-10-10 06:02:00')`,
     );
 
-    // Job 803: Reconsidered auto-approval that is PREP-ONLY (never reached fill worker) -> MUST be excluded
     db.run(`
       INSERT INTO jobs (id, url, source, company, title, status, approved_by)
       VALUES (803, 'https://test/803', 'board', 'Prep Only Corp', 'QA', 'approved', 'auto')
@@ -393,7 +364,6 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
     );
     db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (71, 803, 'prep', 'step', 'Tailoring resume in prep', '2026-10-10 07:01:00')`);
 
-    // Job 804: Reconsidered auto-approval superseded by later manual approval cutoff
     db.run(`
       INSERT INTO jobs (id, url, source, company, title, status, approved_by)
       VALUES (804, 'https://test/804', 'board', 'Manual Cutoff Corp', 'DevOps', 'needs_input', 'user')
@@ -401,9 +371,7 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
     db.run(
       `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (80, 804, 'prep', 'auto', 'Approved by reconsidered auto apply: test', '2026-10-10 08:00:00')`,
     );
-    // User manually approves at event 85 before fill starts
     db.run(`INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (85, 804, 'user', 'user', 'approve', '2026-10-10 08:30:00')`);
-    // Fill starts after user approval at event 90
     db.run(
       `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (90, 804, 'fill', 'step', 'Fill started under manual approval', '2026-10-10 09:00:00')`,
     );
@@ -411,8 +379,6 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
       `INSERT INTO events (id, job_id, worker, kind, message, at) VALUES (91, 804, 'fill', 'gate', 'question: Travel percentage?', '2026-10-10 09:01:00')`,
     );
 
-    // Seed an existing state file with a high watermark past all above events (e.g., watermark = 500)
-    // to test that previously omitted historical eligible attempts are discovered
     writeFileSync(
       statePath,
       JSON.stringify(
@@ -429,26 +395,21 @@ Alex Rivera reviewed on 2026-10-09: Remember to keep checking Workday tabs!
       "utf8",
     );
 
-    // Initial run with existing state
     const res = await runMonitor({ dbPath, journalPath, statePath, silent: true, help: false });
     expect(res.changed).toBe(true);
 
     const journalText = readFileSync(journalPath, "utf8");
 
-    // 1. Reconsidered jobs with fill evidence are INCLUDED in journal scope
     expect(journalText).toContain("Reconsidered Input Corp");
     expect(journalText).toContain("Reconsidered Manual Corp");
     expect(journalText).toContain("Gate Event #52");
     expect(journalText).toContain("Cloudflare captcha challenge detected on form");
 
-    // 2. Prep-only job is EXCLUDED
     expect(journalText).not.toContain("Prep Only Corp");
 
-    // 3. User manual approval cutoff is RESPECTED (Job 804 fill was under manual approval)
     expect(journalText).not.toContain("Manual Cutoff Corp");
     expect(journalText).not.toContain("Gate Event #91");
 
-    // 4. Verify state persistence recorded the newly discovered attempts and gates
     const updatedState = loadState(statePath);
     expect(updatedState).not.toBeNull();
     expect(updatedState?.reportedJobStatuses["801"]).toBe("needs_input");

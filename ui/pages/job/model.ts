@@ -1,4 +1,3 @@
-// What the open job shows, worked out from the record: no React and no DOM, so the tests read it directly.
 import type { JobDetail, Summary } from "../../../src/api-types";
 import { parsePracticeAssessment, practiceVerdict, rubricOf as rubricOfAssessment } from "../../../src/practice";
 import { setAsideReason, type Reason } from "../../../src/reasons";
@@ -10,15 +9,10 @@ import { GATE, STATUS, type Tone } from "../../lib/labels";
 
 export type Phase = "practice" | "real";
 
-// The rubric a job's score is on, as src/rubric.ts scores it.
 export const rubricOf = (j: { practice_assessment?: string | null }, describing: boolean): Phase =>
   rubricOfAssessment(parsePracticeAssessment(j.practice_assessment), describing);
-// The bar a score on `rubric` is held to.
 export const thresholdOf = (rubric: Phase, summary: Summary | undefined) => summary?.thresholds?.[rubric] ?? null;
 
-// ---- the gate an action answers
-
-// The gate a job's `pending` column points at, for jobs whose gate row is not open any more.
 export const parsePending = (raw: string | null | undefined): { gateId?: string; context?: string } | null => {
   if (!raw) return null;
   try {
@@ -36,8 +30,6 @@ const SENT: readonly Status[] = ["submitted", "interview", "offer", "rejected_by
 export const ENDED: readonly Status[] = ["rejected_by_company", "withdrawn"];
 const RUNNING: readonly Status[] = ["approved", "filling", "triaged", "prepping", "locating"];
 
-// Which decision the job waits on. The order is the safety order: a submission that may already have
-// gone out outranks everything, so nothing offers to send it again.
 export type DecisionKind =
   | "verify"
   | "ambiguous"
@@ -67,12 +59,8 @@ export function decisionOf(j: Pick<JobDetail, "status" | "gate" | "submissionAmb
   if (SENT.includes(j.status) && !j.gate) return "process";
   return null;
 }
-// Approving and taking a job off hold are judgements on the fit, so the fit leads; every other decision
-// is about what the agent just did, so the decision leads.
 export const fitLeads = (kind: DecisionKind | null) => kind === "review" || kind === "held" || kind === "rejected" || kind === "skipped" || !kind;
 
-// What the job waits on, as the header says it: a stuck job by its gate. Every job in review waits for
-// review, so that one needs no colour.
 export function headerStatus(j: Pick<JobDetail, "status" | "gate" | "submissionAmbiguous">): { label: string; tone: Tone; pulse: boolean } {
   if (j.submissionAmbiguous && j.status !== "rejected" && !SENT.includes(j.status)) return { label: "Outcome unknown", tone: "warning", pulse: false };
   const [label, tone] = STATUS[j.status];
@@ -80,15 +68,10 @@ export function headerStatus(j: Pick<JobDetail, "status" | "gate" | "submissionA
   return { label: j.gate ? GATE[j.gate.kind] : label, tone, pulse: j.status === "filling" || j.status === "prepping" };
 }
 
-// Why a held or rejected job was set aside, in the words the Archive lists it under (src/reasons.ts).
 export const setAsideOf = (j: Pick<JobDetail, "note" | "history">): Reason | null => setAsideReason(j.note, j.history.at(-1)?.from_status ?? null);
 
-// ---- the fit
-
-// Build chatter that older assessments wrote into "concerns" and "resume_changes".
 const NOISE = /compil|pdfinfo|typst|page count|one page|metadata/i;
 
-// Checklists stored before items carried a label have none.
 export type Item = Omit<ChecklistItem, "label"> & { label?: string };
 export const checklistOf = (j: Pick<JobDetail, "checklist">): Item[] => {
   if (!j.checklist) return [];
@@ -101,7 +84,6 @@ export const checklistOf = (j: Pick<JobDetail, "checklist">): Item[] => {
 };
 export const itemLabel = (i: Item) => cap(i.label ?? (i.key.split(".")[1] ?? "").replace(/_/g, " "));
 
-// The items that decided the score in this phase: what it missed (requirements first), then what it met.
 export function verdictOf(items: readonly Item[]) {
   const scored = items.filter(i => !i.required).sort((a, b) => b.weight - a.weight);
   return {
@@ -111,7 +93,6 @@ export function verdictOf(items: readonly Item[]) {
 }
 
 const ORDER: Record<Answer, number> = { no: 0, unclear: 1, yes: 2 };
-// The full checklist of one phase, by answer, each group with requirements and heavy items first.
 export function groupsOf(items: readonly Item[]) {
   const sorted = [...items].sort((a, b) => ORDER[a.answer] - ORDER[b.answer] || Number(b.required) - Number(a.required) || b.weight - a.weight);
   return {
@@ -125,7 +106,6 @@ export const tally = (items: readonly Item[]) => ({
   of: items.reduce((n, i) => n + Math.max(0, i.weight), 0),
 });
 
-// The assessment's concerns, one sentence each, without build chatter.
 export const risksOf = (concerns: string | null) =>
   (concerns ?? "")
     .split(/\n|(?<=\.)\s+(?=[A-Z])/)
@@ -138,14 +118,11 @@ export const resumeChangesOf = (changes: string | null) =>
     .map(l => l.replace(/^[-•\s]+/, "").trim())
     .filter(l => l && !NOISE.test(l));
 
-// One line on the resume in hand: whether it can still change, or how far it moved from the base.
 export function resumeNote(j: Pick<JobDetail, "resumeFrozen" | "submitted_at" | "resume_changes">) {
   if (j.resumeFrozen) return j.submitted_at ? "As submitted" : "Locked for this application";
   const n = resumeChangesOf(j.resume_changes).length;
   return n ? `${n} ${n === 1 ? "change" : "changes"} from your base resume` : "Your base resume";
 }
-
-// ---- practice eligibility
 
 const AGENTS = { yes: "Agent-native", no: "Behind on agent adoption", unclear: "Not clear from the posting" };
 const LISTED = { frontier: "On your frontier list", practice: "On your practice list" };
@@ -156,8 +133,6 @@ export interface Practice {
   reason: string;
   rows: (readonly [label: string, value: string, evidence: string])[];
 }
-// Shown for any job assessed for it, and for every job while target employers are held back. The rule
-// is the server's (src/practice.ts), so the page cannot disagree with it.
 export function practiceOf(j: Pick<JobDetail, "practice_assessment">, targets: Summary["targets"]): Practice | null {
   if (!targets.holdBack && !j.practice_assessment) return null;
   const pa = parsePracticeAssessment(j.practice_assessment);
@@ -191,12 +166,8 @@ export function practiceOf(j: Pick<JobDetail, "practice_assessment">, targets: S
   };
 }
 
-// ---- the summary a filled application is approved on
-
-// "Label: value" lines from the agent become rows; anything else stays as text. A summary written as one
-// paragraph is taken a sentence at a time instead, so each answer gets its own row.
 export function enteredOf(raw: string): { rows: (readonly [label: string, value: string])[] } | { text: string } {
-  const text = raw.replace(/\/\S*\/data\/jobs\/\S*\/([^/\s]+)/g, "$1"); // the frozen resume's path on disk: the file name is enough
+  const text = raw.replace(/\/\S*\/data\/jobs\/\S*\/([^/\s]+)/g, "$1");
   let lines = text.split("\n").filter(l => l.trim());
   const prose = lines.length < 3;
   if (prose)
@@ -215,13 +186,9 @@ export function enteredOf(raw: string): { rows: (readonly [label: string, value:
   return rows.length < 3 ? { text } : { rows: rows.map(([k, v]) => [k, v.trim()] as const) };
 }
 
-// ---- a sent application's steps
-
-// A deadline given as a day reads as that day; a time as the local date and time.
 const day = (s: string) => new Date(`${s}T00:00`).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
 export const stepAt = (s: string) => (s.length === 10 ? day(s) : dateTime(parseAt(s)));
 export const stepMs = (s: string) => (s.length === 10 ? Date.parse(`${s}T23:59:59`) : parseAt(s));
-// The value a datetime-local box takes for a stored time, on the local clock.
 export const localInput = (s: string | null) => {
   if (!s || s.length === 10) return "";
   const d = new Date(parseAt(s));
@@ -237,10 +204,8 @@ export function stepStateOf(s: Pick<Step, "state" | "due_at" | "scheduled_at">, 
   return s.state === "expired" ? { label: "Expired", tone: "danger" } : { label: cap(s.state), tone: "neutral" };
 }
 
-// Whose move it is on a sent application, or how it ended: the line under "Next steps".
 export function leadOf(j: Pick<JobDetail, "status" | "note" | "updated_at" | "submitted_at" | "next" | "company" | "steps">, now = Date.now()) {
   const n = j.next;
-  // The steps are listed right under this line: name the one meant only when several are open.
   const which = n && j.steps.filter(isOpenStep).length > 1 ? `: ${brief(n.label, j.company)}` : "";
   const note = j.note ? `: ${j.note}` : "";
   if (j.status === "offer") return { tone: "success" as Tone, text: `Offer${note}` };
@@ -252,9 +217,6 @@ export function leadOf(j: Pick<JobDetail, "status" | "note" | "updated_at" | "su
   return { tone: "neutral" as Tone, text: `Waiting on ${j.company} since ${stepAt(n.at)}${n.quiet ? `, quiet for ${days} days` : ""}` };
 }
 
-// ---- the activity timeline
-
-// What a user action in the log reads as. The log stores "<action>: <text>".
 const ACTED: Record<string, string> = {
   approve: "You approved it",
   reject: "You rejected it",
@@ -285,8 +247,6 @@ export type Entry =
   | { type: "event"; at: number; title: string; detail: string; tone: Tone }
   | { type: "run"; at: number; from: number; worker: string; steps: string[] };
 
-// Status moves, stops and the log, newest first. A worker's step-by-step chatter folds into one run per
-// stretch of work, and tool calls (raw JSON) are left out: the outcome they report is in the status note.
 export function timelineOf(j: Pick<JobDetail, "history" | "blockers" | "events">): Entry[] {
   const raw: (Entry | { type: "step"; at: number; worker: string; message: string })[] = [
     ...j.history.map(h => ({ type: "status" as const, at: parseAt(h.at), from: h.from_status, to: h.to_status, note: h.note, auto: h.approved_by === "auto" })),
@@ -305,15 +265,12 @@ export function timelineOf(j: Pick<JobDetail, "history" | "blockers" | "events">
       raw.push(title ? { type: "event", at, title, detail: text, tone: "accent" } : { type: "event", at, title: "You", detail: e.message, tone: "accent" });
       continue;
     }
-    // "fill worker aborted: " says nothing the status move does not.
     if (/^\w+ worker aborted:\s*$/.test(e.message)) continue;
     const tone: Tone = e.kind === "error" ? "danger" : e.kind === "gate" ? "warning" : e.kind === "mail" ? "info" : "neutral";
     const title = e.kind === "mail" ? "Email from the employer" : e.kind === "gate" ? "Stopped to ask you" : workerName(e.worker);
     const detail = e.kind === "mail" || e.kind === "gate" ? e.message.replace(/^\w+:\s*/, "") : e.message;
     raw.push({ type: "event", at, title, detail, tone });
   }
-  // A status move, a stop and the log line written with them say one thing once: what the owner did
-  // reads as theirs ("You rejected it"), anything else as the move or the stop.
   const said = (e: (typeof raw)[number]) => (e.type === "status" ? (e.note ?? "") : e.type === "blocker" || e.type === "event" ? e.detail : "");
   const twin = (a: (typeof raw)[number], b: (typeof raw)[number]) => a !== b && Math.abs(a.at - b.at) <= 2000 && !!said(a) && said(a) === said(b);
   const mine = (e: (typeof raw)[number]) => e.type === "event" && e.tone === "accent";
@@ -322,7 +279,6 @@ export function timelineOf(j: Pick<JobDetail, "history" | "blockers" | "events">
       ? mine(e) || !raw.some(o => (o.type === "status" || o.type === "blocker") && twin(e, o))
       : e.type !== "status" || !raw.some(o => mine(o) && twin(e, o)),
   );
-  // Newest first; a status move and the log line written with it in the same second keep the move first.
   kept.sort((a, b) => b.at - a.at || Number(b.type === "status") - Number(a.type === "status"));
   const out: Entry[] = [];
   for (const e of kept) {

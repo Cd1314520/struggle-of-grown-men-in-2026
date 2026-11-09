@@ -1,5 +1,3 @@
-// One fill worker's hold on a job and a browser: who owns the application right now, how its place in
-// the form is recorded, and the only ways a worker stops (parked under a gate, or ended).
 import { join } from "node:path";
 import { confirmsSubmit } from "./auto";
 import { recordBlocker, type BlockerCause } from "./blockers";
@@ -24,21 +22,18 @@ export interface FillSession {
 
 export type Browser = Pick<typeof chrome, "ensureChrome" | "pruneTabs" | "prepareJobBrowser" | "tabs" | "screenshot" | "activateApplicationTab">;
 
-// What a scheduler lends its fill workers: the sessions it is running, and the outside world.
 export interface FillRuntime {
   sessions: Map<number, FillSession>;
   runWorker: RunWorker;
   browser: Browser;
 }
 
-// Callbacks are invalidated first, then the process is told to stop.
 export function endSession(session: FillSession) {
   session.active = false;
   session.browser?.revoke();
   session.handle?.abort();
 }
 
-// Object identity is the generation guard. Aborted callbacks cannot touch a successor.
 export function ownsFill(rt: FillRuntime, session: FillSession) {
   return session.active && rt.sessions.get(session.jobId) === session && getJob(session.jobId)?.status === "filling";
 }
@@ -93,8 +88,6 @@ export async function checkpointFrom(rt: FillRuntime, session: FillSession, args
   return checkpoint;
 }
 
-// Persist first, invalidate callbacks second, stop the actual process third.
-// The scheduler retains the slot until handle.done (which waits for process exit).
 export async function parkFill(rt: FillRuntime, session: FillSession, input: GateInput, checkpoint = session.checkpoint): Promise<string> {
   if (!ownsFill(rt, session)) throw new Error("stale fill worker");
   const shot = checkpoint.tabId ? await rt.browser.screenshot(session.slot, checkpoint.tabId).catch(() => null) : null;
@@ -118,7 +111,6 @@ export async function parkFill(rt: FillRuntime, session: FillSession, input: Gat
   return "PARKED. This worker has exited.";
 }
 
-// The worker has re-observed the form and asks to click final submit: authorize the submission, or park for review.
 export async function confirmSubmission(rt: FillRuntime, session: FillSession, summary: string): Promise<string> {
   const jobId = session.jobId;
   const job = getJob(jobId);
@@ -138,7 +130,6 @@ export async function confirmSubmission(rt: FillRuntime, session: FillSession, s
   return parkFill(rt, session, { kind: "confirm_submit", text: summary });
 }
 
-// The worker stopped without a recorded outcome: leave the application under a gate a person must clear.
 export function stopFailedFill(rt: FillRuntime, session: FillSession, message: string, cause: BlockerCause = "unknown") {
   if (!ownsFill(rt, session)) return;
   recordBlocker(session.jobId, cause, message);

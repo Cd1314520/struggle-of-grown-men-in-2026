@@ -16,7 +16,6 @@ globalThis.fetch = async (input: string | URL | Request) => {
   if (url.includes("/json/activate/")) return activationResponse;
   throw new Error("unexpected CDP request: " + url);
 };
-// Dynamic import keeps each subprocess's mocked fetch and module initialization isolated.
 const chrome = await import(${JSON.stringify(join(import.meta.dir, "../src/chrome.ts"))});
 `;
 

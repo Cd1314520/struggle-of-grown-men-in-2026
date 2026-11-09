@@ -1,5 +1,3 @@
-// Settings: each subsystem's state, its one action, every value it runs with, and the policy behind it folded
-// away. A value changed here is saved to config.local.yml, laid over config.yml (see field.tsx).
 import { ExternalLink, Plus, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -30,11 +28,9 @@ const SECTIONS = [
 ] as const;
 type Section = (typeof SECTIONS)[number][0];
 
-// The section nav follows the scroll: the last section whose top has passed under the header, or the last one
-// at the foot of the page. A click scrolls rather than following a link, since the hash is the route.
 function Nav({ ready }: { ready: boolean }) {
   const [active, setActive] = useState<Section>(SECTIONS[0][0]);
-  const picked = useRef(0); // when a click last chose a section: the smooth scroll it starts must not overrule it
+  const picked = useRef(0);
   useEffect(() => {
     if (!ready) return;
     const onScroll = () => {
@@ -74,7 +70,6 @@ const COVER_LETTERS = [
   { value: "draft", label: "Draft for me" },
 ] as const;
 
-// Settings the app reads only at start, saved but not yet in use.
 function RestartNotice() {
   const { data } = useSettings();
   if (!data?.pending.length) return null;
@@ -85,7 +80,6 @@ function RestartNotice() {
   );
 }
 
-// Turning hold-back off or on changes what happens to every job at a target employer, so it is asked first.
 const holdBackConfirm =
   (s: Summary) =>
   (next: unknown): Confirm | null =>
@@ -231,7 +225,6 @@ function AutoApply({ s }: { s: Summary }) {
             <div className={cn("h-full rounded-full", used >= 1 ? "bg-warning" : "bg-accent")} style={{ width: `${used * 100}%` }} />
           </div>
           <span className="tabular">
-            {/* The limit can be lowered after the day's approvals were made. */}
             {a.approvedToday > a.perDay ? `${num(a.approvedToday)} today, limit ${num(a.perDay)}` : `${num(a.approvedToday)} of ${num(a.perDay)} today`}
           </span>
         </div>
@@ -307,7 +300,6 @@ function DangerZone({ s }: { s: Summary }) {
       toast.success("Held jobs released");
       await refreshAll();
     } catch {
-      // the request already showed the server's refusal
     } finally {
       setBusy(false);
     }
@@ -349,7 +341,6 @@ function DangerZone({ s }: { s: Summary }) {
 
 export function SettingsPage() {
   const { data: s } = useSummary();
-  // #settings/<section> opens the page at that section (the Setup page links to them).
   const { parts } = useRoute();
   const section = parts[0];
   const ready = !!s;
@@ -357,7 +348,6 @@ export function SettingsPage() {
     if (ready && section) document.getElementById(section)?.scrollIntoView({ block: "start" });
   }, [ready, section]);
   return (
-    // Below lg the bar holds nothing but the h1 (the top bar names the page): its rule would double the top bar's.
     <Workspace
       className="max-lg:[&>:first-child]:border-b-0"
       bar={{ title: "Settings", hint: "How the app runs: what it may do on its own, where mail goes, and the browser it applies with." }}

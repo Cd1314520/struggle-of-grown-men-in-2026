@@ -1,9 +1,3 @@
-// Sits between omp and Chrome's DevTools port and makes input look like a person's.
-//
-// Agents drive pages at machine speed: the pointer teleports to the exact centre of a target and a
-// paragraph arrives with 0 ms between keystrokes. Behavioural bot checks (hCaptcha, reCAPTCHA) score
-// Input commands are re-timed here. Fill workers additionally use a private,
-// target-scoped listener so browser.open cannot adopt another application's tab.
 import type { Server, ServerWebSocket } from "bun";
 import { browserSlot } from "./config";
 import { logEvent } from "./db";
@@ -14,11 +8,10 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 interface Pointer {
   x: number;
   y: number;
-  // The last place the client asked for, and where we actually put the pointer (slightly off-centre).
   asked?: { x: number; y: number };
   lastKeyAt: number;
   lastMouseAt: number;
-  burst: number; // keys typed in the current run
+  burst: number;
 }
 
 interface Conn {
@@ -27,8 +20,8 @@ interface Conn {
   sessions: Map<string, Pointer>;
   queues: Map<string, Promise<void>>;
   injected: Set<number>;
-  quiet: Set<number>; // injected commands whose failure is ignored
-  prepared: Set<string>; // sessions already given NO_PRINT
+  quiet: Set<number>;
+  prepared: Set<string>;
   nextId: number;
   nativeUserAgent: string | undefined;
   pendingBrowserVersion: Set<string>;
@@ -53,7 +46,6 @@ interface Packet {
   result?: Record<string, unknown> | undefined;
   error?: unknown;
 }
-// Input.dispatchMouseEvent params; CDP requires x and y.
 interface MouseParams {
   [key: string]: unknown;
   x: number;
@@ -75,7 +67,6 @@ interface TargetConnection {
   infos: Map<string, TargetInfo>;
   autoAttach: Record<string, unknown> | null;
   monitors: Map<number, string>;
-  // createTarget replies held until the new page's attachment is announced, as Chrome orders them.
   held: Map<number, string>;
   watched: Set<string>;
   autoSessions: Set<string>;
@@ -123,20 +114,10 @@ function packet(text: string): Packet | null {
 
 const INPUT = new Set(["Input.dispatchMouseEvent", "Input.dispatchKeyEvent", "Input.insertText"]);
 
-// Commands that act on a page as if someone were looking at it. A page in a background tab paints no
-// frames, so requestAnimationFrame never fires and wheel input never lands: a client's wait for an
-// element to hold still, and its scroll into view, time out while reads keep working. The page a
-// fill worker drives is brought to the front first.
 const DRIVE = new Set([...INPUT, "Runtime.evaluate", "Runtime.callFunctionOn", "DOM.scrollIntoViewIfNeeded", "DOM.focus"]);
-// How long the page last brought to the front is trusted to still be there: a popup or a closed tab
-// can change the active tab without the proxy seeing it.
 const FRONT_TRUST_MS = 2000;
-// The print dialog blocks the page's renderer until someone dismisses it, and a worker cannot.
 const NO_PRINT = "window.print = () => {};";
 
-// These mutate the shared profile even when sent through an owned page session.
-// Keep URL/domain-scoped login APIs (Network.setCookie/setCookies/deleteCookies) usable;
-// this guards accidental cross-tab commands, not arbitrary code executing in a page.
 const PROFILE_MUTATIONS: Record<string, true> = {
   "Network.clearBrowserCookies": true,
   "Network.clearBrowserCache": true,
@@ -173,23 +154,20 @@ function pointer(conn: Conn, session: string) {
   return p;
 }
 
-// Send a command of our own and drop its response.
 function inject(conn: Conn, msg: Pick<Packet, "sessionId">, method: string, params: Record<string, unknown>) {
   const id = conn.nextId++;
   conn.injected.add(id);
   conn.upstream.send(JSON.stringify({ id, method, params, ...(msg.sessionId ? { sessionId: msg.sessionId } : {}) }));
   return id;
 }
-// Like inject, for a command whose failure does not matter.
 function injectQuietly(conn: Conn, msg: Pick<Packet, "sessionId">, method: string, params: Record<string, unknown>) {
   conn.quiet.add(inject(conn, msg, method, params));
 }
 
-// Curved, eased path from the current position to (x, y).
 async function glide(conn: Conn, msg: Packet, p: Pointer, x: number, y: number) {
   const dist = Math.hypot(x - p.x, y - p.y);
   if (dist < 6) return;
-  if (dist > 140) await sleep(rand(220, 850)); // looking for the next thing
+  if (dist > 140) await sleep(rand(220, 850));
   const steps = Math.round(Math.min(42, Math.max(8, dist / 14)));
   const bend = dist * rand(0.08, 0.22) * (Math.random() < 0.5 ? -1 : 1);
   const cx = (p.x + x) / 2 + (-(y - p.y) / dist) * bend;
@@ -220,7 +198,6 @@ async function mouse(conn: Conn, msg: Packet, p: Pointer) {
   }
   const same = p.asked && Math.abs(p.asked.x - q.x) < 1.5 && Math.abs(p.asked.y - q.y) < 1.5;
   if (!same) {
-    // New target: land a few pixels off the exact centre the client computed.
     const tx = q.x + rand(-3, 3),
       ty = q.y + rand(-2, 2);
     await glide(conn, msg, p, tx, ty);
@@ -239,12 +216,9 @@ function keyGap(p: Pointer, text?: unknown) {
   const now = Date.now();
   if (now - p.lastKeyAt > 2000) {
     p.burst = 0;
-    // Starting to type: just clicked into the field, or tabbed there after a pause.
     return now - p.lastMouseAt < 1500 ? rand(180, 520) : rand(350, 1100);
   }
   p.burst++;
-  // Long answers are typed faster (people paste or know what they are writing), which also keeps
-  // one helper call inside the agent's per-call timeout.
   let gap = p.burst < 25 ? rand(50, 130) : p.burst < 80 ? rand(36, 90) : rand(18, 42);
   if (text === " " || text === "." || text === ",") gap *= rand(1.1, 1.7);
   if (p.burst < 80 && Math.random() < 0.035) gap += rand(240, 620);
@@ -258,7 +232,6 @@ async function key(msg: Packet, p: Pointer) {
   p.lastKeyAt = Date.now();
 }
 
-// insertText drops a whole string in at once; feed it a character at a time instead.
 async function insertText(conn: Conn, msg: Packet, p: Pointer) {
   const text: unknown = msg.params["text"] ?? "";
   const chars = Array.from(String(text));
@@ -306,9 +279,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
         cachedNativeUa = ua;
         return ua;
       }
-    } catch {
-      /* browser not up yet; the UA is learned later from Browser.getVersion */
-    }
+    } catch {}
     return undefined;
   }
 
@@ -340,7 +311,6 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
     const requestId = inject(connOf(ws), {}, "Target.attachToTarget", { targetId: id, flatten: true });
     state.monitors.set(requestId, id);
   }
-  // Sends `reply` once the attachment in flight for target `id` has been announced, or now if there is none.
   function afterAttach(ws: ServerWebSocket<ProxyClient>, id: string, reply: string) {
     const state = targetsOf(ws);
     const pending = [...state.monitors].find(([, target]) => target === id)?.[0];
@@ -401,7 +371,6 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
             : undefined;
         return server.upgrade(req, { data: { path: url.pathname + url.search, targets } }) ? undefined : new Response("upgrade failed", { status: 400 });
       }
-      // Playwright asks for `/json/version/`; Chrome answers either spelling.
       if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, "");
       if (scope) {
         const actionId = /^\/json\/(?:activate|close)\/([^/]+)$/.exec(url.pathname)?.[1];
@@ -473,9 +442,7 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
             let pre: Packet | null = null;
             try {
               pre = packet(text);
-            } catch {
-              /* not JSON; the strict parse below decides what to do with it */
-            }
+            } catch {}
             if (pre) {
               if (pre.method === "Runtime.consoleAPICalled" && Array.isArray(pre.params["args"])) {
                 const session = pre.sessionId ?? "";
@@ -556,7 +523,6 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
                 return;
               }
             } else if (request.method === "Target.getBrowserContexts" && msg.result) {
-              // Workers use the persistent profile, not arbitrary/incognito contexts.
               if (contextId === undefined && typeof msg.result["defaultBrowserContextId"] === "string") contextId = msg.result["defaultBrowserContextId"];
               msg.result["browserContextIds"] = Array.isArray(msg.result["browserContextIds"])
                 ? msg.result["browserContextIds"].filter(id => id === contextId)
@@ -629,12 +595,9 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
               state.held.delete(requestId);
               if (held !== undefined) ws.send(held);
             }
-            // Ownership outlives discovery for lost-tab checkpoints.
             if (!ownsTarget(target)) return;
           } else if (msg.method?.startsWith("Target.")) {
             if (typeof msg.params["targetId"] !== "string" || !ownsTarget(msg.params["targetId"])) return;
-            // Retain ownership provenance after destruction so host tools can
-            // checkpoint a lost job tab and park safely. Discovery stays live-only.
           }
           if (msg.sessionId && !ownsTarget(state.sessions.get(msg.sessionId) ?? "")) return;
           ws.send(text);
@@ -766,8 +729,6 @@ export function startCdpProxy(slot = 0, scope?: CdpTargetScope): CdpProxy {
             state.discover = msg.params["discover"] === true;
             if (!state.discover) state.announced.clear();
           }
-          // Never enable browser-wide auto-attachment: it would attach/pause
-          // parked/manual pages before event filtering could protect them.
           const request: Packet = { ...msg, params: { ...msg.params } };
           if (msg.method === "Target.setAutoAttach") {
             if (msg.params["autoAttach"] === true) {

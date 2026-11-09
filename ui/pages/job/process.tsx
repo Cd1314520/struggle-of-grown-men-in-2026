@@ -1,5 +1,3 @@
-// What happened after an application was sent: each step the employer asked for, whose move it is, and
-// the buttons to record what the owner did. The mailbox agent adds most steps; the owner adds the rest.
 import {
   Ban,
   CalendarClock,
@@ -46,7 +44,6 @@ import { ENDED, isOpenStep, leadOf, localInput, stepAt, stepStateOf } from "./mo
 
 const KIND_OPTIONS = (Object.keys(STEP_KIND) as StepKind[]).map(k => ({ value: k, label: STEP_KIND[k] }));
 
-// The fields of a step, empty for a new one.
 function StepForm({ step, submit, busy, onCancel }: { step: Step | null; submit: (f: StepFields) => void; busy: boolean; onCancel: () => void }) {
   const [f, setF] = useState<StepFields>({
     kind: step?.kind ?? "assessment",
@@ -102,7 +99,6 @@ function StepForm({ step, submit, busy, onCancel }: { step: Step | null; submit:
   );
 }
 
-// A one-field form under a step: a note on finishing it, or the time it was booked for.
 function InlineForm({
   children,
   onCancel,
@@ -249,7 +245,6 @@ function StepItem({ step, company, a, last }: { step: Step; company: string; a: 
           </Menu>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-fg-muted [&_svg]:size-3.5 [&_svg]:text-fg-subtle">
-          {/* The dot carries the state; a step still to do needs no word for it. */}
           {step.state !== "todo" || state.tone === "danger" ? (
             <span className={state.tone === "danger" ? "text-danger-text" : "text-fg"}>{state.waiting ? `${state.label}, waiting on them` : state.label}</span>
           ) : null}
@@ -405,7 +400,6 @@ export function NextSteps({ job, a }: { job: JobDetail; a: JobActions }) {
         { action: "mark_declined", label: "Mark declined", icon: <ThumbsDown /> },
         { action: "withdraw", label: "Withdraw", icon: <Undo2 />, danger: true },
       ];
-  // Open steps first, in the order asked; what is finished sinks under them.
   const steps = [...job.steps].sort((x, y) => Number(isOpenStep(y)) - Number(isOpenStep(x)));
   const add = !ended && !adding && (
     <Button
@@ -469,8 +463,6 @@ export function NextSteps({ job, a }: { job: JobDetail; a: JobActions }) {
           </div>
         )}
       </div>
-      {/* How it ended, or that it is back on: a quiet line under the steps, so the header keeps one action
-          and a phone never stacks this menu over a step's own. */}
       <div className="mt-5 flex items-center gap-2 border-t border-border pt-3 text-sm text-fg-muted">
         <span className="min-w-0 flex-1">{ended ? "Closed by mistake?" : "Heard back, or pulling out?"}</span>
         <Menu>

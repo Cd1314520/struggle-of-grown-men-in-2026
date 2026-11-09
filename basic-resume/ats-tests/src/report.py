@@ -71,7 +71,6 @@ def render(
         f"(threshold {overall_threshold:.2f})"
     )
 
-    # Findings (only those that contributed to a sub-threshold dim on the best backend)
     console.print()
     for dim in DIMS:
         if best.get(dim, 0.0) >= thresholds.get(dim, 0.0):
@@ -87,7 +86,6 @@ def render(
             if len(r.findings) > 8:
                 console.print(f"    - ... and {len(r.findings) - 8} more")
 
-    # Warnings (non-blocking). Same finding from multiple backends is deduped.
     seen: set[str] = set()
     warn_lines: list[str] = []
     for b, dims in per_backend.items():
@@ -105,7 +103,6 @@ def render(
         for line in warn_lines:
             console.print(f"  - {line}")
 
-    # JSON dump
     serializable = {
         "overall": overall,
         "overall_threshold": overall_threshold,

@@ -85,7 +85,6 @@ export interface MonitorResult {
   message: string;
 }
 
-/** Shape of the JSON stored in `jobs.pending`; fields are untrusted until checked. */
 interface PendingPayload {
   text?: unknown;
   shot?: unknown;
@@ -160,7 +159,6 @@ export function loadState(statePath: string, journalPath?: string): JournalState
 
   if (!stateExists) {
     if (journalWatermark > 0) {
-      // Recover state from journal markers after prior uncommitted state crash
       return {
         version: 1,
         lastRunAt: new Date().toISOString(),
@@ -301,7 +299,6 @@ export function sanitizeQuestionText(raw: string): string {
 
 export function sanitizeBlockerDetail(raw: string): string {
   let cleaned = raw.replace(/^(manual|confirm_submit):\s*/, "").trim();
-  // Strip raw tool wrappers if present
   if (cleaned.startsWith("report_result")) {
     cleaned = cleaned.replace(/^report_result\s*/, "");
     try {
@@ -309,9 +306,7 @@ export function sanitizeBlockerDetail(raw: string): string {
       if (parsed && typeof parsed.note === "string") {
         cleaned = parsed.note;
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
   cleaned = cleaned.replace(/(password|secret|token)\s*[:=]\s*\S+/gi, "$1: [REDACTED]");
   cleaned = cleaned.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b/g, "[EMAIL]");
@@ -360,9 +355,7 @@ export function observeAutoApplyActivity(
   const reportedGates = new Set<number>(state?.reportedGateEventIds ?? []);
   const prevStatuses = state?.reportedJobStatuses ?? {};
 
-  // Execute snapshot within a consistent transaction
   const tx = db.transaction(() => {
-    // 1. Retrieve all explicit auto-approval events (exact boundary required, never fallback to 0)
     const autoApprovalEvents = db
       .query<EventRow, []>(
         `
@@ -374,7 +367,6 @@ export function observeAutoApplyActivity(
       )
       .all();
 
-    // 2. Retrieve user manual approval events to define cutoff boundaries
     const userApprovalEvents = db
       .query<EventRow, []>(
         `
@@ -386,7 +378,6 @@ export function observeAutoApplyActivity(
       )
       .all();
 
-    // 3. Build non-overlapping auto-approval intervals for each job
     const allAutoJobIds = Array.from(new Set(autoApprovalEvents.flatMap(e => (e.job_id === null ? [] : [e.job_id]))));
     const intervals: AutoApprovalInterval[] = [];
 
@@ -400,7 +391,6 @@ export function observeAutoApplyActivity(
         const nextUserId = nextUser ? nextUser.id : Infinity;
         const endId = Math.min(nextAutoId, nextUserId);
 
-        // Check for actual live fill worker evidence within this auto-apply interval
         const fillEvent = db
           .query<EventRow, [number, number, number]>(
             `
@@ -424,7 +414,6 @@ export function observeAutoApplyActivity(
       }
     }
 
-    // Get max event ID
     const maxRow = db.query<{ max_id: number | null }, []>("SELECT max(id) as max_id FROM events").get();
     const maxEventId = maxRow?.max_id ?? 0;
 
@@ -439,7 +428,6 @@ export function observeAutoApplyActivity(
     }
 
     const uniqueJobIds = Array.from(new Set(intervals.map(inv => inv.jobId)));
-    // One bound JSON array stands in for the id list, so no value is ever spliced into the SQL.
     const jobIdList = JSON.stringify(uniqueJobIds);
     const eligibleJobRows = db
       .query<JobRow, [string]>(
@@ -451,7 +439,6 @@ export function observeAutoApplyActivity(
       )
       .all(jobIdList);
 
-    // 4. Retrieve candidate question gates strictly under worker = 'fill'
     const allGates = db
       .query<EventRow, [string]>(
         `
@@ -463,7 +450,6 @@ export function observeAutoApplyActivity(
       )
       .all(jobIdList);
 
-    // 5. Retrieve non-KB blockers: manual stalls, confirm_submit gates, fill worker errors and report failures
     const otherBlockerEvents = db
       .query<EventRow, [string]>(
         `
@@ -499,7 +485,6 @@ export function observeAutoApplyActivity(
 
   const jobsMap = new Map<number, JobRow>(eligibleJobRows.map(j => [j.id, j]));
 
-  // Build eligible attempts
   const eligibleAttempts: AutoApplyJobAttempt[] = [];
   for (const inv of intervals) {
     const job = jobsMap.get(inv.jobId);
@@ -512,9 +497,7 @@ export function observeAutoApplyActivity(
         const parsed = JSON.parse(job.pending) as PendingPayload | null;
         if (parsed && typeof parsed.text === "string") pendingText = parsed.text;
         if (parsed && typeof parsed.shot === "number") pendingShot = parsed.shot;
-      } catch {
-        // ignore parse error
-      }
+      } catch {}
     }
 
     eligibleAttempts.push({
@@ -532,13 +515,11 @@ export function observeAutoApplyActivity(
     });
   }
 
-  // 6. Attribute gates strictly to auto intervals
   const allAttributedGates: QuestionGateEvidence[] = [];
   const newGates: QuestionGateEvidence[] = [];
 
   for (const g of allGates) {
     if (!g.job_id) continue;
-    // Check if g falls within any auto interval for this job
     const matchedInv = intervals.find(inv => inv.jobId === g.job_id && g.id >= inv.startId && g.id < inv.endId);
     if (!matchedInv) continue;
 
@@ -583,7 +564,6 @@ export function observeAutoApplyActivity(
     }
   }
 
-  // 7. Attribute other blockers strictly to auto intervals
   const newBlockers: OtherBlockerEvidence[] = [];
   for (const b of otherBlockerEvents) {
     if (!b.job_id) continue;
@@ -617,7 +597,6 @@ export function observeAutoApplyActivity(
     }
   }
 
-  // 8. Determine real activity change
   let hasRealChanges = false;
   if (isBootstrap) {
     hasRealChanges = eligibleAttempts.length > 0;
@@ -638,7 +617,6 @@ export function observeAutoApplyActivity(
       }
     }
     if (!hasRealChanges) {
-      // Check for any recent fill worker events in auto intervals
       for (const inv of intervals) {
         const recentFill = db
           .query<EventRow, [number, number, number, number]>(
@@ -661,7 +639,6 @@ export function observeAutoApplyActivity(
     return { snapshot: null, newState: null };
   }
 
-  // 9. Aggregate candidate input themes across ALL historical attributed gates
   const themeCounts: Record<string, { count: number; suggestion: string }> = {};
   const seenJobCategory = new Set<string>();
 
@@ -679,7 +656,6 @@ export function observeAutoApplyActivity(
     }
   }
 
-  // 10. Collect currently stalled jobs with accurate stall timestamps
   const currentlyStalled: {
     jobId: number;
     company: string;
@@ -690,7 +666,6 @@ export function observeAutoApplyActivity(
 
   for (const att of eligibleAttempts) {
     if (att.status === "needs_input") {
-      // Find latest gate event in that interval
       const gateEv = allAttributedGates.filter(g => g.jobId === att.jobId).pop();
       const stalledSince = gateEv ? gateEv.at : att.pendingShot ? new Date(att.pendingShot).toISOString() : "Time unknown";
       currentlyStalled.push({
@@ -721,7 +696,6 @@ export function observeAutoApplyActivity(
     }
   }
 
-  // 11. Bounded progress table: active jobs or jobs touched in this scope
   const activeOrRecentJobs = eligibleAttempts.filter(
     att =>
       att.status === "filling" ||
@@ -793,7 +767,6 @@ export function formatJournalEntry(snapshot: JournalSnapshot): string {
   const lines: string[] = [];
   const tag = snapshot.isBootstrap ? " [Bootstrap]" : "";
 
-  // Deterministic recovery checkpoint comments
   lines.push(`<!-- journal-checkpoint: watermark=${snapshot.maxEventId} -->`);
   for (const g of snapshot.newGates) {
     lines.push(`<!-- journal-gate: id=${g.eventId} -->`);
@@ -806,7 +779,6 @@ export function formatJournalEntry(snapshot: JournalSnapshot): string {
   lines.push(`### [${snapshot.timestamp}] Auto-Apply Observation Run${tag}`);
   lines.push("");
 
-  // Section 1: Application Attempt & Progress Summary
   lines.push("#### 1. Application Attempts & Progress Summary");
   const totalEligible = snapshot.eligibleJobs.length;
   const submitted = snapshot.eligibleJobs.filter(j => j.status === "submitted" || j.submittedAt !== null);
@@ -825,7 +797,6 @@ export function formatJournalEntry(snapshot: JournalSnapshot): string {
   }
   lines.push("");
 
-  // Bounded progress table (active or touched in this scope)
   if (snapshot.activeOrRecentJobs.length > 0) {
     lines.push("| Job ID | Company | Role | Current Status | Fill Started | Submitted |");
     lines.push("| :--- | :--- | :--- | :--- | :--- | :--- |");
@@ -835,7 +806,6 @@ export function formatJournalEntry(snapshot: JournalSnapshot): string {
     lines.push("");
   }
 
-  // Section 2: Observed Candidate-Input Question Gates
   lines.push("#### 2. Observed Candidate-Input Question Gates");
   if (snapshot.newGates.length === 0) {
     lines.push("No new candidate question gates observed during this interval.");
@@ -866,7 +836,6 @@ export function formatJournalEntry(snapshot: JournalSnapshot): string {
     }
   }
 
-  // Section 3: Candidate Input Themes (Cumulative across distinct applications)
   lines.push("#### 3. Candidate Input Themes (Cumulative across distinct applications)");
   const themeEntries = Object.entries(snapshot.themeCounts);
   if (themeEntries.length === 0) {
@@ -883,7 +852,6 @@ export function formatJournalEntry(snapshot: JournalSnapshot): string {
     lines.push("");
   }
 
-  // Section 4: Other Non-KB Blockers
   if (snapshot.otherBlockers.length > 0) {
     lines.push("#### 4. Non-KB Blockers & ATS Anomalies");
     for (const b of snapshot.otherBlockers) {
@@ -892,7 +860,6 @@ export function formatJournalEntry(snapshot: JournalSnapshot): string {
     lines.push("");
   }
 
-  // Section 5: Current Unresolved Stalls (Active Queue)
   if (snapshot.currentlyStalled.length > 0) {
     lines.push("#### 5. Active Stalls Requiring Attention");
     for (const s of snapshot.currentlyStalled) {
@@ -917,7 +884,6 @@ export function updateJournalFile(journalPath: string, entryContent: string): vo
   if (!existing) {
     finalContent = `${JOURNAL_HEADER}\n\n${entryContent}\n`;
   } else {
-    // Preserve existing file bytes without trimming
     const separator = existing.endsWith("\n\n") ? "" : existing.endsWith("\n") ? "\n" : "\n\n";
     finalContent = `${existing}${separator}${entryContent}\n`;
   }
@@ -928,7 +894,6 @@ export function updateJournalFile(journalPath: string, entryContent: string): vo
 }
 
 export function runMonitor(options: CliOptions): Promise<MonitorResult> {
-  // The work is synchronous; the promise keeps failures surfacing as rejections for callers.
   return new Promise(resolveResult => {
     resolveResult(monitorOnce(options));
   });
@@ -954,10 +919,8 @@ function monitorOnce(options: CliOptions): MonitorResult {
       return { changed: false, message: msg };
     }
 
-    // Check if entry with this watermark was already written to the journal (prior crash recovery)
     const marker = `<!-- journal-checkpoint: watermark=${snapshot.maxEventId} -->`;
     if (existingContent.includes(marker)) {
-      // Sync state without duplicating journal entry
       saveState(options.statePath, newState);
       const msg = `Synced state checkpoint (watermark: ${snapshot.maxEventId}) without duplicating journal.`;
       if (!options.silent) {

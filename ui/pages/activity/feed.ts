@@ -1,5 +1,3 @@
-// The highlights feed as sentences: raw log entries reworded, scan and triage batches summed per day,
-// repeats collapsed. Pure, so the page can rebuild it from every page loaded so far.
 import type { ActivityItem } from "../../../src/api-types";
 import type { BlockerCause } from "../../../src/blockers";
 import type { GateKind } from "../../../src/questions";
@@ -15,23 +13,21 @@ export interface FeedRow {
   key: string;
   kind: string;
   day: string;
-  at: string; // the newest entry the row stands for
+  at: string;
   text: string;
-  detail: string | null; // a quieter second line
-  url: string | null; // a page the sentence is about, shown as its host
+  detail: string | null;
+  url: string | null;
   job: FeedJob | null;
-  jobs: FeedJob[]; // more than one when the same thing happened to several jobs that day
-  boards: string[]; // job boards a read error hit
-  n: number; // how many times the same entry repeated that day
+  jobs: FeedJob[];
+  boards: string[];
+  n: number;
 }
 
-// "Cleared: site_down (see Blockers)" is a bulk clear-out by cause.
 const rejected = (note: string) => {
   const cleared = /^cleared: (.+?)(?: \(see Blockers\))?$/i.exec(note)?.[1];
   if (cleared) return `You cleared it away: ${cleared in CAUSE ? CAUSE[cleared as BlockerCause] : gateWords(cleared)}.`;
   return note ? `You rejected it: ${note}` : "You rejected it.";
 };
-// "stuck on a confirm_submit gate" reads "stuck on a confirm submit gate".
 const gateWords = (s: string) => s.replace(/\b(\w+) gate\b/g, (m, k: string) => (k in GATE ? `${GATE[k as GateKind].toLowerCase()} gate` : m));
 
 const USER_ACTS: Record<string, (note: string) => string> = {
@@ -47,7 +43,6 @@ const USER_ACTS: Record<string, (note: string) => string> = {
   respond: note => (note === "approve" ? "You confirmed the submit." : `You replied: ${note}`),
 };
 
-// The workers' run reports lead with their name; the feed leads with what was done.
 const LEADS: Record<string, string> = {
   Track: "Checked mail",
   Locate: "Looked for the employer's posting",
@@ -56,7 +51,6 @@ const LEADS: Record<string, string> = {
   Answers: "Added to your answers",
 };
 
-// Long agent reports cut to what was decided; the full text stays in the full log and on the job.
 const SHORTER: [RegExp, (m: RegExpExecArray) => Said][] = [
   [
     /^Approved by (reconsidered )?auto apply: (.+?); score (\d+) \(threshold \d+\)$/s,
@@ -77,7 +71,6 @@ const SHORTER: [RegExp, (m: RegExpExecArray) => Said][] = [
   ],
   [/^edited profile\/(.+)$/, m => ({ text: `You edited ${m[1] ?? "a profile file"}.` })],
 ];
-// "practice: IT services or consultancy (Deloitte is a …)" reads as "Practice: IT services or consultancy".
 const reason = (s: string) => cap(s.replace(/\s*\(.*\)\s*$/s, "").replace(/^(\w+): /, "$1, "));
 
 interface Said {
@@ -86,7 +79,6 @@ interface Said {
   url?: string | null;
 }
 
-// One entry as a sentence; null drops it.
 function said(e: Pick<ActivityItem, "kind" | "message">): Said | null {
   for (const [re, f] of SHORTER) {
     const m = re.exec(e.message);
@@ -96,20 +88,16 @@ function said(e: Pick<ActivityItem, "kind" | "message">): Said | null {
   return text === null ? null : { text };
 }
 
-// Ids nobody reads: "(Claude Code session 3fe752b7-…)" after a worker's report, a bare UUID in a list.
 const IDS = /\s*\(Claude Code session [\w-]+\)|\s*\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 
 function plain(e: Pick<ActivityItem, "kind" | "message">) {
   const m = e.message.replace(/\bTab job-\d+:\s*/g, "").replace(IDS, ""),
     cut = (s: string) => s.replace(/^\w+:\s*/, "");
-  // Housekeeping: a worker that ends because it parked at a gate (the gate has its own entry), a tab closed for memory.
   if (/^Chrome started|^Gmail connected|^\w+ worker aborted:\s*$|^Closed this application's parked browser tab/.test(m)) return null;
   const worker = /^(\w+) worker (aborted|error): (.+)$/s.exec(m);
   if (worker) return `The ${worker[1] ?? ""} worker ${worker[2] === "error" ? "failed" : "stopped"}: ${worker[3] ?? ""}`;
   const lead = /^(\w+): /.exec(m);
   if (e.kind === "mail") {
-    // "BDO Careers <join-our-team@careers.bdo.com> requests…" reads as "BDO Careers requests…". Mail matched to an
-    // application leads with the status it moved to, which the sentence says anyway.
     const text = m.replace(/ ?(<[^\s<>@]+@[^\s<>]+>|\([^\s()@]+@[^\s()]+\))/g, "");
     return lead?.[1] && lead[1] in STATUS ? text.slice(lead[0].length) : text;
   }
@@ -129,7 +117,6 @@ function plain(e: Pick<ActivityItem, "kind" | "message">) {
   return m;
 }
 
-// Paths in error text become their file name: "ENOENT … '/home/…/rubric.yml'" reads as "… rubric.yml".
 const shorten = (s: string) => s.replace(/'?\/[^\s']+\/([^/\s']+)'?/g, "$1");
 
 const SCAN = /^Scan: (\d+) new postings?/;
@@ -146,7 +133,6 @@ interface Batch {
   held: number;
   checked: number;
 }
-// A day's batch may be cut off by the page boundary, so any of the three counts can be missing.
 function batchText(b: Batch) {
   const screened = b.screened ? `${num(b.screened)} screened out before reading` : "";
   if (b.checked) {
@@ -160,9 +146,9 @@ function batchText(b: Batch) {
 
 export function feed(items: readonly ActivityItem[]): FeedRow[] {
   const out: FeedRow[] = [],
-    batches = new Map<string, Batch>(), // per day: the scan and triage lines summed
-    boardErrors = new Map<string, FeedRow>(), // per day and error: the job boards it hit
-    twins = new Map<string, FeedRow>(); // per day and wording: the row it went into
+    batches = new Map<string, Batch>(),
+    boardErrors = new Map<string, FeedRow>(),
+    twins = new Map<string, FeedRow>();
   const row = (e: ActivityItem, day: string, text: string): FeedRow => ({
     key: String(e.id),
     kind: e.kind,
@@ -218,19 +204,16 @@ export function feed(items: readonly ActivityItem[]): FeedRow[] {
     const s = said(e);
     if (s === null) continue;
     const text = e.kind === "error" ? shorten(s.text) : s.text;
-    // The same thing on the same day reads as one row: repeats count up, and the other jobs it happened to (a bulk
-    // reject, a migration) list under it. Errors repeat with only a number changed: those count as the same error.
     const same = e.kind === "error" ? text.toLowerCase().replace(/\d+/g, "#") : text,
       key = `${day}|${e.kind}|${same}|${s.detail ?? ""}`,
       twin = twins.get(key);
     if (twin) {
       const id = e.job_id;
-      if (!id || !twin.job || twin.job.id === id || twin.jobs.some(j => j.id === id))
-        twin.n++; // newest first, so the row keeps the latest time
+      if (!id || !twin.job || twin.job.id === id || twin.jobs.some(j => j.id === id)) twin.n++;
       else {
         if (!twin.jobs.length) twin.jobs.push(twin.job);
         twin.jobs.push({ id, company: e.company, title: e.title });
-        twin.url = null; // each job has its own; the job pages show them
+        twin.url = null;
       }
       continue;
     }
@@ -246,7 +229,6 @@ export function feed(items: readonly ActivityItem[]): FeedRow[] {
   return out;
 }
 
-// The highlight filters and the kinds of entry each asks the server for.
 export const KIND_FILTERS = {
   all: { label: "All", kinds: [] },
   gate: { label: "Needs you", kinds: ["gate"] },

@@ -1,5 +1,3 @@
-// What employers asked for after an application went out: the owner's moves first, soonest due, then
-// what is booked, soonest first.
 import { CalendarClock } from "lucide-react";
 import { CompanyMark, EmptyState, ListBody, ListRow } from "../../components/ui";
 import { useJobList } from "../../lib/api";

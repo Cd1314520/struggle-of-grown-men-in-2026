@@ -1,7 +1,3 @@
-// Recheck: questions that parked before the profile could answer them. Nothing else looks at a parked
-// question again until the candidate answers it, so when profile/personal.yml, profile/answers.md or the
-// rules for answering change, an agent reads every open question against them and answers the ones
-// they now settle. Each answer resumes its application as if the candidate had given it.
 import { createHash } from "node:crypto";
 import { config, readProfile } from "./config";
 import { kvGet, kvSet, logEvent } from "./db";
@@ -11,11 +7,8 @@ import { arg, S, schema, type RunWorker } from "./worker";
 import { answerGate, listQuestionGroups, type QuestionGroup } from "./questions";
 import { humanizerRules, lowStakesRule, readPrompt, render, termsRule, workDir } from "./worker-tools";
 
-// Questions per worker: enough to share one read of the profile, few enough that long legal context still fits.
 const BATCH = 25;
-// Someone editing answers.md saves it several times; check once it has stopped changing.
 const SETTLE_MINUTES = 5;
-// A run that did not finish is tried again after this long, not on every tick.
 const RETRY_MINUTES = 60;
 
 const fingerprint = () =>
@@ -33,7 +26,6 @@ const fingerprint = () =>
     )
     .digest("hex");
 
-// Whether the profile or the rules have changed since the open questions were last checked against them.
 export function recheckDue(): boolean {
   const current = fingerprint();
   if (kvGet("recheck.done") === current) return false;
@@ -59,7 +51,6 @@ export function questionList(groups: readonly QuestionGroup[]) {
     .join("\n\n");
 }
 
-// Where a question lists options, an answer is one of them, or several where more than one may be picked.
 export function answerProblem(options: readonly string[], answer: string): string | null {
   if (!answer.trim()) return "the answer is blank";
   if (!options.length || options.includes(answer) || answer.split("; ").every(part => options.includes(part))) return null;
@@ -68,7 +59,7 @@ export function answerProblem(options: readonly string[], answer: string): strin
 
 async function recheckBatch(run: RunWorker, groups: readonly QuestionGroup[]) {
   let answered = 0;
-  let finished = false as boolean; // set from the tool callback
+  let finished = false as boolean;
   const { done } = run({
     name: "recheck",
     builtins: [],
@@ -100,7 +91,6 @@ async function recheckBatch(run: RunWorker, groups: readonly QuestionGroup[]) {
           if (problem) return `ERROR: ${problem}.`;
           let resumed = 0;
           for (const job of group.jobs) {
-            // The candidate may have answered it meanwhile: that answer stands.
             try {
               resumed += answerGate(job.gateId, answer, "application").jobIds.length;
               logEvent("recheck", `Answered from the profile: ${JSON.stringify(group.text)} → ${JSON.stringify(answer)} (${basis})`, job.id, "recheck");

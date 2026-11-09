@@ -1,6 +1,3 @@
-# Gitignored files a new worktree needs in order to run the app and `bun run check`. Claude Code copies
-# these into worktrees it creates; .githooks/post-checkout copies them on a plain `git worktree add`.
-# The data/ directory is left out on purpose: a worktree must never open the live database.
 profile/
 config.local.yml
 basic-resume/main.typ

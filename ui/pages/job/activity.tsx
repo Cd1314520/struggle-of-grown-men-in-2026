@@ -1,4 +1,3 @@
-// The Activity tab: one timeline of status moves, stops and the log, newest first, grouped by day.
 import type { JobDetail } from "../../../src/api-types";
 import { Clamp, Disclosure, StatusDot, Subhead } from "../../components/ui";
 import { cap, clock, dayLabel, plain, plural } from "../../lib/format";

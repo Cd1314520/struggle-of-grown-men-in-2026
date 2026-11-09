@@ -1,5 +1,3 @@
-// The sections of settings that are nothing but values: when agents run and how much they may do, where
-// postings are read from, and the server's addresses and files.
 import { useSettings } from "../../lib/api";
 import { ConfigRow, type FieldKind } from "./field";
 import { SavedLocally, SettingsGroup, SettingsPanel } from "./parts";
@@ -74,7 +72,6 @@ export function Schedule() {
   );
 }
 
-// A feed's own parameter, as its value's type has it.
 const paramField = (value: unknown): FieldKind =>
   Array.isArray(value) ? { kind: "list" } : typeof value === "number" ? { kind: "number" } : typeof value === "boolean" ? { kind: "bool" } : { kind: "text" };
 const titled = (key: string) =>
@@ -175,7 +172,6 @@ export function Server() {
   );
 }
 
-// The browser's own settings, below its live-view buttons.
 export function BrowserRows() {
   return (
     <>

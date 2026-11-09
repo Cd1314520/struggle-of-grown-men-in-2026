@@ -1,15 +1,12 @@
 node_modules/
 data/
 
-# The owner's profile (targets, rubric, answers, personal details, employers, Gmail client) and the resume itself
 /profile/
 basic-resume/main.typ
 basic-resume/*.pdf
 
-# Settings for this machine and its owner
 config.local.yml
 
-# Generated output
 artifacts/
 .playwright-mcp/
 reports/auto-apply-journal.md

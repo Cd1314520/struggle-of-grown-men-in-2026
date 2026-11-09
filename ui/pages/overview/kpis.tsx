@@ -1,5 +1,3 @@
-// The four numbers that say whether the machine is working, in the funnel's order: a band across the sheet,
-// divided by rules, two by two on a phone.
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import type { Summary } from "../../../src/api-types";
 import { Skeleton } from "../../components/ui";
@@ -8,10 +6,8 @@ import { cn } from "../../lib/cn";
 import { num } from "../../lib/format";
 
 const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
-// The last seven days, today included, and the seven before them.
 const weeks = (series: readonly number[]) => [sum(series.slice(-7)), sum(series.slice(-14, -7))] as const;
 
-// "+18% vs last week". `good` says whether up is good news; when it is not, neither direction is coloured.
 function Delta({ now, before, good }: { now: number; before: number; good: boolean }) {
   if (!before) return <span>{now ? "New this week" : "None last week either"}</span>;
   const change = Math.round(((now - before) / before) * 100);
@@ -28,7 +24,6 @@ function Delta({ now, before, good }: { now: number; before: number; good: boole
   );
 }
 
-// Each cell's rules: between the four in a line, or the two by two of a phone.
 const cell = (i: number) => cn("px-(--list-x) py-5 border-border", i < 3 && "sm:border-r", i % 2 === 0 && "max-sm:border-r", i < 2 && "max-sm:border-b");
 
 export function Kpis({ summary, className }: { summary: Summary | undefined; className?: string }) {
@@ -49,7 +44,6 @@ export function Kpis({ summary, className }: { summary: Summary | undefined; cla
   const [sent, sentBefore] = weeks(st.applied),
     [found, foundBefore] = weeks(st.found);
   const rate = st.response.sent ? Math.round((st.response.heard / st.response.sent) * 100) : null;
-  // Review's count is in Needs you: this one is the conversations under way instead.
   const talking = summary.counts["interview"] ?? 0,
     offers = summary.counts["offer"] ?? 0;
   const items = [

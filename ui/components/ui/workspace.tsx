@@ -1,6 +1,3 @@
-// The workspace: every page is one panel, inset beside the sidebar as Linear's are, filled edge to edge. A
-// slim bar heads it (title, count, tabs, segments, search, sort, actions on one line), then the rows edge to
-// edge, then a slim footer. No cards, no page header block, no column headers. See docs/ui.md, "Frames".
 import { Info } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
@@ -9,21 +6,20 @@ import { SkeletonRows } from "./feedback";
 import { Tooltip } from "./tooltip";
 
 export interface WorkspaceBarProps {
-  title: ReactNode; // the page's name: an h1, for screen readers only below lg (the top bar names the page)
+  title: ReactNode;
   titleAs?: "h1" | "h2";
-  count?: number | undefined; // beside the title: the whole list; undefined while loading
-  noun?: string; // a column below lg, where the count is a line of its own: "334 waiting for you"
-  meta?: ReactNode; // after the title, muted: "461 things need you", the open job's name
-  back?: ReactNode; // before the title: a ghost sm link back to the list (the job page)
-  tabs?: ReactNode; // a <TabsList variant="bar"> (inside the page's <Tabs>), right of the title
-  segments?: ReactNode; // <Segments>: on the bar's line when it has room, else a line of their own
-  search?: ReactNode; // a <SearchInput>
-  controls?: ReactNode; // <FilterMenu>, <Select prefix="Sort" collapse>: icon-only under 80rem
-  actions?: ReactNode; // buttons at the right, size="sm": Run, Release held, Check again
-  hint?: string; // the page's one-line description, behind an info button (desktop only)
+  count?: number | undefined;
+  noun?: string;
+  meta?: ReactNode;
+  back?: ReactNode;
+  tabs?: ReactNode;
+  segments?: ReactNode;
+  search?: ReactNode;
+  controls?: ReactNode;
+  actions?: ReactNode;
+  hint?: string;
 }
 
-// A line of the bar, at its height for each place: the page on a desktop, a column, a phone.
 const LINE = "flex min-w-0 shrink-0 items-center";
 
 export function WorkspaceBar({
@@ -42,19 +38,15 @@ export function WorkspaceBar({
   hint,
 }: WorkspaceBarProps & { frame?: "page" | "column" }) {
   const col = frame === "column";
-  // Inline only on a wide page bar with no tabs; otherwise the segments take a line of their own.
   const inline = !col && !tabs;
   const tools = !!(search || controls || actions);
   return (
     <div
       className={cn(
         "@container/bar z-20 flex shrink-0 flex-wrap items-center gap-x-3 border-b border-border bg-surface px-(--list-x)",
-        // A column's first line has a rule under it, level with the open record's position bar beside it.
         col ? "lg:relative lg:before:absolute lg:before:inset-x-0 lg:before:top-12 lg:before:h-px lg:before:bg-border" : "lg:sticky lg:top-0",
       )}
     >
-      {/* Title and count. Below lg the top bar names the page: the h1 is for screen readers, and a column
-          keeps its count as a line ("334 waiting for you"). */}
       <div
         className={cn(
           LINE,
@@ -75,7 +67,6 @@ export function WorkspaceBar({
       </div>
       {tabs && <div className={cn(LINE, "order-1 h-12 min-w-0 max-lg:flex-1 lg:order-2 lg:ml-3 [&_[role=tablist]]:min-w-0")}>{tabs}</div>}
       {segments && (
-        // The segments' own box reaches 4px past their room, so a selected segment's ring is never clipped.
         <div
           className={cn(
             LINE,
@@ -86,14 +77,12 @@ export function WorkspaceBar({
           {segments}
         </div>
       )}
-      {/* On a phone with tabs, the tabs and actions are the first line and the search the second. */}
       {tabs && tools && <div aria-hidden className="order-3 basis-full lg:hidden" />}
       {search && (
         <div
           className={cn(
             LINE,
             "order-4 h-14 flex-1 [&>*]:w-full",
-            // In a column, between the title and the controls, so the bar keeps to two lines: that, then segments.
             col ? "lg:order-2 lg:h-12 lg:basis-24 lg:[&_input]:text-ellipsis" : "lg:ml-auto lg:h-12 lg:w-56 lg:flex-none lg:@[80rem]/bar:w-64",
           )}
         >
@@ -115,10 +104,6 @@ export function WorkspaceBar({
   );
 }
 
-// The sheet. `page`: the page itself (the window scrolls; from lg, inside a split list, the list's pane
-// does), the bar sticks to the top. `column`: the list beside an open record: from lg the bar stays, the
-// rows scroll, the footer is pinned; below lg it is the page. Sets the gutter (`--list-x`) and where group
-// labels stick (`--group-top`) for everything inside.
 export function Workspace({
   frame = "page",
   bar,
@@ -135,20 +120,18 @@ export function Workspace({
 }: {
   frame?: "page" | "column";
   bar?: WorkspaceBarProps;
-  strip?: ReactNode; // a <WorkspaceStrip> under the bar: numbers that scroll away
-  notice?: ReactNode; // a <ListNotice> under the bar (and strip), scrolls away
-  footer?: ReactNode; // <Pagination variant="footer"> or <ListFooter>
-  loading?: boolean; // placeholder data on screen: the rows dim until the real page arrives
-  bodyRole?: "table" | "list" | "none"; // a list page's rows; omitted on a page that is not a list
-  bodyLabel?: string; // the table's name: "Applications", "Queue"
+  strip?: ReactNode;
+  notice?: ReactNode;
+  footer?: ReactNode;
+  loading?: boolean;
+  bodyRole?: "table" | "list" | "none";
+  bodyLabel?: string;
   className?: string;
   children: ReactNode;
   "aria-label"?: string;
   "aria-rowcount"?: number | undefined;
 }) {
   const col = frame === "column";
-  // The bar's height from lg, where group labels stick under it: one 48px line and its rule, or two when
-  // the segments take a line of their own (always with tabs; under 68rem of bar without).
   const two = bar?.segments && (bar.tabs ? "lg:[--group-top:calc(5.75rem+1px)]" : "lg:@max-[68rem]/ws:[--group-top:calc(5.75rem+1px)]");
   return (
     <section
@@ -179,7 +162,6 @@ export function Workspace({
   );
 }
 
-// Numbers in one line under a page's bar: "Sent 431  In process 11  Reply rate 19%". Scrolls away.
 export function WorkspaceStrip({ items, className }: { items: readonly { label: ReactNode; value: ReactNode; hint?: ReactNode }[]; className?: string }) {
   return (
     <dl className={cn("flex h-12 shrink-0 items-center gap-8 overflow-x-auto border-b border-border px-(--list-x) whitespace-nowrap", className)}>
@@ -194,9 +176,6 @@ export function WorkspaceStrip({ items, className }: { items: readonly { label: 
   );
 }
 
-// A titled part of a page that is not a list, divided from the next by a full-bleed rule, never a card.
-// Reading content inside caps itself at 56rem (`max-w-[56rem]`); the rule does not. `flush`: no padding
-// under the header, for a section that is a list (its ListBody bleeds to the edges).
 export function WorkspaceSection({
   title,
   count,
@@ -235,9 +214,6 @@ export function WorkspaceSection({
   );
 }
 
-// A page with a side pane: a nav (Settings' sections, Profile's files), a rail (the Overview's system
-// state) or a pane (Resume's import). From lg (xl for a rail) a full-height column beside the main part
-// with a rule between; below that it stacks: a nav as a sideways strip under the bar, the rest after.
 const ASIDE = {
   nav: "lg:w-52",
   rail: "xl:w-88",
@@ -277,8 +253,6 @@ export function WorkspaceBody({
   );
 }
 
-// Rows with no frame of their own: a list inside a WorkspaceSection, bleeding to the section's edges so a
-// row's hover runs the full width.
 export function ListBody({
   label,
   role = "table",
@@ -290,7 +264,7 @@ export function ListBody({
   label: string;
   role?: "table" | "list";
   rowCount?: number | undefined;
-  loading?: boolean; // no data yet: placeholder rows
+  loading?: boolean;
   className?: string;
   children?: ReactNode;
 }) {

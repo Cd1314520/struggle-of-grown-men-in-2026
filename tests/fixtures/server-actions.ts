@@ -1,5 +1,3 @@
-// Drives the HTTP handler in a fresh process with throwaway state. Run with a scenario name; the
-// caller sets AUTO_APPLY_DATA, AUTO_APPLY_PROFILE and AUTO_APPLY_PORT.
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -15,7 +13,6 @@ const scheduler = new Scheduler({
     throw new Error("no worker may start in this fixture");
   },
 });
-// Only the handler is under test: nothing may be started on the strength of what it writes.
 scheduler.pump = () => undefined;
 const handle = createHandler(scheduler);
 
@@ -47,7 +44,6 @@ async function act(id: number, action: string, text = "", headers: Record<string
 const statusOf = (id: number) => getJob(id)?.status;
 
 if (scenario === "action-guards") {
-  // redo: only while awaiting approval, and never once the resume is frozen.
   const fresh = job("awaiting_approval");
   assert.equal((await act(fresh, "redo", "lead with the data work")).status, 200);
   assert.equal(statusOf(fresh), "triaged");
@@ -64,12 +60,10 @@ if (scenario === "action-guards") {
     assert.equal(statusOf(id), status);
   }
 
-  // approve: only from gate 1.
   const held = job("held");
   assert.equal((await act(held, "approve")).status, 409);
   assert.equal(statusOf(held), "held");
 
-  // An application that went out keeps its outcome and its submission time.
   for (const status of ["submitted", "interview", "offer", "rejected_by_company"]) {
     const id = job(status, { submitted_at: "2026-10-01T00:00:00.000Z" });
     assert.equal((await act(id, "reject", "changed my mind")).status, 409, `reject from ${status}`);
@@ -85,7 +79,6 @@ if (scenario === "action-guards") {
   assert.equal((await act(sent, "hold")).status, 409);
   assert.equal(statusOf(sent), "submitted");
 
-  // hold: sets an unsent job aside, parked ones included; retry releases it.
   for (const status of ["awaiting_approval", "awaiting_submit", "needs_input"]) {
     const id = job(status);
     assert.equal((await act(id, "hold", "not a practice job")).status, 200, `hold from ${status}`);
@@ -93,7 +86,6 @@ if (scenario === "action-guards") {
     assert.equal(getJob(id)?.note, "not a practice job");
   }
 
-  // What the guards leave alone.
   const review = job("awaiting_approval");
   assert.equal((await act(review, "approve")).status, 200);
   assert.equal(statusOf(review), "approved");
@@ -114,18 +106,15 @@ if (scenario === "action-guards") {
     assert.equal(res.status, 403, JSON.stringify({ headers, base }));
     assert.equal(statusOf(id), "awaiting_approval");
   };
-  // A page on another site posting to the local port, as a form or with a JSON body.
   await refusedUnchanged({ origin: "https://careers.example.com" });
   await refusedUnchanged({ origin: "https://careers.example.com", "content-type": "text/plain" });
   await refusedUnchanged({ "sec-fetch-site": "cross-site" });
   await refusedUnchanged({ "sec-fetch-site": "same-site", origin: BASE });
   await refusedUnchanged({ origin: "null" });
-  // A hostname re-pointed at this machine: the page and the request share an origin, but not one of ours.
   await refusedUnchanged({ origin: `http://rebound.example.com:${config.port}`, "sec-fetch-site": "same-origin" }, `http://rebound.example.com:${config.port}`);
   const read = await handle(new Request(`http://rebound.example.com:${config.port}/api/state`));
   assert.equal(read.status, 403, "reads under a foreign host name are refused too");
 
-  // The app's own page, a local tunnel on another port, and a command-line client.
   const allowed = async (headers: Record<string, string>, base = BASE) => {
     const id = job("awaiting_approval");
     assert.equal((await act(id, "approve", "", headers, base)).status, 200, JSON.stringify({ headers, base }));
@@ -146,12 +135,10 @@ if (scenario === "action-guards") {
   const first = await add("https://boards.example/acme/123?utm_source=x");
   assert.equal(first.status, 200);
   assert.equal(typeof first.body.id, "number");
-  // The same posting again, under other tracking parameters: refused, naming the job it already is.
   const again = await add("https://boards.example/acme/123?utm_campaign=y");
   assert.equal(again.status, 409);
   assert.deepEqual(again.body, { error: "already known", id: first.body.id });
 } else if (scenario === "profile-poll") {
-  // The profile has no rubric here. Every state poll checks it; the error is logged once, not per poll.
   const errors = () => db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events WHERE kind = 'error'").get()?.n ?? 0;
   for (let i = 0; i < 3; i++) assert.equal((await handle(new Request(`${BASE}/api/state`))).status, 200);
   assert.equal(errors(), 1);
@@ -167,7 +154,6 @@ if (scenario === "action-guards") {
     listed: null,
     against: "k",
   };
-  // Made under the pay and location rules, which never judged the employer.
   const oldRules = { version: 2, annualBaseMaxUsd: null, salaryEvidence: "", mandatoryNonlocalOnsite: "yes", locationEvidence: "Onsite in Denver" };
   const approved = (assessment: object | null, extra: { approved_by?: string; resume_sha?: string; company?: string } = {}) => {
     const id = job("approved", extra.resume_sha ? { resume_sha: extra.resume_sha } : {});
@@ -190,17 +176,13 @@ if (scenario === "action-guards") {
 
   reviewStandingApprovals();
 
-  // Still qualifies, approved by hand, or already under way: untouched.
   for (const id of [ordinary, byHand, started]) assert.equal(statusOf(id), "approved", `job ${id}`);
-  // No longer a practice job: held for the user, with the reason, and no longer approved.
   assert.equal(statusOf(kept), "held");
   assert.equal(getJob(kept)?.note, "needs your review: auto-approved, but not a practice job: a target employer, kept for later (Autonomy company at scale)");
   assert.equal(getJob(kept)?.approved_by, null);
-  // The employer lists as they stand now, over what was stored.
   assert.equal(statusOf(listed), "held");
   assert.match(getJob(listed)?.note ?? "", /on your frontier list/);
   assert.equal(statusOf(unreadable), "held");
-  // Only lacks the judgment the rules now ask for: back to prep to get it.
   assert.equal(statusOf(unjudged), "triaged");
   assert.equal(getJob(unjudged)?.approved_by, null);
   assert.deepEqual(
@@ -208,12 +190,10 @@ if (scenario === "action-guards") {
     [["approved", "triaged"]],
   );
 
-  // Running it again changes nothing.
   reviewStandingApprovals();
   assert.equal(statusHistory(kept).length, 1);
   assert.equal(statusOf(ordinary), "approved");
 
-  // With target employers no longer held back, the practice rules do not apply.
   config.targets.holdBack = false;
   const real = approved({ ...practice, target: "yes" });
   reviewStandingApprovals();
@@ -228,7 +208,6 @@ if (scenario === "action-guards") {
   };
   const detail = async (id: number) => (await (await handle(new Request(`${BASE}/api/jobs/${id}`))).json()) as { steps: { id: number; state: string }[] };
 
-  // Steps belong to applications that were sent.
   const draft = job("awaiting_approval");
   assert.equal((await steps(draft, { op: "add", kind: "assessment", title: "OA" })).status, 409);
 
@@ -247,12 +226,10 @@ if (scenario === "action-guards") {
   assert.equal(jobSteps(sent)[0]?.title, "Onsite");
   assert.equal(jobSteps(sent)[0]?.due_at, null);
 
-  // A step is only changed through its own application.
   const other = job("submitted", { submitted_at: "2026-10-01T00:00:00Z" });
   assert.equal((await steps(other, { op: "remove", step: oa.id })).status, 409);
   assert.equal(jobSteps(sent).length, 1);
 
-  // Outcomes the user records, and undoing one.
   assert.equal((await act(draft, "withdraw")).status, 409);
   assert.equal((await act(sent, "mark_declined")).status, 200);
   assert.equal(statusOf(sent), "rejected_by_company");

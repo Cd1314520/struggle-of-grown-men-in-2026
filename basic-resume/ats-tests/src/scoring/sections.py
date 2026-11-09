@@ -21,10 +21,6 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
     total = len(expected)
     presence_score = present / total if total else 1.0
 
-    # Order check: positions must be monotonically increasing among the
-    # headings we did find. Order failures are reported but do not directly
-    # subtract — sections score weights presence; reading_order owns ordering
-    # of bullets vs headings.
     last = -1
     order_ok = True
     for h, idx in found_positions:
@@ -34,9 +30,6 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
             break
         last = idx
 
-    # Hard penalty for out-of-order sections: a swapped Education/Work
-    # ordering in source should fail the suite, not be quietly absorbed by
-    # the "× 0.8" of a near-perfect presence score.
     if not order_ok:
         presence_score = min(presence_score, 0.5)
 

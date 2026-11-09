@@ -1,5 +1,3 @@
-// Models: which model each kind of agent work runs on. The list is what omp and Claude Code can reach on
-// this machine; a choice is saved to config.local.yml and used from that stage's next run.
 import { FileCog, RefreshCw, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -8,7 +6,6 @@ import { Button, Combobox, ListNotice, SkeletonRows, type ComboOption } from "..
 import { api, queryClient, refreshAll, useModels } from "../../lib/api";
 import { SettingRow, SettingsGroup, SettingsPanel } from "./parts";
 
-// What each stage does, and what that asks of a model. In the order a job meets them.
 export const STAGES: readonly { stage: ModelStage; label: string; description: string; core: boolean }[] = [
   {
     stage: "triage",
@@ -37,7 +34,6 @@ export const STAGES: readonly { stage: ModelStage; label: string; description: s
 ];
 
 const DEFAULT = "__default__";
-// Each harness: its name, and how to sign it in on this machine.
 const HARNESSES: { id: keyof ModelCatalog["errors"]; label: string; login: string }[] = [
   { id: "omp", label: "omp", login: "omp login" },
   { id: "claude-code", label: "Claude Code", login: "claude auth login" },
@@ -75,12 +71,10 @@ function StageRow({
       await queryClient.invalidateQueries({ queryKey: ["models"] });
       void refreshAll();
     } catch {
-      // the request showed why; the choice stays as it was
     } finally {
       setSaving(false);
     }
   };
-  // A model named in the config that is not listed still shows as chosen.
   const all = value && !options.some(o => o.value === value) ? [...options, { value, label: value, group: "Not listed" }] : options;
   return (
     <SettingRow stack label={label} description={description}>
@@ -108,7 +102,6 @@ export function Models() {
       queryClient.setQueryData(["models"], await api.models(true));
       void queryClient.invalidateQueries({ queryKey: ["setup"] });
     } catch {
-      // shown by the request
     } finally {
       setRefreshing(false);
     }

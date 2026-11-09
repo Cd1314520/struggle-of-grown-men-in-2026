@@ -1,20 +1,5 @@
-// Prefill: fills the plain fields of an application form before the fill agent reads it, so the agent
-// spends its turns only on what needs judgment. An omp fill agent imports this module into its own
-// JavaScript session and calls `prefill(tab, factsPath)` with its browser tab (prompts/browser-omp.md);
-// for a Claude Code one, which has no such session, the app runs it over CDP (src/cdp-tab.ts) when the
-// agent calls the `prefill` host tool.
-//
-// It fills only what the candidate details settle with no judgment: name, contact, address, links,
-// current job, school, the resume upload, and the plain eligibility, EEO, referral, source and text
-// consent questions whose answers profile/personal.yml gives under `prefill:`. Anything else, and any
-// field already holding something else, is left and listed for the agent. It works the page the way
-// the agent is told to: one field at a time, top to bottom, clicking and then typing, with every
-// input paced by the browser's proxy like the agent's own.
-//
-// Runs inside omp's JavaScript session as well as the app: it must import nothing from the app.
 import { readFileSync } from "node:fs";
 
-// The part of omp's browser tab this uses (src/cdp-tab.ts gives the same).
 export interface Tab {
   evaluate(code: string): Promise<unknown>;
   click(selector: string): Promise<unknown>;
@@ -26,7 +11,6 @@ export interface Tab {
 }
 
 export type YesNo = "yes" | "no";
-// What fill.ts writes for the script (buildFacts): the candidate details, flattened.
 export interface Facts {
   resume: string;
   first_name: string;
@@ -37,7 +21,7 @@ export interface Facts {
   phone: string;
   street: string;
   city: string;
-  state: string; // as given: an abbreviation or a name
+  state: string;
   postal_code: string;
   country: string;
   linkedin: string;
@@ -56,13 +40,12 @@ export interface Facts {
     relocate?: YesNo;
     hispanic?: YesNo;
     eeo?: "decline";
-    gender_if_required?: string; // when a required gender question offers no way to decline
+    gender_if_required?: string;
     sms_consent?: YesNo;
-    how_heard?: string[]; // options to prefer, in order
+    how_heard?: string[];
   };
 }
 
-// A form control as the scan reports it. Radio and checkbox groups are one field with options.
 export interface Field {
   id: string;
   kind: "text" | "textarea" | "select" | "combobox" | "radio" | "checkbox" | "file";
@@ -72,8 +55,6 @@ export interface Field {
   options?: { tag?: string; value?: string; text: string; checked?: boolean; label?: boolean }[];
 }
 
-// What to put in a field: text to type, an option to pick (the first pattern any option matches,
-// typing `search` first in a combobox that needs it), or a file to upload.
 export type Plan = { text: string } | { choose: RegExp[]; search?: string; avoid?: RegExp } | { upload: string };
 
 const clean = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
@@ -142,12 +123,9 @@ const stateNames = (state: string) => {
   return abbr ? { abbr, name: STATES[abbr] ?? state } : { abbr: state, name: state };
 };
 
-// Questions about someone other than the candidate, or about the past, which the facts do not answer.
 const NOT_THE_CANDIDATE =
   /reference|emergency|referr|supervisor|manager|spouse|relative|parent|guardian|previous|former|prior|other than|outside|additional|secondary|alternate|confirm|\bif\b|explain|describe|why/i;
 
-// The plain fact a text, select or combobox field asks for: the text to type, and for a list, the
-// options that say the same (the text itself, if none are given) and what to type to find them.
 interface Fact {
   text: string;
   choose?: RegExp[];
@@ -184,10 +162,8 @@ function factOf(q: string, f: Facts): Fact | null {
   return null;
 }
 
-// The plain yes/no, EEO and source questions answered under `prefill:` in profile/personal.yml.
 function answerPlan(q: string, field: Field, a: Facts["answers"]): Plan | null {
   if (/\b(gender|sex)\b/.test(q) && !q.includes("orientation")) {
-    // A closed combobox shows no options yet: declining is tried first, the required fallback after.
     const unseen = !field.options?.length;
     const decline = a.eeo === "decline" && (unseen || field.options?.some(o => DECLINE.test(o.text))) ? [DECLINE] : [];
     const g = a.gender_if_required;
@@ -196,7 +172,6 @@ function answerPlan(q: string, field: Field, a: Facts["answers"]): Plan | null {
   }
   if (/hispanic|latin[oa]/.test(q) && a.hispanic) return { choose: a.hispanic === "no" ? [/^\s*no\b/i, /not hispanic/i] : YES };
   if (/\brace\b|ethnic|veteran|disabilit|sexual orientation|transgender/.test(q)) return a.eeo === "decline" ? { choose: [DECLINE] } : null;
-  // Consent to texts is often a pair of options under the phone number, with no question of its own.
   const sms = /text messag|\bsms\b/;
   if ((sms.test(q) || (field.options?.length && field.options.every(o => sms.test(o.text.toLowerCase())))) && a.sms_consent)
     return a.sms_consent === "yes" ? { choose: [...YES, /\b(i )?(consent|agree|opt.?in)\b/i], avoid: /\b(not|don.?t|no)\b/i } : { choose: NO };
@@ -219,7 +194,6 @@ function answerPlan(q: string, field: Field, a: Facts["answers"]): Plan | null {
   return null;
 }
 
-// What the facts say to put in a field, or null when it is one for the agent.
 export function decide(field: Field, facts: Facts): Plan | null {
   const q = words(field.question)
     .replace(/\s*[*✱]\s*$/, "")
@@ -234,7 +208,6 @@ export function decide(field: Field, facts: Facts): Plan | null {
   return choice ? { choose: fact.choose ?? [exact(fact.text)], search: fact.search ?? fact.text } : { text: fact.text };
 }
 
-// The first option, in the order of the patterns, that a plan picks.
 export function pick<T extends { text: string }>(options: T[], plan: { choose: RegExp[]; avoid?: RegExp }): T | null {
   for (const pattern of plan.choose) {
     const hit = options.find(o => pattern.test(o.text) && !plan.avoid?.test(o.text));
@@ -243,7 +216,6 @@ export function pick<T extends { text: string }>(options: T[], plan: { choose: R
   return null;
 }
 
-// Whether a field already holds what the plan would put there.
 export function holds(value: string, plan: Plan): boolean {
   if ("text" in plan) {
     const digits = (s: string) => s.replace(/\D/g, "");
@@ -254,8 +226,6 @@ export function holds(value: string, plan: Plan): boolean {
   return false;
 }
 
-// Reads every visible form control on the page, top to bottom, and tags each with data-prefill so it
-// can be addressed by selector. Runs in the page.
 const SCAN = String.raw`(() => {
   const clean = s => (s || "").replace(/\s+/g, " ").trim();
   const shown = el => el.type === "file" || !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
@@ -280,11 +250,8 @@ const SCAN = String.raw`(() => {
     const type = (el.getAttribute("type") || el.tagName).toLowerCase();
     if (["hidden", "submit", "button", "image", "reset", "password"].includes(type) || el.disabled || !shown(el)) continue;
     if (el.closest("[class*=iti__country], [class*=iti__dropdown], .g-recaptcha, [class*=captcha]") || /captcha/i.test(el.name || "")) continue;
-    // Stand-ins a widget keeps for the browser's own validation, out of reach of a person. (Radio
-    // buttons and checkboxes are often drawn over an invisible input, so those stay.)
     if (!["file", "radio", "checkbox"].includes(type) && (el.tabIndex < 0 || el.getAttribute("aria-hidden") === "true" || getComputedStyle(el).opacity === "0")) continue;
     if (type === "radio" || type === "checkbox") {
-      // One question: the box around the options, else their shared name (forms reuse names like "Agree").
       const key = el.closest("fieldset, [role=radiogroup], [role=group]") || type + ":" + (el.name || el.id);
       let g = groups.get(key);
       if (!g) {
@@ -321,7 +288,6 @@ const SCAN = String.raw`(() => {
   return fields;
 })()`;
 
-// The options a combobox shows once opened, each tagged so it can be clicked. Runs in the page.
 const comboOptions = (id: string) => String.raw`(() => {
   const el = document.querySelector('[data-prefill="${id}"]');
   const list = el && (document.getElementById(el.getAttribute("aria-controls") || "") || document.getElementById(el.getAttribute("aria-owns") || ""));
@@ -340,10 +306,8 @@ export interface Report {
   note?: string;
 }
 
-// Pages already scrolled through once, so a second call on the same page does not do it again.
 const looked = new Set<string>();
 
-// The report as the agent reads it: short lines, since omp cuts long console lines, required fields first.
 export function reportText(r: Report): string {
   const lines = [`filled ${r.filled.length}: ${r.filled.join("; ") || "nothing"}`];
   const left = [...r.left].sort((a, b) => Number(b.required) - Number(a.required));
@@ -357,16 +321,10 @@ export function reportText(r: Report): string {
   return lines.map(l => short(l, 700)).join("\n");
 }
 
-/**
- * Fills the plain fields of the form on the tab's current page and reports, as text, what it filled and
- * what it left. Stops starting new fields after `budgetMs`; it then reports `more: true`, and calling
- * it again carries on, skipping what is done.
- */
 export async function prefill(tab: Tab, factsPath: string, opts: { budgetMs?: number; looked?: Set<string> } = {}): Promise<string> {
   return reportText(await prefillForm(tab, factsPath, opts.budgetMs ?? 100_000, opts.looked ?? looked));
 }
 
-// `looked`: pages already scrolled through by this worker. omp's session holds this module for one worker; the app passes one set per worker.
 async function prefillForm(tab: Tab, factsPath: string, budgetMs: number, looked: Set<string>): Promise<Report> {
   const facts = JSON.parse(readFileSync(factsPath, "utf8")) as Facts;
   const until = Date.now() + budgetMs;
@@ -383,8 +341,7 @@ async function prefillForm(tab: Tab, factsPath: string, budgetMs: number, looked
   let fields = await scan();
   if (!fields.length)
     return { filled: [], left: [], more: false, note: "no form fields on this page (is the form inside a frame, or behind an Apply button?)" };
-  const filled = new Map<string, { line: string; plan: Plan }>(); // by field key: "question: value"
-  // Fields by kind, question and place among those alike: scans renumber them, and answers reveal more.
+  const filled = new Map<string, { line: string; plan: Plan }>();
   const keyOf = () => {
     const seen = new Map<string, number>();
     return (f: Field) => {
@@ -405,7 +362,6 @@ async function prefillForm(tab: Tab, factsPath: string, budgetMs: number, looked
       why,
     });
 
-  // The resume first: Greenhouse and Ashby read it and fill the form again, which can redraw it.
   const resume = fields.find(f => f.kind === "file" && !f.value && decide(f, facts));
   if (resume) {
     await tab.uploadFile(sel(resume.id), facts.resume);
@@ -414,8 +370,6 @@ async function prefillForm(tab: Tab, factsPath: string, budgetMs: number, looked
     fields = await scan();
   }
 
-  // Answers can reveal further questions (race after "not Hispanic"), so a pass that filled anything
-  // is followed by another over what the page shows then.
   const handled = new Set<string>();
   let more = false;
   for (let pass = 0; pass < 3; pass++) {
@@ -436,8 +390,6 @@ async function prefillForm(tab: Tab, factsPath: string, budgetMs: number, looked
         continue;
       }
       const current = f.kind === "radio" ? (f.options?.find(o => o.checked)?.text ?? "") : (f.value ?? "");
-      // A site that read the resume may have typed something else into a plain text field: the
-      // candidate details win there. A choice it made is left for the agent to judge.
       const replace = !!current && !holds(current, plan);
       if (current && (!replace || !("text" in plan))) {
         if (replace) leave(k, f, "already holds something else; check it");
@@ -460,8 +412,6 @@ async function prefillForm(tab: Tab, factsPath: string, budgetMs: number, looked
     await sleep(800);
     fields = await scan();
   }
-  // What it entered, read back once the page has settled: some fields clear what was typed unless one
-  // of their suggestions is picked, and some widgets drop a click.
   await sleep(800);
   const key = keyOf();
   for (const f of await scan()) {
@@ -476,7 +426,6 @@ async function prefillForm(tab: Tab, factsPath: string, budgetMs: number, looked
   return { filled: [...filled.values()].map(e => e.line), left: [...left.values()], more };
 }
 
-// Puts the plan into one field. Returns what it entered, or null when no option matched.
 async function fillField(tab: Tab, f: Field, plan: Plan, replace = false): Promise<string | null> {
   if ("upload" in plan) return null;
   if ("text" in plan) {
@@ -498,7 +447,6 @@ async function fillField(tab: Tab, f: Field, plan: Plan, replace = false): Promi
     await tab.click(option.label ? `[data-prefill-label="${option.tag}"]` : sel(option.tag));
     return option.text;
   }
-  // A combobox: open it, type to narrow it when the option is not listed, and click the option.
   await tab.click(sel(f.id));
   await sleep(500);
   let options = (await tab.evaluate(comboOptions(f.id))) as { tag: string; text: string }[];
@@ -517,7 +465,6 @@ async function fillField(tab: Tab, f: Field, plan: Plan, replace = false): Promi
   return option.text;
 }
 
-// The facts file's content, from profile/personal.yml as parsed, the application mailbox and the resume.
 export function buildFacts(personal: Record<string, unknown>, mailbox: string, resume: string): Facts {
   const str = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v).trim() : "");
   const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});

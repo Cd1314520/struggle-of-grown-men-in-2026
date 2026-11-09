@@ -1,8 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
 
-// What an empty list or page says: an icon, one line, an optional nudge and action. `md` on the sheet,
-// under the bar; `sm` inside a section.
 export function EmptyState({
   icon,
   title,
@@ -41,8 +39,6 @@ export function Skeleton({ className }: { className?: string }) {
   );
 }
 
-// Rows of placeholder while a list loads, shaped like ListRow: a mark, the title and meta and the fact, each
-// with its hairline, on one line or two as the rows will be. `dense` is the log's line; `lead={false}` drops the mark.
 export function SkeletonRows({ rows = 8, dense, lead = true, className }: { rows?: number; dense?: boolean; lead?: boolean; className?: string }) {
   const mark = lead && !dense;
   return (
@@ -72,7 +68,6 @@ export function SkeletonRows({ rows = 8, dense, lead = true, className }: { rows
   );
 }
 
-// A notice across the top of a page or card. One sentence and an action.
 export function Callout({
   tone = "neutral",
   icon,

@@ -3,8 +3,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Every scenario runs in a fresh process: no shared config/module mocks, no production DB,
-// no OAuth credentials, and no outbound network. The fixture exercises core + digest + Gmail.
 async function scenario(name: string, phases = [name]) {
   const directory = mkdtempSync(join(tmpdir(), "auto-apply-digest-test-"));
   try {

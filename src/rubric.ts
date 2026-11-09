@@ -1,5 +1,3 @@
-// Scoring is arithmetic over a checklist. The agent only answers yes / no / unclear per statement;
-// weights, thresholds and the pass / hold / skip decision live here and in profile/rubric.yml.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
@@ -11,11 +9,11 @@ export type Answer = "yes" | "no" | "unclear";
 const ANSWERS: readonly Answer[] = ["yes", "no", "unclear"];
 interface Criterion {
   id: string;
-  label?: string; // short form for the at-a-glance view
+  label?: string;
   statement: string;
   required?: boolean;
   weight?: number;
-  screen?: boolean; // false: a requirement the screen leaves to the full assessment
+  screen?: boolean;
 }
 interface PhaseRubric {
   threshold: number;
@@ -26,7 +24,7 @@ interface Rubric extends Record<Phase, PhaseRubric> {
 }
 
 export interface ChecklistItem {
-  key: string; // "<phase>.<id>"
+  key: string;
   phase: Phase;
   label: string;
   statement: string;
@@ -38,8 +36,8 @@ export interface ChecklistItem {
 }
 export interface Verdict {
   decision: "apply" | "hold" | "skip";
-  rubric: Phase; // the one that scored it: real for a target employer, practice for any other
-  score: number; // on that rubric
+  rubric: Phase;
+  score: number;
   threshold: number;
   reason: string;
   items: ChecklistItem[];
@@ -47,7 +45,6 @@ export interface Verdict {
 }
 
 export function loadRubric(file = join(PROFILE, "rubric.yml")): Rubric {
-  // Hand-edited file: nothing is there until checked.
   const r = YAML.parse(readFileSync(file, "utf8")) as (Partial<Record<Phase, Partial<PhaseRubric>>> & { unclear?: number }) | null;
   for (const phase of ["practice", "real"] as const) {
     const criteria = r?.[phase]?.criteria;
@@ -60,7 +57,6 @@ export function loadRubric(file = join(PROFILE, "rubric.yml")): Rubric {
   return r as Rubric;
 }
 
-// Both are answered: which one scores the job depends on whether its employer turns out to be a target.
 const PHASES: Phase[] = ["practice", "real"];
 
 export const thresholds = (r = loadRubric()) => ({ practice: r.practice.threshold, real: r.real.threshold });
@@ -69,10 +65,6 @@ export function checklistText(r = loadRubric()) {
   return PHASES.flatMap(phase => r[phase].criteria.map(c => `- \`${phase}.${c.id}\`: ${c.statement}`)).join("\n");
 }
 
-// ---- the screen: a cheap read of the posting before the full assessment
-
-// The rubrics that can decide a job. Whether its employer is a target is the full assessment's
-// judgment unless the employer is listed, so a job is only ruled out when it fails both.
 function decidingPhases(listed: Listed | null): Phase[] {
   if (listed === "frontier") return ["real"];
   return listed === "practice" ? ["practice"] : ["practice", "real"];
@@ -89,8 +81,6 @@ export function screenChecklistText(listed: Listed | null, r = loadRubric()) {
     .join("\n");
 }
 
-// Why the screen rules the job out, null when the full assessment should read it, or an error
-// string when the answers are incomplete. Only a "no" rules out, as with requirements in evaluate.
 export function screenVerdict(raw: unknown, listed: Listed | null): { out: string | null } | string {
   const r = loadRubric();
   const answers = new Map<string, Answer>();
@@ -139,7 +129,6 @@ function scorePhase(r: Rubric, phase: Phase, answers: Map<string, { answer: Answ
   return { items, score, failed, threshold: r[phase].threshold };
 }
 
-// Returns an error string when the answers are incomplete, otherwise the computed verdict.
 export function evaluate(raw: unknown, practiceEvidence?: unknown): Verdict | string {
   const r = loadRubric();
   const answers = new Map<string, { answer: Answer; evidence: string }>();
@@ -159,8 +148,6 @@ export function evaluate(raw: unknown, practiceEvidence?: unknown): Verdict | st
   const practice = assessPractice(practiceEvidence);
   const { qualifies, reason } = practiceVerdict(practice, describing());
   const failedIds = (failed: ChecklistItem[]) => failed.map(i => i.key.split(".")[1]).join(", ");
-  // A target employer: the real rubric decides whether the job is worth it, and holdBack whether it is
-  // applied to now or kept for later.
   if (!qualifies) {
     const kept = { rubric: "real" as const, score: real.score, threshold: real.threshold, items, practice };
     if (real.failed.length) return { ...kept, decision: "skip", reason: `not a practice job, and failed real requirement: ${failedIds(real.failed)}` };

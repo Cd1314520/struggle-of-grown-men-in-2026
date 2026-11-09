@@ -1,6 +1,3 @@
-// Review: the approval queue, worked like an inbox. On a desktop the queue and the open job sit side by
-// side and J/K walks the queue; deciding a job opens the next in its place. On a phone the queue is the
-// page and a job opens over it.
 import { ArrowRight, Inbox, PanelRight } from "lucide-react";
 import { useRef, type ReactNode } from "react";
 import { FilterMenu, GroupSegments, ListDetail, NoMatch, useOpenRecord } from "../../components/list";
@@ -25,7 +22,6 @@ export function ReviewPage() {
     tablet = useMedia(TABLET);
   const lp = useListParams();
   const search = useRef<HTMLInputElement>(null);
-  // Beside the queue a job is always open; on a phone the queue is the page until one is.
   const record = useOpenRecord({ base: "review", view: "review", lp, search, autoOpen: wide });
   const { data: list, query, openId } = record;
   const { data: summary } = useSummary();
@@ -57,8 +53,6 @@ export function ReviewPage() {
         )
       }
     >
-      {/* The queue is always the column. A phone's has no count line: the tab bar's badge and the All segment
-          count it, so the queue starts right under the search. The bar's h1 stays for screen readers. */}
       <Workspace
         frame="column"
         aria-label="Jobs to review"
@@ -75,7 +69,6 @@ export function ReviewPage() {
               ref={search}
               value={lp.search}
               onValueChange={lp.setSearch}
-              // A phone's box, beside Filter and Sort, has room for the word alone.
               placeholder={tablet ? "Search title, company or place" : "Search"}
               aria-label="Search the queue"
             />
@@ -113,8 +106,6 @@ export function ReviewPage() {
           rows.map((job, i) => {
             const prev = rows[i - 1],
               next = rows[i + 1];
-            // Sorted by company, an employer with several roles here gets a heading over them; one with a
-            // single role stays an ordinary row, so the list is not half headings.
             const clustered = byCompany && (job.company === prev?.company || job.company === next?.company);
             let heading: ReactNode = null;
             if (byAge && job.group !== prev?.group) {
@@ -123,7 +114,6 @@ export function ReviewPage() {
             } else if (clustered && job.company !== prev?.company)
               heading = (
                 <ListGroup
-                  // The mark sits over the rows' lead, so the name lines up with the titles under it.
                   lead={
                     <span className="mr-1 flex w-8 shrink-0 justify-center">
                       <CompanyMark name={job.company} size="sm" />
@@ -146,7 +136,6 @@ export function ReviewPage() {
   );
 }
 
-// Nothing to review: say so, and point at whatever else waits on the owner.
 function AllClear() {
   const { data: s } = useSummary();
   const a = s?.attention;

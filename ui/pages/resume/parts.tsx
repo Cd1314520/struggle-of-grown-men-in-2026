@@ -1,11 +1,9 @@
-// The pieces of the Resume page: a resume's pages, framed as the sheets they are, and the upload form.
 import { ExternalLink, FileText, FileUp, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button, Field, Skeleton, Textarea } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { plural } from "../../lib/format";
 
-// Each page as an image. `version` changes whenever the PDF does, so a new one is fetched.
 export function Sheets({ src, pages, version, pdf, label }: { src: string; pages: number | null; version: string; pdf: string; label: string }) {
   return (
     <div className="flex flex-col gap-6">
@@ -17,7 +15,7 @@ export function Sheets({ src, pages, version, pdf, label }: { src: string; pages
 }
 
 function Sheet({ src, pdf, alt }: { src: string; pdf: string; alt: string }) {
-  const [loaded, setLoaded] = useState(false); // rendered on the server the first time: shimmer until it arrives
+  const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const frame = "relative aspect-[8.5/11] w-full overflow-hidden rounded-sm bg-white shadow-md ring-1 ring-border";
   if (failed)
@@ -30,7 +28,6 @@ function Sheet({ src, pdf, alt }: { src: string; pdf: string; alt: string }) {
   return (
     <a href={pdf} target="_blank" rel="noopener noreferrer" className={cn(frame, "block transition-shadow hover:shadow-lg")}>
       {!loaded && <Skeleton className="absolute inset-0 rounded-none" />}
-      {/* A phone can't read the page at this size: the sheet says what a tap does. */}
       <span
         aria-hidden
         className="absolute right-3 bottom-3 z-10 hidden h-8 items-center gap-1.5 rounded-md bg-surface px-3 text-sm font-medium text-fg shadow-md ring-1 ring-border touch:inline-flex"
@@ -55,7 +52,6 @@ function Sheet({ src, pdf, alt }: { src: string; pdf: string; alt: string }) {
 
 const size = (bytes: number) => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
 
-// Files of any kind, dropped or chosen, and a note for the agent. `onSubmit` sends them.
 export function Upload({
   limits,
   submit,

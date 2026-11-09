@@ -22,7 +22,6 @@ import {
 } from "../scripts/journal-resumes";
 import type { ResumeReviewInput, ApplicationResumeReview } from "../scripts/resume-review-model";
 
-/** Resolves with the Error a promise rejects with; fails the test if it settles any other way. */
 async function rejectionOf(promise: Promise<unknown>): Promise<Error> {
   try {
     await promise;
@@ -76,7 +75,6 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
 
     mkdirSync(jobsRoot, { recursive: true });
 
-    // Seed notes file with explicit negative boundaries
     writeFileSync(
       notesPath,
       `# Candidate Notes
@@ -151,12 +149,10 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
   });
 
   it("3. Resolves default paths relative to REPO_ROOT and explicit flags relative to cwd", () => {
-    // Default invocation
     const defaults = parseCliArgs(["node", "scripts/journal-resumes.ts"]);
     expect(defaults.dbPath).toBe(DEFAULT_DB_PATH);
     expect(defaults.dbPath.startsWith(REPO_ROOT)).toBe(true);
 
-    // Explicit flag invocation
     const custom = parseCliArgs(["node", "scripts/journal-resumes.ts", "--db", "custom/test.db"]);
     expect(custom.dbPath).toBe(join(process.cwd(), "custom/test.db"));
   });
@@ -168,7 +164,6 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     const now = "2026-10-10 03:00:00";
     const nowIso = "2026-10-10T03:00:00.000Z";
 
-    // Simulate pre-existing journal with high watermark checkpoint from previous stall run
     writeFileSync(journalPath, `# Auto-Apply Observation & Stalls Journal\n\n<!-- journal-checkpoint: watermark=999999 -->\n\n### Prior stall run\n`, "utf8");
 
     const db = new Database(dbPath);
@@ -180,7 +175,6 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     `);
     db.close();
 
-    // Must still discover Job 102 even though stall watermark 999999 is higher than event id 2
     const res = await runResumeJournal(defaultOpts);
     expect(res.success).toBe(true);
     expect(res.changed).toBe(true);
@@ -212,12 +206,11 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
       title: "Data Eng",
       description: "Posting text description",
       resume_sha: sha,
-      resume_frozen_at: "2026-10-10T03:00:02.000Z", // frozen under auto approval id 10
+      resume_frozen_at: "2026-10-10T03:00:02.000Z",
       approved_by: "auto",
       status: "filling",
     };
 
-    // Case A: Governing approval is auto (event 10 at 03:00:00 before freeze at 03:00:02)
     const approvalsA: ApprovalEventRow[] = [
       { id: 1, kind: "user", message: "approve", at: "2026-10-09 10:00:00" },
       { id: 10, kind: "auto", message: "Approved by auto apply: test", at: "2026-10-10 03:00:00" },
@@ -226,7 +219,6 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     const resA = verifyJobAttributionAndEvidence(jobRow, attempt, approvalsA, jobsRoot, notesPath);
     expect(resA.valid).toBe(true);
 
-    // Case B: Governing approval is user (event 20 at 04:00:00 before new freeze at 04:00:05)
     const jobRowB: JobDetailRow = {
       ...jobRow,
       resume_frozen_at: "2026-10-10T04:00:05.000Z",
@@ -260,7 +252,6 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     `);
     db.close();
 
-    // First review with initial posting text
     const res1 = await runResumeJournal(defaultOpts);
     expect(res1.changed).toBe(true);
     expect(mockCalls.length).toBe(1);
@@ -268,7 +259,6 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     const journalContent1 = readFileSync(defaultOpts.journalPath, "utf8");
     expect(journalContent1).toContain(`jobId=301 fp=`);
 
-    // Employer posting text updates in database (same resume SHA)
     const db2 = new Database(dbPath);
     db2.run(`UPDATE jobs SET description = 'Updated posting text with new requirements' WHERE id = 301`);
     db2.close();
@@ -276,10 +266,9 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     mockCalls.length = 0;
     const res2 = await runResumeJournal(defaultOpts);
     expect(res2.changed).toBe(true);
-    expect(mockCalls.length).toBe(1); // Re-reviewed because evidence fingerprint changed!
+    expect(mockCalls.length).toBe(1);
 
     const journalContent2 = readFileSync(defaultOpts.journalPath, "utf8");
-    // Journal contains two distinct review entries reflecting the two different fingerprints
     const matches = Array.from(journalContent2.matchAll(/<!--\s*journal-resume-review:\s*jobId=301\s+fp=([0-9a-f]+)/g));
     expect(matches.length).toBe(2);
     expect(matches[0]?.[1]).not.toBe(matches[1]?.[1]);
@@ -322,7 +311,7 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
           {
             theme: "SQL Server Schema Design",
             importance: "core",
-            status: "unconfirmed", // Same theme name, but unconfirmed here!
+            status: "unconfirmed",
             postingQuote: "SQL Server experience required",
             resumeEvidence: null,
             notesEvidence: null,
@@ -335,7 +324,6 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
 
     const { supportedThemes, unconfirmedThemes } = aggregateResumeThemes(reviews);
 
-    // Verify structured segregation without majority conflation
     expect(supportedThemes.length).toBe(1);
     expect(supportedThemes[0]?.theme).toBe("SQL Server Schema Design");
     expect(supportedThemes[0]?.distinctJobIds.size).toBe(1);
@@ -348,7 +336,6 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     expect(unconfirmedThemes[0]?.requiredCount).toBe(0);
     expect(unconfirmedThemes[0]?.coreCount).toBe(1);
 
-    // Verify formatted entry contains stable markers and verbatim posting quotes
     const formatted = formatResumeJournalEntry({
       timestamp: "2026-10-10T02:00:00Z",
       newReviews: reviews,
@@ -363,7 +350,6 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
   });
 
   it("8. Strict throw when model review output lacks coverage for an input job (no fake fallback)", async () => {
-    // Custom reviewer returns empty array (missing coverage for job 501)
     const { dbPath, jobsRoot, defaultOpts } = setupTestEnv(() => Promise.resolve([]));
 
     const { sha } = createValidJobArtifacts(jobsRoot, 501);
@@ -381,7 +367,6 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
 
     expect(await rejectionOf(runResumeJournal(defaultOpts))).toBeInstanceOf(Error);
 
-    // Job 501 is NOT cached in state
     const state = loadResumeJournalState(defaultOpts.statePath);
     expect(state.reviews["501"]).toBeUndefined();
   });
@@ -393,7 +378,6 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     const nowIso = "2026-10-10T03:00:00.000Z";
 
     const db = new Database(dbPath);
-    // Job 601 starts with missing PDF file
     db.run(`
       INSERT INTO jobs (id, url, source, company, title, description, status, approved_by, resume_sha, resume_frozen_at)
       VALUES (601, 'https://example.com/601', 'discover', 'Recovering Corp', 'Role', 'Posting text', 'filling', 'auto', 'nonexistent_sha_value', '${nowIso}');
@@ -402,24 +386,21 @@ describe("Auto-Apply Resume Journal - Comprehensive Correctness Tests", () => {
     `);
     db.close();
 
-    // Run 1: Missing evidence recorded
     const res1 = await runResumeJournal(defaultOpts);
     expect(res1.success).toBe(true);
     let state = loadResumeJournalState(defaultOpts.statePath);
     expect(state.missingEvidence["601"]).toBeDefined();
 
-    // Fix the issue: create valid PDF artifact and update DB with real SHA
     const { sha: realSha } = createValidJobArtifacts(jobsRoot, 601);
     const db2 = new Database(dbPath);
     db2.run(`UPDATE jobs SET resume_sha = '${realSha}' WHERE id = 601`);
     db2.close();
 
-    // Run 2: Evidence recovers, stale missing evidence is deleted from mapping
     const res2 = await runResumeJournal(defaultOpts);
     expect(res2.success).toBe(true);
     state = loadResumeJournalState(defaultOpts.statePath);
-    expect(state.missingEvidence["601"]).toBeUndefined(); // Cleared on recovery!
-    expect(state.reviews["601"]).toBeDefined(); // Now reviewed!
+    expect(state.missingEvidence["601"]).toBeUndefined();
+    expect(state.reviews["601"]).toBeDefined();
   });
 
   it("10. Corrupt state file throws an error and is NEVER silently overwritten", () => {

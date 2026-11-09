@@ -32,7 +32,6 @@ export function MenuItem({
     <M.Item
       className={cn(
         "flex cursor-pointer items-center gap-2",
-        // A second line ("Last run 22m ago") makes the item two lines tall, its icon level with the first.
         description ? "items-start py-1.5 [&>svg]:mt-0.5" : "h-8 touch:h-10",
         "rounded-md px-2 text-sm outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-subtle [&_svg]:size-4",
         danger ? "text-danger-text data-[highlighted]:bg-danger-soft [&_svg]:text-danger-text" : "text-fg [&_svg]:text-fg-subtle",

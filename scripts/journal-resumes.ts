@@ -6,7 +6,6 @@ import { openDatabase } from "../src/schema";
 import { observeAutoApplyActivity, JOURNAL_HEADER, type AutoApplyJobAttempt } from "./journal-stalls";
 import { reviewResumes, REVIEW_MODEL, type ResumeReviewInput, type ResumeGap, type ApplicationResumeReview } from "./resume-review-model";
 
-// Resolve repository root via import.meta.url so default paths are independent of process.cwd()
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export const DEFAULT_DB_PATH = join(REPO_ROOT, "data/app.db");
@@ -257,15 +256,12 @@ export function extractPublishedJournalMarkers(journalPath: string): {
   }
 
   const content = readFileSync(journalPath, "utf8");
-  // Match full evidence fingerprint marker: <!-- journal-resume-review: jobId=401 fp=<sha256> ... -->
   for (const m of content.matchAll(/<!--\s*journal-resume-review:\s*jobId=(\d+)\s+fp=([0-9a-fA-F]+)(?:\s+sha=([0-9a-fA-F]+))?\s*-->/g)) {
     publishedJobFingerprints.add(`${m[1]}:${m[2]}`);
   }
-  // Match missing evidence marker with reason hash: <!-- journal-resume-missing-evidence: jobId=401 reasonHash=<sha256[:12]> -->
   for (const m of content.matchAll(/<!--\s*journal-resume-missing-evidence:\s*jobId=(\d+)\s+reasonHash=([0-9a-fA-F]+)\s*-->/g)) {
     publishedMissingKeys.add(`${m[1]}:${m[2]}`);
   }
-  // Match entry timestamp
   for (const m of content.matchAll(/<!--\s*journal-resume-review-entry:\s*timestamp=([^\s]+)\s*-->/g)) {
     if (m[1] !== undefined) entryTimestamps.add(m[1]);
   }
@@ -290,8 +286,6 @@ export function verifyJobAttributionAndEvidence(
     };
   }
 
-  // 1. Governing approval at freeze/fill boundary:
-  // Normalize timestamps to epoch ms to avoid lexical ISO vs SQLite comparisons
   const freezeMs = parseTimestampMs(job.resume_frozen_at);
   if (!freezeMs || !job.resume_frozen_at) {
     return {
@@ -303,8 +297,6 @@ export function verifyJobAttributionAndEvidence(
     };
   }
 
-  // Find governing approval event: latest approval at or before the freeze timestamp
-  // (allow 5000ms clock tolerance for minor differences between node Date and sqlite datetime)
   const priorApprovals = approvals.filter(a => {
     const apprMs = parseTimestampMs(a.at);
     return apprMs !== null && apprMs <= freezeMs + 5000;
@@ -332,7 +324,6 @@ export function verifyJobAttributionAndEvidence(
     };
   }
 
-  // 2. Validate posting description
   if (!job.description?.trim()) {
     return {
       valid: false,
@@ -343,7 +334,6 @@ export function verifyJobAttributionAndEvidence(
     };
   }
 
-  // 3. Validate stored resume SHA
   if (!job.resume_sha?.trim()) {
     return {
       valid: false,
@@ -354,8 +344,6 @@ export function verifyJobAttributionAndEvidence(
     };
   }
 
-  // 4. Locate applied resume PDF: the one PDF in data/jobs/<id>/applied/<sha[:12]>/. Its name is
-  // whatever resume.pdfName was when it was frozen; its identity is the SHA checked next.
   const frozenDir = join(jobsRoot, String(job.id), "applied", job.resume_sha.slice(0, 12));
   const pdfNames = existsSync(frozenDir) ? readdirSync(frozenDir).filter(name => name.toLowerCase().endsWith(".pdf")) : [];
   const [pdfName] = pdfNames;
@@ -370,7 +358,6 @@ export function verifyJobAttributionAndEvidence(
   }
   const pdfPath = join(frozenDir, pdfName);
 
-  // 5. Verify PDF SHA matches jobs.resume_sha
   let actualSha: string;
   try {
     actualSha = computeFileSha256(pdfPath);
@@ -395,7 +382,6 @@ export function verifyJobAttributionAndEvidence(
     };
   }
 
-  // 6. Extract text with pdftotext
   const extractRes = extractPdfText(pdfPath);
   if (!extractRes.success) {
     return {
@@ -407,7 +393,6 @@ export function verifyJobAttributionAndEvidence(
     };
   }
 
-  // 7. Load candidate notes
   if (!existsSync(notesPath)) {
     return {
       valid: false,
@@ -441,7 +426,6 @@ export function aggregateResumeThemes(reviews: CachedReviewEntry[]): {
   unconfirmedThemes: ThemeBucketSummary[];
   confirmedMismatchThemes: ThemeBucketSummary[];
 } {
-  // Group by status bucket AND theme to never conflate categories across apps
   type BucketKey = "supported" | "unconfirmed" | "confirmed_mismatch";
 
   const bucketMaps: Record<
@@ -498,7 +482,6 @@ export function aggregateResumeThemes(reviews: CachedReviewEntry[]): {
 
       entry.jobCompany.set(review.jobId, review.company);
 
-      // Deduplicate importance per job/theme: keep strongest classification if duplicate
       const currentImp = entry.jobImportance.get(review.jobId);
       if (!currentImp || importanceRank(gap.importance) > importanceRank(currentImp)) {
         entry.jobImportance.set(review.jobId, gap.importance);
@@ -536,13 +519,10 @@ export function aggregateResumeThemes(reviews: CachedReviewEntry[]): {
     }
 
     list.sort((a, b) => {
-      // 1. Distinct applications descending
       const countDiff = b.distinctJobIds.size - a.distinctJobIds.size;
       if (countDiff !== 0) return countDiff;
-      // 2. Required count descending
       const reqDiff = b.requiredCount - a.requiredCount;
       if (reqDiff !== 0) return reqDiff;
-      // 3. Alphabetical
       return a.theme.localeCompare(b.theme);
     });
 
@@ -583,7 +563,6 @@ export function formatResumeJournalEntry(params: {
 }): string {
   const lines: string[] = [];
 
-  // 1. Stable markers for checkpointing & crash idempotency (keyed by full evidence fingerprint)
   lines.push(`<!-- journal-resume-review-entry: timestamp=${params.timestamp} -->`);
   for (const r of params.newReviews) {
     lines.push(`<!-- journal-resume-review: jobId=${r.jobId} fp=${r.fingerprint} sha=${r.resumeSha} -->`);
@@ -594,11 +573,9 @@ export function formatResumeJournalEntry(params: {
   }
   lines.push("");
 
-  // 2. Section Heading
   lines.push(`### [${params.timestamp}] Auto-Apply Resume Review Run (GPT-6 Luna)`);
   lines.push("");
 
-  // 3. Denominator & Scope Summary
   const allDistinctJobIds = new Set(params.allReviews.map(r => r.jobId));
   const allDistinctCompanies = new Set(params.allReviews.map(r => r.company));
 
@@ -616,7 +593,6 @@ export function formatResumeJournalEntry(params: {
   }
   lines.push("");
 
-  // 4. Methodological & Practice-Biased Sample Limitations
   lines.push("#### 2. Methodological & Sampling Limitations");
   lines.push(
     "Observations represent read-only AI evaluations (`openai-codex/gpt-6-luna`) comparing verbatim text extracted from the exact frozen applied resume PDF (`pdftotext -layout`) against stored employer posting text and candidate notes (`profile/resume-notes.md`).",
@@ -636,14 +612,12 @@ export function formatResumeJournalEntry(params: {
   );
   lines.push("");
 
-  // 5. Cumulative Ranked Resume Themes Across Applications (Compact Tables per bucket)
   const { supportedThemes, unconfirmedThemes, confirmedMismatchThemes } = aggregateResumeThemes(params.allReviews);
 
   lines.push("#### 3. Cumulative Ranked Resume Themes (Across Distinct Applications)");
   lines.push("Counts indicate DISTINCT employer applications and companies where the qualification gap was identified:");
   lines.push("");
 
-  // Subsection 3A: Supported Omissions
   lines.push("##### A. Supported-but-Omitted & Underemphasized Experience");
   lines.push(
     "*Experience supported by candidate notes (`profile/resume-notes.md`) or existing resume evidence that was omitted or underemphasized relative to employer requirements (including reframing already-supported resume work without requiring separate notes):*",
@@ -651,19 +625,16 @@ export function formatResumeJournalEntry(params: {
   lines.push("");
   lines.push(...formatBucketTable(supportedThemes));
 
-  // Subsection 3B: Unconfirmed Experience & Questions
   lines.push("##### B. Unconfirmed Experience & Questions for Candidate");
   lines.push("*Employer requirements absent from both tailored resume and candidate notes (not evidenced in supplied material):*");
   lines.push("");
   lines.push(...formatBucketTable(unconfirmedThemes));
 
-  // Subsection 3C: Explicitly Unsupported Requirements / Confirmed Negatives
   lines.push("##### C. Explicitly Unsupported Requirements (Candidate Negative Boundaries)");
   lines.push("*Posting requirements that conflict with candidate negative boundaries in `profile/resume-notes.md`. Must never be claimed on resumes:*");
   lines.push("");
   lines.push(...formatBucketTable(confirmedMismatchThemes));
 
-  // 6. Detailed Per-Application Findings (for newly reviewed applications in this run)
   if (params.newReviews.length > 0) {
     lines.push("#### 4. Detailed Application Gap Findings (Newly Evaluated)");
     for (const r of params.newReviews) {
@@ -691,7 +662,6 @@ export function formatResumeJournalEntry(params: {
     }
   }
 
-  // 7. Evidence-Unavailable Applications
   if (params.allMissingEvidence.length > 0) {
     lines.push("#### 5. Evidence-Unavailable Applications");
     lines.push("*The following auto-approved applications could not be evaluated due to missing or unattributable evidence:*");
@@ -718,7 +688,6 @@ export function updateJournalFile(journalPath: string, entryContent: string): vo
   if (!existing) {
     finalContent = `${JOURNAL_HEADER}\n\n${entryContent}\n`;
   } else {
-    // Preserve existing file bytes without trimming
     const separator = existing.endsWith("\n\n") ? "" : existing.endsWith("\n") ? "\n" : "\n\n";
     finalContent = `${existing}${separator}${entryContent}\n`;
   }
@@ -733,14 +702,10 @@ export async function runResumeJournal(options: CliOptions): Promise<{ changed: 
     throw new Error(`Database file not found at: ${options.dbPath}`);
   }
 
-  // Strict read-only database connection
   const db = openDatabase(options.dbPath, "readonly");
 
   try {
-    // 1. Consistent database transaction snapshot for all DB reads (NO await inside transaction!)
     const dbSnapshot = db.transaction(() => {
-      // Pass empty string "" for journal content so stall checkpoints are NOT recovered
-      // This ensures all retained eligible attempts are enumerated every check
       const act = observeAutoApplyActivity(db, null, "");
 
       if (!act.snapshot || act.snapshot.eligibleJobs.length === 0) {
@@ -752,7 +717,6 @@ export async function runResumeJournal(options: CliOptions): Promise<{ changed: 
         };
       }
 
-      // Deduplicate eligible jobs by jobId
       const uniqueAttemptsMap = new Map<number, AutoApplyJobAttempt>();
       for (const att of act.snapshot.eligibleJobs) {
         if (!uniqueAttemptsMap.has(att.jobId)) {
@@ -762,8 +726,6 @@ export async function runResumeJournal(options: CliOptions): Promise<{ changed: 
       const uniqueAttempts = Array.from(uniqueAttemptsMap.values());
       const jobIds = uniqueAttempts.map(a => a.jobId);
 
-      // Query jobs rows
-      // One bound JSON array stands in for the id list, so no value is ever spliced into the SQL.
       const jobIdList = JSON.stringify(jobIds);
       const jobRows = db
         .query<JobDetailRow, [string]>(
@@ -774,7 +736,6 @@ export async function runResumeJournal(options: CliOptions): Promise<{ changed: 
         .all(jobIdList);
       const jobDetailsMap = new Map<number, JobDetailRow>(jobRows.map(j => [j.id, j]));
 
-      // Query approval events (auto and user approvals) for governing approval determination
       const approvalRows = db
         .query<ApprovalEventRow & { job_id: number }, [string]>(
           `SELECT id, job_id, kind, message, at
@@ -813,13 +774,10 @@ export async function runResumeJournal(options: CliOptions): Promise<{ changed: 
       };
     }
 
-    // 2. Load resume review state (throws if corrupt, never silent reset)
     const state = loadResumeJournalState(options.statePath);
 
-    // 3. Inspect published markers in journal (keyed by full evidence fingerprint & reason hash)
     const { publishedJobFingerprints, publishedMissingKeys } = extractPublishedJournalMarkers(options.journalPath);
 
-    // 4. Collect and validate evidence for each eligible attempt outside of DB transaction
     const validEvidenceList: ValidJobEvidence[] = [];
     const newMissingEvidenceEntries: MissingEvidenceEntry[] = [];
 
@@ -831,7 +789,6 @@ export async function runResumeJournal(options: CliOptions): Promise<{ changed: 
 
       if (res.valid) {
         validEvidenceList.push(res);
-        // Clear stale missing evidence mapping on valid recovery
         const recoveredKey = String(res.jobId);
         if (state.missingEvidence[recoveredKey]) {
           const { [recoveredKey]: _recovered, ...stillMissing } = state.missingEvidence;
@@ -853,31 +810,26 @@ export async function runResumeJournal(options: CliOptions): Promise<{ changed: 
       }
     }
 
-    // 5. Identify unreviewed jobs (not in state.reviews or fingerprint changed)
     const unreviewedEvidence: ValidJobEvidence[] = [];
     const cachedToPublish: CachedReviewEntry[] = [];
 
     for (const ev of validEvidenceList) {
       const cached = state.reviews[String(ev.jobId)];
       if (cached?.fingerprint === ev.fingerprint) {
-        // Cached exists and matches exact evidence fingerprint
         const key = `${cached.jobId}:${cached.fingerprint}`;
         if (!publishedJobFingerprints.has(key)) {
           cachedToPublish.push(cached);
         }
       } else {
-        // Needs review
         unreviewedEvidence.push(ev);
       }
     }
 
-    // Check if any missing evidence needs publication in journal (keyed by jobId:reasonHash)
     const unpublishedMissing = Object.values(state.missingEvidence).filter(m => {
       const reasonHash = createHash("sha256").update(m.reason).digest("hex").slice(0, 12);
       return !publishedMissingKeys.has(`${m.jobId}:${reasonHash}`);
     });
 
-    // If no unreviewed jobs, no unpublished cached reviews, and no unpublished missing evidence: NO-OP!
     if (unreviewedEvidence.length === 0 && cachedToPublish.length === 0 && unpublishedMissing.length === 0) {
       return {
         changed: false,
@@ -886,16 +838,13 @@ export async function runResumeJournal(options: CliOptions): Promise<{ changed: 
       };
     }
 
-    // Bound the unreviewed backlog by maxApps if specified (preserving remainder for subsequent runs)
     let jobsToReview = unreviewedEvidence;
     if (options.maxApps > 0 && jobsToReview.length > options.maxApps) {
       jobsToReview = jobsToReview.slice(0, options.maxApps);
     }
 
-    // Extract known themes for vocabulary consistency across model invocations
     const knownThemes = Array.from(new Set(Object.values(state.reviews).flatMap(r => r.gaps.map(g => normalizeTheme(g.theme)))));
 
-    // 6. If there are unpublished cached reviews or missing evidence but no unreviewed jobs, publish them directly
     if (jobsToReview.length === 0 && (cachedToPublish.length > 0 || unpublishedMissing.length > 0)) {
       const runTimestamp = new Date().toISOString();
       const allReviews = Object.values(state.reviews);
@@ -920,8 +869,6 @@ export async function runResumeJournal(options: CliOptions): Promise<{ changed: 
       };
     }
 
-    // 7. Process unreviewed evidence in small bounded batches (e.g. at most 5 per batch)
-    // Checkpoint/cache + publish after EACH successful batch to preserve progress if service is interrupted
     let totalReviewed = 0;
     const batchSize = Math.max(1, options.batchSize);
 
@@ -951,7 +898,6 @@ export async function runResumeJournal(options: CliOptions): Promise<{ changed: 
         };
       }
 
-      // Map batch outputs back to evidence; throw if any model review output is missing (no fake fallback!)
       const batchTimestamp = new Date().toISOString();
       const batchCachedEntries: CachedReviewEntry[] = [];
 
@@ -977,22 +923,18 @@ export async function runResumeJournal(options: CliOptions): Promise<{ changed: 
         state.reviews[String(ev.jobId)] = cached;
         batchCachedEntries.push(cached);
 
-        // Add newly found themes to knownThemes for subsequent batches
         for (const g of gaps) {
           const nt = normalizeTheme(g.theme);
           if (!knownThemes.includes(nt)) knownThemes.push(nt);
         }
       }
 
-      // Checkpoint state immediately
       state.lastRunAt = batchTimestamp;
       saveResumeJournalState(options.statePath, state);
 
-      // Append journal section for this successful batch
       const allReviews = Object.values(state.reviews);
       const allMissing = Object.values(state.missingEvidence);
 
-      // In the first batch, also include any previously unpublished cached entries or missing evidence
       const publishReviews = i === 0 ? [...cachedToPublish, ...batchCachedEntries] : batchCachedEntries;
       const publishMissing = i === 0 ? unpublishedMissing : [];
 
@@ -1024,7 +966,6 @@ export async function runResumeJournal(options: CliOptions): Promise<{ changed: 
   }
 }
 
-// Standalone CLI execution
 if (import.meta.main) {
   try {
     const opts = parseCliArgs(process.argv);

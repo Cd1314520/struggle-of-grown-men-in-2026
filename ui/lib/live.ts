@@ -1,5 +1,3 @@
-// The server says when anything changed over /api/stream; every query on screen is then refetched.
-// The stream doubles as the connection check: while it is down, the page says so.
 import { useEffect, useSyncExternalStore } from "react";
 import { refreshAll } from "./api";
 
@@ -24,7 +22,6 @@ export function useLiveUpdates() {
     const stream = new EventSource("/api/stream");
     let timer: ReturnType<typeof setTimeout> | undefined;
     stream.onmessage = () => {
-      // Bursts of changes (a worker's steps) refetch once.
       clearTimeout(timer);
       timer = setTimeout(() => void refreshAll(), 250);
     };

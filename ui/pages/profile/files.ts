@@ -1,8 +1,5 @@
-// What each profile file is for, and the drafts being edited. Drafts live outside the page so leaving it
-// by a key or Back keeps the words; a link click asks first (see ProfilePage).
 import { queryClient } from "../../lib/api";
 
-// In one line: who reads it and what it changes.
 export const PROFILE_DESC: Record<string, string> = {
   "targets.md": "The roles, places and pay you want. Triage and assessment read it to decide what is worth applying to.",
   "rubric.yml": "How a posting is scored: the checks and the points each is worth.",
@@ -14,7 +11,6 @@ export const PROFILE_DESC: Record<string, string> = {
   "employers.yml": "Employers you have settled by hand: the ones you most want, and the ones that are fine to practise on.",
   "referral.yml": "The true facts referral messages are drafted from, and how the daily list of who to contact is chosen. Only the Referrals page reads it.",
 };
-// The same, in a few words, for the list of files.
 export const PROFILE_GIST: Record<string, string> = {
   "targets.md": "Roles, places and pay you want",
   "rubric.yml": "How postings are scored",
@@ -26,9 +22,8 @@ export const PROFILE_GIST: Record<string, string> = {
   "employers.yml": "Employers settled by hand",
   "referral.yml": "Facts for referral messages",
 };
-export const PLACEHOLDER = "TODO-FILL"; // as src/profile.ts: the shipped templates carry it until filled in
+export const PLACEHOLDER = "TODO-FILL";
 
-// profileProblems names the resume "resume"; its file is the Typst one.
 export const needsFilling = (problems: readonly string[], file: string) => problems.some(p => p === file || (p === "resume" && file.endsWith(".typ")));
 
 const drafts = new Map<string, string>();
@@ -52,11 +47,9 @@ export const draftStore = {
       listeners.delete(cb);
     };
   },
-  // A draft that differs from the file as last loaded.
   unsaved: (file?: string) => [...drafts].some(([f, text]) => (file === undefined || f === file) && text !== queryClient.getQueryData<string>(["profile", f])),
 };
 
-// Leaving the tab with unsaved words asks first.
 addEventListener("beforeunload", ev => {
   if (draftStore.unsaved()) ev.preventDefault();
 });

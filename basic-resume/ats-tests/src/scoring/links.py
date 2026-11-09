@@ -13,7 +13,6 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
     url_hits = 0
     text_hits = 0
 
-    # Only meaningful for backends that surface link annotations.
     backend_has_links = bool(ext.links)
 
     for spec in expected:
@@ -37,9 +36,6 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
     if backend_has_links:
         s = (url_hits + text_hits) / (2 * n)
     else:
-        # Backend can't surface link annotations at all — skip scoring rather
-        # than inflate via visible-text-only. The orchestrator's "best across
-        # backends" should pick a link-capable backend's score instead.
         s = None
 
     return DimensionResult(

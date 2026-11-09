@@ -17,7 +17,6 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
         else:
             findings.append(f"verbatim token missing: {t!r}")
 
-    # Skills are also checked here — flat list of all skill strings.
     skill_tokens: list[str] = []
     for cat, items in truth.get("skills", {}).items():
         for item in items:

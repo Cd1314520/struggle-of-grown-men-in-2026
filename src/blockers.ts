@@ -1,14 +1,8 @@
-// Why an application stopped short of being sent. Every stop a person has to look at (a manual hand-off,
-// a failure, a worker that ended without saying) adds one row with its cause and the worker's own account.
-// Rows are kept after the gate closes or the job is cleared, so the stops can be looked at again later,
-// for instance to retry the ones a site outage caused.
 import { db, type Job } from "./db";
 
 export const BLOCKER_CAUSES = ["site_down", "login", "captcha", "email_code", "no_form", "needs_you", "browser", "no_response", "unknown", "other"] as const;
 export type BlockerCause = (typeof BLOCKER_CAUSES)[number];
 
-// What a fill worker may give as the cause, and how each is told apart. `unknown` is the host's own: a
-// worker that ended without reporting.
 export const WORKER_CAUSES = BLOCKER_CAUSES.filter(c => c !== "unknown");
 export const CAUSE_GUIDE =
   "site_down: the employer's site or ATS is down or erroring (maintenance page, outage, HTTP 4xx/5xx, 'Something went wrong'). " +
@@ -36,7 +30,6 @@ export function recordBlocker(jobId: number, cause: BlockerCause, detail: string
 
 export const jobBlockers = (jobId: number) => db.query<Blocker, [number]>("SELECT * FROM blockers WHERE job_id = ? ORDER BY id").all(jobId);
 
-// Every stop, newest first, with the job it belongs to as it stands now.
 export const listBlockers = () =>
   db
     .query<ListedBlocker, []>("SELECT b.*, j.company, j.title, j.url, j.status FROM blockers b JOIN jobs j ON j.id = b.job_id ORDER BY b.at DESC, b.id DESC")

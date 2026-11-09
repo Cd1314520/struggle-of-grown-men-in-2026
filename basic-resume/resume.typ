@@ -19,14 +19,8 @@
   body,
 ) = {
 
-  // Sets document metadata
   set document(author: author, title: author)
 
-  // Document-wide formatting, including font and margins
-  // Plain text for ATS parsers: no ligatures, no hyphenation and no kerning. Position-based
-  // extractors (pypdf, several ATS importers) read a kerned pair as a word break ("Da vid",
-  // "T ypeScript") and a hyphenated line break as two words ("autho- rization"), so keywords
-  // stop matching. A font with modest kerning (Liberation Sans) keeps the page compact without it.
   set text(
     font: font,
     size: font-size,
@@ -36,27 +30,21 @@
     kerning: false,
   )
 
-  // Disable smart quotes so apostrophes stay as ASCII U+0027 — ATS keyword
-  // matching on "OpenAI's" etc. fails when Typst rewrites ' to U+2019.
   set smartquote(enabled: false)
 
-  // Reccomended to have 0.5in margin on all sides
   set page(
     margin: margin,
     paper: paper,
   )
 
-  // Link styles
   show link: underline
 
 
-  // Small caps for section titles
   show heading.where(level: 2): it => [
     #pad(top: 0pt, bottom: -10pt, [#smallcaps(it.body)])
     #line(length: 100%, stroke: 1pt)
   ]
 
-  // Accent Color Styling
   show heading: set text(
     fill: rgb(accent-color),
   )
@@ -65,7 +53,6 @@
     fill: rgb(accent-color),
   )
 
-  // Name will be aligned left, bold and big
   show heading.where(level: 1): it => [
     #set align(author-position)
     #set text(
@@ -75,10 +62,8 @@
     #pad(it.body)
   ]
 
-  // Level 1 Heading
   [= #(author)]
 
-  // Personal Info Helper
   let contact-item(value, prefix: "", link-type: "") = {
     if value != "" {
       if link-type != "" {
@@ -89,7 +74,6 @@
     }
   }
 
-  // Personal Info
   pad(
     top: 0.25em,
     align(personal-info-position)[
@@ -103,20 +87,17 @@
           contact-item(linkedin, link-type: "https://"),
           contact-item(personal-site, link-type: "https://"),
         )
-        // Slightly smaller and tighter so five contact items fit on one line
         set text(size: 0.9em)
         items.filter(x => x != none).join(" | ")
       }
     ],
   )
 
-  // Main body. Ragged right: justified text needs hyphenation to look even, and hyphenation is off.
   set par(justify: false)
 
   body
 }
 
-// Generic two by two component for resume
 #let generic-two-by-two(
   top-left: "",
   top-right: "",
@@ -129,7 +110,6 @@
   ]
 }
 
-// Generic one by two component for resume
 #let generic-one-by-two(
   left: "",
   right: "",
@@ -139,8 +119,6 @@
   ]
 }
 
-// An en dash between the dates: date-range parsers in ATS importers expect "-" or "–", and the
-// --- ligature is unavailable anyway because ligatures are disabled.
 #let dates-helper(
   start-date: "",
   end-date: "",
@@ -152,18 +130,15 @@
   }
 }
 
-// Section components below
 #let edu(
   institution: "",
   dates: "",
   degree: "",
   gpa: "",
   location: "",
-  // Makes dates on upper right like rest of components
   consistent: false,
 ) = {
   if consistent {
-    // edu-constant style (dates top-right, location bottom-right)
     generic-two-by-two(
       top-left: strong(institution),
       top-right: dates,
@@ -171,7 +146,6 @@
       bottom-right: emph(location),
     )
   } else {
-    // original edu style (location top-right, dates bottom-right)
     generic-two-by-two(
       top-left: strong(institution),
       top-right: location,

@@ -1,4 +1,3 @@
-// companies.yml, read: the boards each scan reads, as a list to search rather than 5,000 lines of YAML.
 import { useMemo, useState } from "react";
 import { parse } from "yaml";
 import { NoMatch } from "../../components/list";
@@ -14,7 +13,6 @@ export interface Board {
 
 const PAGE = 100;
 
-// The boards in the file, or null when it isn't the shape the scanner reads (it then shows as YAML).
 export function boardsOf(text: string): Board[] | null {
   try {
     const companies = (parse(text) as { companies?: unknown } | null)?.companies;
@@ -25,7 +23,6 @@ export function boardsOf(text: string): Board[] | null {
   }
 }
 
-// The search, the rows and the paging of the list, for the file's panel to place.
 export function useBoards(boards: readonly Board[]) {
   const [q, setQ] = useState("");
   const [offset, setOffset] = useState(0);

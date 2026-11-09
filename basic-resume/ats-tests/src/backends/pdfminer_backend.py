@@ -13,8 +13,6 @@ class PdfMinerBackend:
         except Exception as e:
             return RawExtraction(self.name, error=f"import failed: {e}")
 
-        # LAParams tuned for resume-style single-column layout.
-        # char_margin lower than default so adjacent tokens don't get glued.
         laparams = LAParams(
             char_margin=1.5,
             line_margin=0.4,
@@ -32,5 +30,5 @@ class PdfMinerBackend:
             backend_name=self.name,
             text=text,
             layout_lines=lines,
-            links=[],  # pypdf backend owns link extraction
+            links=[],
         )

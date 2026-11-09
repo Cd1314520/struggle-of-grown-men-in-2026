@@ -1,5 +1,3 @@
-// Applications: everything sent, as a CRM. Whose move it is on each, what came back, and the
-// numbers that say how the search is going.
 import { Inbox } from "lucide-react";
 import { Fragment, useRef } from "react";
 import type { Summary } from "../../../src/api-types";
@@ -42,9 +40,6 @@ const EMPTY: Record<string, readonly [title: string, description: string]> = {
   closed: ["Nothing closed", "Declined and withdrawn applications move here."],
 };
 
-// The search in five numbers, in a strip under the bar on a desktop (Overview has them for a phone). Reply
-// rate counts any reply, a no included: it says whether applications are being read. `counts` is undefined
-// while loading.
 function Kpis({ counts }: { counts: Summary["counts"] | undefined }) {
   const n = (s: string) => counts?.[s] ?? 0,
     show = (v: number) => (counts ? v.toLocaleString() : "–");
@@ -71,8 +66,6 @@ export function ApplicationsPage() {
   const lp = useListParams();
   const { data: summary } = useSummary();
   const search = useRef<HTMLInputElement>(null);
-  // Recording an outcome moves the application to Closed, often on a later page; it stays open so the
-  // owner sees what they just did rather than the next application.
   const record = useOpenRecord({ base: "applications", view: "applications", lp, search, advance: false });
   const { data, rows, openId } = record;
   const wide = useMedia(WIDE);
@@ -86,7 +79,6 @@ export function ApplicationsPage() {
       .map(g => ({ value: g.key, label: g.label, count: g.count, tone: g.key === "your_move" ? ("warning" as const) : undefined })),
   ];
   const segment = lp.group ?? "all";
-  // With every segment shown in its natural order, each group gets a label where it starts.
   const headed = !lp.group && !lp.sort;
   const labelOf = new Map(groups.map(g => [g.key, g]));
   const empty = EMPTY[segment];
@@ -165,7 +157,6 @@ export function ApplicationsPage() {
                 lead={<CompanyMark name={r.company} />}
                 title={unent(r.title)}
                 secondary={unent(r.company)}
-                // What matters on each: the step that is owed; with none, when it went (Closed) or where it is.
                 gist={
                   r.next ? (
                     <NextLabel next={r.next} company={r.company} />
@@ -175,7 +166,6 @@ export function ApplicationsPage() {
                     r.location && <span title={r.location}>{place(r.location)}</span>
                   )
                 }
-                // Whose move and since when, or how it ended, or how long it has been out.
                 fact={r.next ? <NextPhrase next={r.next} short /> : closed ? <JobStatus status={r.status} /> : <Time at={sent} short prefix="Sent " />}
               />
             </Fragment>

@@ -1,5 +1,3 @@
-// A job list's state in the URL: which group, sort, quick filters, search and page. Search is typed
-// into local state and written to the URL a moment later, so typing stays instant.
 import { useEffect, useState } from "react";
 import { setParams, useRoute } from "./router";
 
@@ -9,7 +7,6 @@ export function useListParams() {
   const { params } = useRoute();
   const q = params.get("q") ?? "";
   const [draft, setDraft] = useState(q);
-  // The URL changed under the box (Back, a link): show what it says now.
   const [seen, setSeen] = useState(q);
   if (seen !== q) {
     setSeen(q);
@@ -44,7 +41,6 @@ export function useListParams() {
       const now = params.getAll("filter");
       setParams({ filter: now.includes(key) ? now.filter(f => f !== key) : [...now, key], page: null });
     },
-    // Back to the whole list: no search, filter or group.
     clear: () => {
       setDraft("");
       setParams({ q: null, filter: null, group: null, page: null });

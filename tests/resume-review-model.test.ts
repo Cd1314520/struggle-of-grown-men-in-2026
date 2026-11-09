@@ -173,7 +173,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
             status: "supported_omission",
             postingQuote: "PostgreSQL schema design and query optimization",
             resumeEvidence: null,
-            // Quote exists in Job 102 notes, but NOT in Job 101 notes
             notesEvidence: "Managed Kubernetes production clusters with 50+ nodes and Helm charts",
             rationale: "Accidentally cross-pollinated notes quote across different jobs",
             suggestion: "Suggest something",
@@ -209,7 +208,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
             theme: "Kubernetes",
             importance: "required",
             status: "supported_omission",
-            // Single spaces instead of newline and indentation
             postingQuote: "Required: - 3+ years experience with Kubernetes - Cloud infrastructure",
             resumeEvidence: null,
             notesEvidence: "Led 3-year Kubernetes migration.",
@@ -256,7 +254,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     const result = validateResumeReviews(validMismatchReview, [postingWithCpp]);
     expect(result[0]?.gaps[0]?.status).toBe("confirmed_mismatch");
 
-    // Negative invariant: confirmed_mismatch with resume evidence must throw
     const invalidMismatchWithResumeEvidence = [
       {
         jobId: 301,
@@ -277,7 +274,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
 
     expect(() => validateResumeReviews(invalidMismatchWithResumeEvidence, [postingWithCpp])).toThrow("confirmed_mismatch requires null resumeEvidence");
 
-    // Negative invariant: confirmed_mismatch with null notesEvidence must throw
     const invalidMismatchWithNullNotes = [
       {
         jobId: 301,
@@ -300,7 +296,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
   });
 
   it("enforces status-evidence invariants strictly across all statuses", () => {
-    // supported_omission cannot have resumeEvidence
     const badSupportedOmission = [
       {
         jobId: 101,
@@ -320,7 +315,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     ];
     expect(() => validateResumeReviews(badSupportedOmission, [sampleJob101])).toThrow("supported_omission requires null resumeEvidence");
 
-    // underemphasized requires non-null resumeEvidence
     const badUnderemphasized = [
       {
         jobId: 101,
@@ -339,7 +333,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
       },
     ];
     expect(() => validateResumeReviews(badUnderemphasized, [sampleJob101])).toThrow("underemphasized requires resumeEvidence");
-    // underemphasized allows notesEvidence to be null when grounded solely in existing resume bullet
     const validUnderemphasizedWithoutNotes = [
       {
         jobId: 101,
@@ -359,7 +352,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     ];
     expect(() => validateResumeReviews(validUnderemphasizedWithoutNotes, [sampleJob101])).not.toThrow();
 
-    // unconfirmed cannot have notesEvidence or resumeEvidence
     const badUnconfirmed = [
       {
         jobId: 101,
@@ -381,7 +373,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
   });
 
   it("rejects coverage violations (missing job, unknown job, duplicate job)", () => {
-    // Missing job 102
     const missingJob = [
       {
         jobId: 101,
@@ -390,7 +381,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     ];
     expect(() => validateResumeReviews(missingJob, [sampleJob101, sampleJob102])).toThrow("Review missing for jobId 102");
 
-    // Unknown job 999
     const unknownJob = [
       { jobId: 101, gaps: [] },
       { jobId: 102, gaps: [] },
@@ -398,7 +388,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     ];
     expect(() => validateResumeReviews(unknownJob, [sampleJob101, sampleJob102])).toThrow("Unexpected jobId 999 not found in review inputs");
 
-    // Duplicate job 101
     const duplicateJob = [
       { jobId: 101, gaps: [] },
       { jobId: 101, gaps: [] },
@@ -407,7 +396,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
   });
 
   it("rejects invalid importance and status enums, and bounds findings to 6 gaps", () => {
-    // Invalid importance
     const invalidImportance = [
       {
         jobId: 101,
@@ -427,7 +415,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     ];
     expect(() => validateResumeReviews(invalidImportance, [sampleJob101])).toThrow('invalid importance "critical"');
 
-    // Invalid status
     const invalidStatus = [
       {
         jobId: 101,
@@ -447,7 +434,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     ];
     expect(() => validateResumeReviews(invalidStatus, [sampleJob101])).toThrow('invalid status "missing_skill"');
 
-    // Object prototype keys as importance enum
     const protoImportance = [
       {
         jobId: 101,
@@ -467,7 +453,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     ];
     expect(() => validateResumeReviews(protoImportance, [sampleJob101])).toThrow('invalid importance "toString"');
 
-    // Object prototype keys as status enum
     const protoStatus = [
       {
         jobId: 101,
@@ -487,7 +472,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     ];
     expect(() => validateResumeReviews(protoStatus, [sampleJob101])).toThrow('invalid status "constructor"');
 
-    // More than 6 gaps
     const sevenGaps = [
       {
         jobId: 101,
@@ -591,7 +575,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
   });
 
   it("detects and rejects model substitution and silent fallback", () => {
-    // model_change event with fallback flag
     const fallbackEvent = [
       JSON.stringify({
         type: "model_change",
@@ -602,7 +585,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
 
     expect(() => extractAssistantResponseText(fallbackEvent)).toThrow("Model fallback detected");
 
-    // model substitution to another model
     const substitutedModelEvent = [
       JSON.stringify({
         type: "message_end",
@@ -620,7 +602,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
   });
 
   it("rejects invalid earlier event even if a later valid assistant event exists", () => {
-    // Earlier model_change was fallback, followed by valid assistant message
     const earlyFallbackThenValid = [
       JSON.stringify({
         type: "model_change",
@@ -641,7 +622,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
 
     expect(() => extractAssistantResponseText(earlyFallbackThenValid)).toThrow("Model fallback detected");
 
-    // Earlier assistant event was truncated with length, followed by valid message
     const earlyLengthThenValid = [
       JSON.stringify({
         type: "message_end",
@@ -667,7 +647,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
 
     expect(() => extractAssistantResponseText(earlyLengthThenValid)).toThrow("Assistant stopped with incomplete stopReason: length");
 
-    // Earlier assistant event had provider mismatch, followed by valid message
     const earlyProviderMismatchThenValid = [
       JSON.stringify({
         type: "message_end",
@@ -703,7 +682,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     expect(excerpts[0]?.id).toBe("P1");
     expect(excerpts[0]?.text).toBe("First short line.");
 
-    // Every excerpt must be an exact substring matching its recorded slice
     for (const excerpt of excerpts) {
       expect(sampleText.slice(excerpt.startIndex, excerpt.endIndex)).toBe(excerpt.text);
       expect(sampleText.includes(excerpt.text)).toBe(true);
@@ -765,7 +743,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
     expect(resolved[0]?.gaps[1]?.resumeEvidence).toBeTruthy();
     expect(resolved[0]?.gaps[1]?.notesEvidence).toBeNull();
 
-    // Resolved reviews pass authoritative validateResumeReviews provenance checks
     const validated = validateResumeReviews(resolved, [sampleJob101, sampleJob102]);
     expect(validated.length).toBe(2);
   });
@@ -805,7 +782,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
             status: "supported_omission",
             postingEvidenceId: "P1",
             resumeEvidenceId: null,
-            // R1 is a resume excerpt ID, not a notes ID
             notesEvidenceId: "R1",
             rationale: "Cross-source ID test",
             suggestion: "Suggest",
@@ -819,7 +795,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
 
   it("resolves contiguous multi-ID excerpts by preserving exact source slice", () => {
     const excerptMaps = buildJobExcerptMaps([sampleJob101]);
-    // P1 and P2 are adjacent in sampleJob101 postingText
     const multiIdWireOutput = [
       {
         jobId: 101,
@@ -840,7 +815,6 @@ describe("Resume Review Model - Behavioral Validation and Invariant Tests", () =
 
     const resolved = resolveModelWireReviews(multiIdWireOutput, excerptMaps);
     expect(resolved[0]?.gaps[0]?.postingQuote).toBeTruthy();
-    // Validates against sampleJob101 postingText
     expect(() => validateResumeReviews(resolved, [sampleJob101])).not.toThrow();
   });
 });

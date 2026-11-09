@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { answerProblem } from "../src/recheck";
 
-// Each scenario imports the production modules in a fresh process with throwaway state and profile.
 const src = (name: string) => JSON.stringify(join(import.meta.dir, `../src/${name}.ts`));
 const prelude = `
 import assert from "node:assert/strict";
@@ -16,7 +15,6 @@ function job(id, company) {
   db.query("INSERT INTO jobs (id,url,source,company,title,status,resume_sha,resume_frozen_at) VALUES (?,?,?,?,?,'filling','frozen-sha','2026-10-10T00:00:00Z')").run(id, "https://ats.example/jobs/" + id, "test", company, "Engineer");
 }
 const ask = (text, options) => ({ kind: "question", text, context: "Required field", options });
-// A worker that makes the given tool calls in order, recording each reply.
 function worker(calls, replies, prompts = []) {
   return opts => {
     prompts.push(opts.prompt);
@@ -69,7 +67,6 @@ describe("recheck", () => {
       ["answer_question", { number: 3, answer: "No", basis: "Are you Hispanic or Latino?" }],
       ["recheck_done", { summary: "answered 2, left SSN" }],
     ], replies, prompts));
-    // listQuestionGroups puts the most recently opened posting first.
     assert.ok(prompts[0].includes("1. Gamma") && prompts[0].includes("3. Acme"));
     assert.ok(prompts[0].includes("Hispanic or Latino?\\nNo."));
     // A free-text answer it writes goes through the humanizer rules first.
@@ -88,11 +85,11 @@ describe("recheck", () => {
     job(1, "Acme");
     parkGate(1, ask("Title", ["Mr.", "Ms."]), null);
     const settled = () => kvSet("recheck.seenAt", "2000-01-01T00:00:00Z");
-    assert.equal(recheckDue(), false); // first sight of this profile
+    assert.equal(recheckDue(), false);
     settled();
     assert.equal(recheckDue(), true);
     await recheckOpenQuestions(worker([], []));
-    assert.equal(recheckDue(), false); // tried within the hour, not finished
+    assert.equal(recheckDue(), false);
     kvSet("recheck.triedAt", "2000-01-01T00:00:00Z");
     assert.equal(recheckDue(), true);
     await recheckOpenQuestions(worker([["recheck_done", { summary: "left it" }]], []));

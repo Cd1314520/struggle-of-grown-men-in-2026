@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
-// Module-loading boundary under test: static imports would initialize the production DB before
-// this isolation guard. Dynamic imports are required so direct accidental execution fails safely.
 const directory = process.env["AUTO_APPLY_DATA"];
 assert.ok(directory && basename(directory).startsWith("auto-apply-digest-test-"));
 assert.equal(process.env["AUTO_APPLY_PROFILE"], join(directory, "profile"));
@@ -57,7 +55,6 @@ function pauseNextProfile() {
   return { waiting, release };
 }
 
-// This transport is intentionally closed: an unexpected URL fails, never falls back to fetch.
 function must<T>(value: T | null | undefined, what: string): T {
   if (value == null) throw new Error(`missing ${what}`);
   return value;
@@ -102,7 +99,6 @@ globalThis.fetch = Object.assign(
       const message: SentMessage = {
         id: `gmail-${sent.length + 1}`,
         owner: requestMailbox,
-        // Provider replaces the RFC identity but preserves our custom header and body.
         messageId: `<CANEwGNQfixture${sent.length + 1}=accepted@mail.gmail.com>`,
         deliveryReference: headers["x-auto-apply-delivery-id"] ?? null,
         from: headers["from"],
@@ -114,7 +110,6 @@ globalThis.fetch = Object.assign(
       sent.push(message);
       if (process.argv[2] === "restart-before") {
         writeFileSync(sentFile, JSON.stringify(message));
-        // Simulate process death after Gmail acceptance, before any result or ledger update.
         process.exit(0);
       }
       if (outcome === "ambiguous") throw new TypeError("Connection closed after acceptance");
@@ -318,7 +313,6 @@ switch (process.argv[2]) {
   case "restart-before": {
     gate("Are you authorized to work?");
     await sendQuestionDigest({ force: true, now });
-    // Explicit throw (not assert.fail) so control flow visibly never reaches the next case.
     throw new assert.AssertionError({ message: "Restart transport must terminate before recording success", operator: "fail" });
   }
   case "restart-after": {
@@ -361,7 +355,6 @@ switch (process.argv[2]) {
     const sendPause = pauseNextProfile();
     const sending = sendQuestionDigest({ force: true, now });
     await sendPause.waiting;
-    // Match exchangeCode's transient state: B token cached while A's address remains recorded.
     kvSet("gmail.access", JSON.stringify({ token: tokenB, exp: Date.parse("2100-01-01T00:00:00Z") }));
     sendPause.release();
     assert.equal((await sending).sent, true);
@@ -438,7 +431,6 @@ switch (process.argv[2]) {
       );
       return { id, status: "submitted" as const };
     };
-    // Due within two days: in the daily mail once; later, or with no deadline: not yet.
     addStep(sentJob("Backend Engineer"), { kind: "assessment", title: "Codility OA", due_at: "2026-10-11", source: "mail" });
     addStep(sentJob("Data Engineer"), { kind: "questionnaire", title: "Later form", due_at: "2026-10-20", source: "mail" });
     addStep(sentJob("SRE"), { kind: "schedule", title: "Book a call", source: "mail" });
@@ -452,7 +444,6 @@ switch (process.argv[2]) {
     assert.ok(text.includes("Acme — Backend Engineer: https://auto-apply.example.com/#applied/1"));
     assert.equal(text.includes("Later form"), false);
     assert.equal(text.includes("Questions inbox"), false);
-    // Already mentioned; the later one comes due two days before its deadline.
     assert.equal((await sendQuestionDigest({ force: true, now })).reason, "no_new_groups");
     gate("Are you authorized to work?");
     const next = await sendQuestionDigest({ force: true, now: new Date("2026-10-19T14:00:00Z") });

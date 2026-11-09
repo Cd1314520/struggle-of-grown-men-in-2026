@@ -1,12 +1,8 @@
-// The controls over a job list: quick filters folded into one menu, and the view's groups as segments.
 import { Check, ListFilter, SearchX } from "lucide-react";
 import type { ListGroup } from "../../../src/api-types";
 import { Button, EmptyState, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Segments } from "../ui";
 import { cn } from "../../lib/cn";
 
-// One button rather than a row of chips. It names the filter when one is on, so what narrows the list
-// stays in sight without a second row. In a Workspace bar narrower than 80rem it keeps only
-// its icon, with an accent dot while a filter is on; the name stays for screen readers.
 export function FilterMenu({
   filters,
   active,
@@ -52,7 +48,6 @@ export function FilterMenu({
               icon={<Check className={cn(checked ? "text-accent-text opacity-100" : "opacity-0")} />}
               shortcut={f.count.toLocaleString()}
               onSelect={e => {
-                // Several can be on at once: keep the menu open.
                 e.preventDefault();
                 onToggle(f.key);
               }}
@@ -72,7 +67,6 @@ export function FilterMenu({
   );
 }
 
-// The view's groups with their counts, after "All". A group with nothing in it is left out unless chosen.
 export function GroupSegments({
   groups,
   value,
@@ -104,7 +98,6 @@ export function GroupSegments({
   );
 }
 
-// A search or filter that leaves nothing: says which one narrowed the list away, and undoes exactly that.
 export function NoMatch({ noun, q, filtered, onClear }: { noun: string; q: string; filtered: boolean; onClear: () => void }) {
   const q1 = q.trim();
   return (

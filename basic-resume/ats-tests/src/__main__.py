@@ -6,8 +6,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Windows consoles are cp1252 by default; the report uses em-dashes and
-# tick/cross marks. Reconfigure stdio to UTF-8 so Rich doesn't crash.
 for stream in (sys.stdout, sys.stderr):
     try:
         stream.reconfigure(encoding="utf-8")
@@ -54,8 +52,6 @@ def _compile_typst(repo_root: Path) -> None:
     src = repo_root / "main.typ"
     out = repo_root / "main.pdf"
     if typst is None:
-        # Don't silently test a stale PDF. If the source is newer than the
-        # compiled PDF and we can't recompile, that's a hard error.
         if src.exists() and out.exists() and src.stat().st_mtime > out.stat().st_mtime:
             print(
                 f"typst not on PATH and main.pdf is stale (older than main.typ). "
@@ -132,14 +128,7 @@ def _run(pdf_path: Path, truth_path: Path, thresholds_path: Path,
                 )
         per_backend[backend.name] = results
 
-    # Synthetic "merged" backend: links specifically benefit from combining
-    # one backend's clean text with another's link annotations (the PDF's
-    # annotation set is intrinsic to the file). Only the links dim runs
-    # here, so other rows show n/a for this backend.
     if len(extractions) >= 2:
-        # Pick the text from whichever backend best preserves verbatim
-        # tokens (copyable score) — pypdf often emits LONGER but garbled
-        # text ("Da vid Y ang"), so naive max(len) picks the wrong one.
         def _text_quality(e: RawExtraction) -> float:
             r = per_backend.get(e.backend_name, {}).get("copyable")
             return r.score if r else 0.0
@@ -168,9 +157,6 @@ def _run(pdf_path: Path, truth_path: Path, thresholds_path: Path,
                 )
             }
 
-    # Best score per dimension across backends. A scorer can opt out of
-    # contributing to "best" by setting details["skip_for_best"] = True
-    # (e.g. links scorer when the backend can't surface link annotations).
     best: dict[str, float] = {}
     for dim in DIMS:
         scores: list[float] = []
@@ -181,8 +167,6 @@ def _run(pdf_path: Path, truth_path: Path, thresholds_path: Path,
             if isinstance(r.details, dict) and r.details.get("skip_for_best"):
                 continue
             scores.append(r.score)
-        # Fall back to the union if every backend opted out — otherwise a
-        # dimension nobody can score would silently disappear.
         if not scores:
             scores = [
                 per_backend[b][dim].score

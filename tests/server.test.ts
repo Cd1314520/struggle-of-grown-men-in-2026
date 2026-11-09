@@ -4,8 +4,6 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-// The handler is driven in a fresh process with throwaway state, as the parking scenarios are:
-// importing the server opens the database and reads the configuration.
 async function runScenario(scenario: string, env: Record<string, string> = {}) {
   const root = mkdtempSync(join(tmpdir(), "auto-apply-server-"));
   const data = join(root, "data"),

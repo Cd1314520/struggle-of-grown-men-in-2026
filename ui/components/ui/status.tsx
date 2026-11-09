@@ -11,7 +11,6 @@ const DOT: Record<Tone, string> = {
   info: "bg-info",
 };
 
-// A coloured dot and a word: how a state shows in rows and headers. Quieter than a badge.
 export function StatusDot({ tone, pulse, className }: { tone: Tone; pulse?: boolean | undefined; className?: string }) {
   return (
     <span className={cn("relative inline-flex size-2 shrink-0", className)} aria-hidden>

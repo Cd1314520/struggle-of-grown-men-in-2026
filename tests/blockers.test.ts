@@ -3,7 +3,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Each scenario imports the production modules in a fresh process with throwaway state.
 const prelude = `
 import assert from "node:assert/strict";
 import { db } from ${JSON.stringify(join(import.meta.dir, "../src/db.ts"))};

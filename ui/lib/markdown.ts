@@ -1,4 +1,3 @@
-// Markdown, as far as the profile files use it: headings, nested lists, quotes, code, rules, bold, italic, links.
 import { esc } from "./format";
 
 const inline = (s: string) =>
@@ -17,7 +16,7 @@ const inline = (s: string) =>
 export function md(text: string) {
   let out = "",
     para: string[] = [];
-  const lists: { indent: number; tag: "ul" | "ol" }[] = []; // the open lists, outermost first
+  const lists: { indent: number; tag: "ul" | "ol" }[] = [];
   const flush = () => {
     if (para.length) out += `<p>${para.map(inline).join("<br>")}</p>`;
     para = [];

@@ -3,8 +3,6 @@ import { Collapsible } from "radix-ui";
 import { useState, type ReactNode } from "react";
 import { cn } from "../../lib/cn";
 
-// Detail most people need only once ("How this works"), folded under a quiet one-line trigger.
-// `id` keeps the open state across remounts for this visit.
 const opened = new Set<string>();
 export function Disclosure({ id, summary, children, className }: { id?: string; summary: ReactNode; children: ReactNode; className?: string }) {
   const [open, setOpen] = useState(() => (id ? opened.has(id) : false));

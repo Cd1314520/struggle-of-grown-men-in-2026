@@ -33,7 +33,6 @@ def _score_entry(entry: dict, text: str, key_for_anchor: str) -> tuple[float, li
                 f"entry {anchor!r}: {field}={val!r} not in surrounding text"
             )
 
-    # Dates
     for field in ("start_date", "end_date", "date"):
         val = entry.get(field)
         if not val:

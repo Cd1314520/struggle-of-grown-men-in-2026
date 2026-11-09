@@ -44,11 +44,8 @@ export interface ApplicationResumeReview {
 
 export const REVIEW_MODEL = "openai-codex/gpt-6-luna";
 
-export const DEFAULT_TIMEOUT_MS = 240_000; // 4 minutes
+export const DEFAULT_TIMEOUT_MS = 240_000;
 
-/**
- * Normalizes all whitespace runs (tabs, newlines, multiple spaces) into a single space and trims.
- */
 export function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -70,10 +67,6 @@ export interface JobExcerptMaps {
   notes: Map<string, SourceExcerpt>;
 }
 
-/**
- * Segments source text into stable numbered excerpts without dropping characters.
- * Each excerpt is guaranteed to be an exact substring of the original text.
- */
 export function segmentText(text: string, prefix: "P" | "R" | "N"): SourceExcerpt[] {
   const excerpts: SourceExcerpt[] = [];
   const lines = text.split(/\r?\n/);
@@ -99,7 +92,6 @@ export function segmentText(text: string, prefix: "P" | "R" | "N"): SourceExcerp
       continue;
     }
 
-    // Split longer lines into sentences
     const sentenceMatches = line.match(/[^.!?\n]+[.!?]+(?:\s+|$)|[^.!?\n]+$/g);
     if (sentenceMatches && sentenceMatches.length > 1) {
       let sentenceSearchPos = lineStart;
@@ -178,10 +170,6 @@ export function formatExcerptsForPrompt(segments: SourceExcerpt[]): string {
   return segments.map(s => `[${s.id}] ${s.text}`).join("\n");
 }
 
-/**
- * Builds the user prompt payload sent to the model via stdin.
- * Numbered excerpts (P1, R1, N1) are clearly separated and identify untrusted text.
- */
 export function buildUserPrompt(inputs: ResumeReviewInput[], knownThemes: string[], excerptMaps?: Map<number, JobExcerptMaps>): string {
   const maps = excerptMaps ?? buildJobExcerptMaps(inputs);
   const sections: string[] = [];
@@ -282,10 +270,6 @@ function resolveExcerptQuote(ids: string[], map: Map<string, SourceExcerpt>, sou
   return first.text;
 }
 
-/**
- * Resolves wire format reviews (which reference excerpt IDs) to full ApplicationResumeReview objects.
- * Falls back to direct quote strings if provided.
- */
 export function resolveModelWireReviews(raw: unknown, excerptMaps: Map<number, JobExcerptMaps>): ApplicationResumeReview[] {
   if (!Array.isArray(raw)) {
     throw new Error("Model output must be a JSON array");
@@ -322,7 +306,6 @@ export function resolveModelWireReviews(raw: unknown, excerptMaps: Map<number, J
       }
       const gap = g as Record<string, unknown>;
 
-      // Resolve posting quote
       let postingQuote: string;
       const postingIds = extractEvidenceIds(gap["postingEvidenceId"], gap["postingEvidenceIds"]);
       if (postingIds.length > 0) {
@@ -333,7 +316,6 @@ export function resolveModelWireReviews(raw: unknown, excerptMaps: Map<number, J
         throw new Error(`JobId ${jobId} gap #${gIdx}: missing postingEvidenceId`);
       }
 
-      // Resolve resume evidence
       let resumeEvidence: string | null = null;
       const resumeIds = extractEvidenceIds(gap["resumeEvidenceId"], gap["resumeEvidenceIds"]);
       if (resumeIds.length > 0) {
@@ -342,7 +324,6 @@ export function resolveModelWireReviews(raw: unknown, excerptMaps: Map<number, J
         resumeEvidence = gap["resumeEvidence"].trim();
       }
 
-      // Resolve notes evidence
       let notesEvidence: string | null = null;
       const notesIds = extractEvidenceIds(gap["notesEvidenceId"], gap["notesEvidenceIds"]);
       if (notesIds.length > 0) {
@@ -383,9 +364,6 @@ function isTextContent(part: unknown): part is { type: "text"; text: string } {
   return p.type === "text" && typeof p.text === "string";
 }
 
-/**
- * Extracts the assistant's text response from omp stdout (JSONL events in --mode json).
- */
 export function extractAssistantResponseText(stdout: string): string {
   const lines = stdout.split("\n");
   let lastAssistantText = "";
@@ -398,7 +376,6 @@ export function extractAssistantResponseText(stdout: string): string {
     try {
       parsed = JSON.parse(trimmed) as Record<string, unknown>;
     } catch {
-      // Ignore lines that are not JSON events
       continue;
     }
 
@@ -458,13 +435,9 @@ export function extractAssistantResponseText(stdout: string): string {
     return lastAssistantText;
   }
 
-  // Fallback if stdout was raw text or direct JSON
   return stdout.trim();
 }
 
-/**
- * Parses JSON array from raw model text output, tolerating markdown code fences.
- */
 export function parseJsonPayload(text: string): unknown {
   const trimmed = text.trim();
   let clean = trimmed;
@@ -498,15 +471,6 @@ export function parseJsonPayload(text: string): unknown {
   }
 }
 
-/**
- * Validates the model output against the inputs:
- * - Unique 1:1 coverage of every input jobId
- * - Bounded findings (max 6 gaps per job)
- * - Strict enum validation (importance, status)
- * - Verbatim quote provenance in source texts (whitespace normalized)
- * - Evidence invariants per status
- * - Never includes raw input text in error messages
- */
 export function validateResumeReviews(raw: unknown, inputs: ResumeReviewInput[]): ApplicationResumeReview[] {
   if (!Array.isArray(raw)) {
     throw new Error("Model output must be a JSON array");
@@ -559,22 +523,18 @@ export function validateResumeReviews(raw: unknown, inputs: ResumeReviewInput[])
 
       const g = gap as Record<string, unknown>;
 
-      // theme
       if (typeof g["theme"] !== "string" || g["theme"].trim().length === 0) {
         throw new Error(`JobId ${jobId} gap #${gIdx}: theme must be a non-empty string`);
       }
 
-      // importance
       if (typeof g["importance"] !== "string" || !Object.hasOwn(VALID_IMPORTANCE, g["importance"])) {
         throw new Error(`JobId ${jobId} gap #${gIdx}: invalid importance "${String(g["importance"])}"`);
       }
 
-      // status
       if (typeof g["status"] !== "string" || !Object.hasOwn(VALID_STATUSES, g["status"])) {
         throw new Error(`JobId ${jobId} gap #${gIdx}: invalid status "${String(g["status"])}"`);
       }
 
-      // postingQuote
       if (typeof g["postingQuote"] !== "string" || g["postingQuote"].trim().length === 0) {
         throw new Error(`JobId ${jobId} gap #${gIdx}: postingQuote must be a non-empty string`);
       }
@@ -582,7 +542,6 @@ export function validateResumeReviews(raw: unknown, inputs: ResumeReviewInput[])
         throw new Error(`JobId ${jobId} gap #${gIdx}: postingQuote not found in job posting text`);
       }
 
-      // resumeEvidence
       if (g["resumeEvidence"] !== null && g["resumeEvidence"] !== undefined) {
         if (typeof g["resumeEvidence"] !== "string" || g["resumeEvidence"].trim().length === 0) {
           throw new Error(`JobId ${jobId} gap #${gIdx}: resumeEvidence must be null or non-empty string`);
@@ -592,7 +551,6 @@ export function validateResumeReviews(raw: unknown, inputs: ResumeReviewInput[])
         }
       }
 
-      // notesEvidence
       if (g["notesEvidence"] !== null && g["notesEvidence"] !== undefined) {
         if (typeof g["notesEvidence"] !== "string" || g["notesEvidence"].trim().length === 0) {
           throw new Error(`JobId ${jobId} gap #${gIdx}: notesEvidence must be null or non-empty string`);
@@ -605,7 +563,6 @@ export function validateResumeReviews(raw: unknown, inputs: ResumeReviewInput[])
       const resumeEvidence = g["resumeEvidence"] ?? null;
       const notesEvidence = g["notesEvidence"] ?? null;
 
-      // Status invariants
       switch (g["status"]) {
         case "supported_omission":
           if (notesEvidence === null) {
@@ -638,12 +595,10 @@ export function validateResumeReviews(raw: unknown, inputs: ResumeReviewInput[])
           break;
       }
 
-      // rationale
       if (typeof g["rationale"] !== "string" || g["rationale"].trim().length === 0) {
         throw new Error(`JobId ${jobId} gap #${gIdx}: rationale must be a non-empty string`);
       }
 
-      // suggestion
       if (typeof g["suggestion"] !== "string" || g["suggestion"].trim().length === 0) {
         throw new Error(`JobId ${jobId} gap #${gIdx}: suggestion must be a non-empty string`);
       }
@@ -666,7 +621,6 @@ export function validateResumeReviews(raw: unknown, inputs: ResumeReviewInput[])
     });
   }
 
-  // Ensure every input job was reviewed
   for (const input of inputs) {
     if (!seenJobIds.has(input.jobId)) {
       throw new Error(`Review missing for jobId ${input.jobId}`);
@@ -676,10 +630,6 @@ export function validateResumeReviews(raw: unknown, inputs: ResumeReviewInput[])
   return reviews;
 }
 
-/**
- * Executes review of submitted applications with GPT-6 Luna via bounded /usr/bin/omp CLI.
- * All input supplied; tool-free, session-free, strictly validated structured result.
- */
 export async function reviewResumes(inputs: ResumeReviewInput[], knownThemes: string[]): Promise<ApplicationResumeReview[]> {
   if (inputs.length === 0) {
     return [];
@@ -719,18 +669,13 @@ export async function reviewResumes(inputs: ResumeReviewInput[], knownThemes: st
     env: { ...process.env },
   });
 
-  // Write payload to stdin and close stdin
-  // Deliberately not awaited: the subprocess result (and the timeout below) decide the outcome.
   try {
     void proc.stdin.write(payload);
     void proc.stdin.flush();
     void proc.stdin.end();
-  } catch {
-    // If process exited immediately, handle on await
-  }
+  } catch {}
 
   let timer: NodeJS.Timeout | undefined;
-  // Held in an object so the flag set inside the timer callback is visible to the cleanup below.
   const timeoutState = { fired: false };
 
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -738,15 +683,11 @@ export async function reviewResumes(inputs: ResumeReviewInput[], knownThemes: st
       timeoutState.fired = true;
       try {
         proc.kill("SIGTERM");
-      } catch {
-        // Process already exited; nothing to kill
-      }
+      } catch {}
       setTimeout(() => {
         try {
           proc.kill("SIGKILL");
-        } catch {
-          // Process already exited; nothing to kill
-        }
+        } catch {}
       }, 2000).unref();
       reject(new Error(`Resume review timed out after ${DEFAULT_TIMEOUT_MS}ms`));
     }, DEFAULT_TIMEOUT_MS);
@@ -760,7 +701,6 @@ export async function reviewResumes(inputs: ResumeReviewInput[], knownThemes: st
 
       if (exitCode !== 0) {
         const firstLine = stderrText.trim().split("\n")[0]?.slice(0, 200);
-        // Empty stderr must also fall back, so test truthiness rather than nullishness
         const stderrFirstLine = firstLine ? firstLine : "unknown error";
         throw new Error(`Resume review subprocess exited with code ${exitCode}: ${stderrFirstLine}`);
       }
@@ -770,13 +710,10 @@ export async function reviewResumes(inputs: ResumeReviewInput[], knownThemes: st
       const resolvedReviews = resolveModelWireReviews(wireReviews, excerptMaps);
       return validateResumeReviews(resolvedReviews, inputs);
     } finally {
-      // Ensure process cleanup on any exit
       if (proc.exitCode === null && !timeoutState.fired) {
         try {
           proc.kill("SIGTERM");
-        } catch {
-          // Process already exited; nothing to kill
-        }
+        } catch {}
       }
     }
   })();

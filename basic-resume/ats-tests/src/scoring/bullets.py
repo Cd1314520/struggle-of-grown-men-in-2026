@@ -4,8 +4,6 @@ from ..backends.base import RawExtraction
 from ..util import DimensionResult
 
 
-# Real bullet glyphs ATS may see. ASCII hyphen is deliberately excluded —
-# would false-positive on hyphenated words at line starts.
 BULLET_CHARS = ("•", "◦", "‣", "⁃", "▪", "▫", "●")
 
 
@@ -36,7 +34,6 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
         return DimensionResult(name="bullets", score=0.0, findings=["empty text"])
     text_cf = text.casefold()
 
-    # Build (anchor, expected_count) pairs.
     pairs: list[tuple[str, int]] = []
     for w in truth.get("work", []):
         pairs.append((w["title"], int(w.get("bullet_count", 0))))
@@ -48,9 +45,7 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
     if not pairs:
         return DimensionResult(name="bullets", score=1.0)
 
-    # Locate every anchor by *actual* position in the linear text stream,
-    # not by truth-file order. Skip not-found.
-    located: list[tuple[int, str, int]] = []   # (pos, anchor, expected)
+    located: list[tuple[int, str, int]] = []
     missing: list[str] = []
     for anchor, exp in pairs:
         idx = text_cf.find(anchor.casefold())
@@ -60,8 +55,6 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
             located.append((idx, anchor, exp))
     located.sort(key=lambda t: t[0])
 
-    # Section heading positions — used as hard upper bounds so e.g. bullets
-    # in the Skills section don't get attributed to the last project.
     sect_positions = sorted(
         text_cf.find(h.casefold())
         for h in truth.get("sections", [])
@@ -73,7 +66,6 @@ def score(truth: dict, ext: RawExtraction) -> DimensionResult:
 
     for i, (pos, anchor, expected) in enumerate(located):
         next_anchor_pos = located[i + 1][0] if i + 1 < len(located) else len(text)
-        # First section heading STRICTLY after this anchor:
         next_sect = next((s for s in sect_positions if s > pos), len(text))
         end = min(next_anchor_pos, next_sect)
 

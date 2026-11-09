@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { editText } from "../src/answer-bank";
 
-// Each scenario imports the production modules in a fresh process with throwaway state and profile.
 const src = (name: string) => JSON.stringify(join(import.meta.dir, `../src/${name}.ts`));
 const prelude = `
 import assert from "node:assert/strict";
@@ -18,7 +17,6 @@ function job(id, company) {
   db.query("INSERT INTO jobs (id,url,source,company,title,status,resume_sha,resume_frozen_at) VALUES (?,?,?,?,?,'filling','frozen-sha','2026-10-10T00:00:00Z')").run(id, "https://ats.example/jobs/" + id, "test", company, "Engineer");
 }
 const ask = (text, options) => ({ kind: "question", text, context: "Required field", options });
-// A worker that makes the given tool calls in order, recording each reply.
 function worker(calls, replies, prompts = []) {
   return opts => {
     prompts.push(opts.prompt);
@@ -94,7 +92,7 @@ describe("answer bank", () => {
     assert.equal(bankDue(), false);
     job(2, "Beta");
     answerGate(parkGate(2, ask("Desired salary", []), null).id, "160000", "bank");
-    assert.equal(bankDue(), true); // a run that finished leaves no retry for the next answer to wait out
+    assert.equal(bankDue(), true);
     `);
   });
 });

@@ -12,7 +12,6 @@ import { CompanyMark, JobStatus, Kbd, useReturnFocus } from "../ui";
 import { NAV } from "./nav";
 import { useShell } from "./state";
 
-// Where a job opens from search: the page that lists it.
 const jobPath = (view: ListView, id: number) => (view === "held" || view === "rejected" ? `archive/${view}/${id}` : `${view}/${id}`);
 const SEARCHED: readonly ListView[] = ["review", "pipeline", "applications", "held", "rejected"];
 
@@ -59,10 +58,7 @@ export function CommandPalette() {
     },
     placeholderData: prev => prev,
   });
-  // Jobs arrive after the pages and commands have been filtered, and cmdk leaves the selection where it was:
-  // when they land, the best match is the one Enter opens.
   const [selected, setSelected] = useState("");
-  // Typed but not yet searched, or the search is out: too early to say nothing matches.
   const searching = q.trim() !== term || isFetching;
   const jobValue = (id: number, title: string, company: string) => `job ${id} ${title} ${company} ${term}`;
   const first = term.length >= 2 && jobs?.[0] ? jobValue(jobs[0].row.id, jobs[0].row.title, jobs[0].row.company) : null;
@@ -87,7 +83,6 @@ export function CommandPalette() {
         toast.success(done);
         void refreshAll();
       },
-      // The request already showed the server's refusal (e.g. the profile isn't filled in).
       () => undefined,
     );
   };

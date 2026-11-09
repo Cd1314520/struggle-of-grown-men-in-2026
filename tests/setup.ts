@@ -1,9 +1,3 @@
-// Loaded before every test file (bunfig.toml). Some tests import app modules in this process, and
-// src/db.ts opens and migrates the database under AUTO_APPLY_DATA as soon as it is imported. Without
-// this, running the tests would upgrade the live database with whatever migrations are in the
-// working tree. Scenarios that need their own state still pass their own AUTO_APPLY_DATA.
-// The profile is a fresh copy of profile.example and the stock resume is the example one, so the
-// tests read neither the owner's files nor missing ones (a fresh checkout or CI has neither).
 import { afterAll } from "bun:test";
 import { copyFileSync, cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

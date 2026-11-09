@@ -1,4 +1,3 @@
-// The three runs the owner can start by hand, in one menu: each says whether it is running and when it last ran.
 import { Building2, Mail, Play, Radar, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -15,7 +14,7 @@ interface Automation {
   icon: LucideIcon;
   name: string;
   running: boolean;
-  blocked?: boolean; // another run holds what this one needs
+  blocked?: boolean;
   status: string;
   detail: string;
 }
@@ -57,7 +56,6 @@ export function RunMenu({ s, size }: { s: Summary | undefined; size?: "sm" | "md
       toast.success(STARTED[what]);
       await refreshAll();
     } catch {
-      // the request already showed the server's refusal
     } finally {
       setStarting(null);
     }
@@ -80,7 +78,6 @@ export function RunMenu({ s, size }: { s: Summary | undefined; size?: "sm" | "md
                 icon={going ? <Spinner /> : <a.icon />}
                 description={a.status}
                 disabled={going || a.blocked}
-                // The name says what it starts, as the buttons it replaced did; the status line is the description.
                 aria-label={`Run: ${a.name}`}
                 aria-description={`${a.status}. ${a.detail}`}
                 title={a.detail}

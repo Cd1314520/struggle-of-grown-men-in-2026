@@ -6,14 +6,12 @@ import { cn } from "../../lib/cn";
 
 export interface ComboOption {
   value: string;
-  label: string; // what the list shows and the search matches
-  hint?: ReactNode; // quiet, on the right of the row
+  label: string;
+  hint?: ReactNode;
   group?: string;
-  selected?: string; // what the trigger shows when it is the value, if not the label
+  selected?: string;
 }
 
-// A select for long lists: a search box over grouped options. `custom` lets a value not in the list be
-// typed and used as it is.
 export function Combobox({
   value,
   onValueChange,
@@ -32,7 +30,7 @@ export function Combobox({
   placeholder?: string;
   search?: string;
   empty?: string;
-  custom?: (typed: string) => string; // the row's label for a typed value, e.g. `Use "${typed}"`
+  custom?: (typed: string) => string;
   disabled?: boolean;
   className?: string;
   "aria-label"?: string;
