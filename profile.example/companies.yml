@@ -1,6 +1,6 @@
 # Copied into profile/ the first time the app starts: the company job boards each scan reads. It ships
-# with the 1,800-odd boards discovery has found so far, so a new install scans from the first run and
-# discovery can stay off (config.yml). The discover run adds to it; add your own,
+# with 1,800-odd boards, so a new install scans from the first run and discovery can stay off
+# (schedule.discoverMinutes in config.yml). The discover run adds to it; add your own,
 # or remove what you never want scanned. `ats` is one of: greenhouse, lever, ashby, workable, recruitee,
 # smartrecruiters, workday, and the others in src/ats.ts. The slug is the board's name in its URL
 # (boards.greenhouse.io/<slug>, jobs.lever.co/<slug>, jobs.ashbyhq.com/<slug>). A Workday slug is

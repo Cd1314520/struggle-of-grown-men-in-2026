@@ -22,7 +22,7 @@ const HEAD = 42,
   FOOT = 38,
   HEIGHT = HEAD + FLOW + GAP + FOOT,
   NODE = 10,
-  // Room right of the last column for its labels; every label starts at its node and needs one column of width.
+  // Room right of the last column for its labels.
   RIGHT = 76,
   MIN_WIDTH = 520;
 

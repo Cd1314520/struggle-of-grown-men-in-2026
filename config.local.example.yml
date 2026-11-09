@@ -6,7 +6,7 @@
 publicUrl: https://your-machine.your-tailnet.ts.net:8787
 vncUrl: https://your-machine.your-tailnet.ts.net:6080
 
-# The mailbox applications are sent from and confirmations arrive in.
+# The address used on applications; confirmation and verification mail is read from it.
 mailbox: you@example.com
 
 resume:

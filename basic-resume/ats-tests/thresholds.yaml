@@ -5,7 +5,7 @@
 # Each score is in [0, 1]. Tune up only after baseline is stable.
 
 contact: 0.95
-sections: 1.00          # all five headings must be found
+sections: 1.00          # every expected heading, in order
 entries: 0.85
 dates: 0.90
 reading_order: 0.95
