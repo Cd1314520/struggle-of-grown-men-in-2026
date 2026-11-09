@@ -2,15 +2,29 @@ import type { Stats } from "../../../src/api-types";
 import { Skeleton, WorkspaceSection } from "../../components/ui";
 import { useStats } from "../../lib/api";
 import { num } from "../../lib/format";
+import { useWidth } from "../../lib/media";
 import { LABEL_HEAD } from "./rail";
 
-const STAGES: readonly (readonly [key: Exclude<keyof Stats["funnel"], "found">, label: string])[] = [
-  ["assessed", "Assessed"],
-  ["recommended", "Recommended"],
-  ["approved", "Approved"],
-  ["applied", "Applied"],
-  ["responded", "Heard back"],
+type Stage = Exclude<keyof Stats["funnel"], "found">;
+
+// Each stage is a subset of the one before it, so what leaves the flow at a step is the difference of two stages.
+const STAGES: readonly (readonly [key: Stage, label: string, dropped: string])[] = [
+  ["assessed", "Assessed", ""],
+  ["recommended", "Recommended", "Not recommended"],
+  ["approved", "Approved", "Not approved"],
+  ["applied", "Applied", "Not sent"],
+  ["responded", "Heard back", "No reply"],
 ];
+
+const HEAD = 42,
+  FLOW = 150,
+  GAP = 10,
+  FOOT = 38,
+  HEIGHT = HEAD + FLOW + GAP + FOOT,
+  NODE = 10,
+  // Room right of the last column for its labels; every label starts at its node and needs one column of width.
+  RIGHT = 76,
+  MIN_WIDTH = 520;
 
 function approvals({ auto, user }: Stats["approvals"]) {
   const n = auto + user;
@@ -25,10 +39,86 @@ const percent = (part: number, whole: number) => {
   return `${p >= 10 || p === 0 ? Math.round(p) : p.toFixed(1)}%`;
 };
 
+function band(x0: number, s0: number, s1: number, x1: number, t0: number, t1: number) {
+  const m = (x0 + x1) / 2;
+  return `M${x0},${s0}C${m},${s0} ${m},${t0} ${x1},${t0}V${t1}C${m},${t1} ${m},${s1} ${x0},${s1}Z`;
+}
+
+function Sankey({ funnel: f }: { funnel: Stats["funnel"] }) {
+  const [ref, measured] = useWidth();
+  const width = Math.max(measured, MIN_WIDTH),
+    step = (width - RIGHT) / (STAGES.length - 1),
+    scale = f.assessed ? FLOW / f.assessed : 0;
+  const h = (v: number) => (v > 0 ? Math.max(1, v * scale) : 0);
+  const x = (i: number) => i * step;
+  const summary = STAGES.slice(1)
+    .map(([key, label], i) => `${label.toLowerCase()} ${num(f[key])} (${percent(f[key], f[STAGES[i]?.[0] ?? "assessed"])})`)
+    .join(", ");
+
+  return (
+    <div ref={ref} className="overflow-x-auto">
+      {measured > 0 ? (
+        <svg width={width} height={HEIGHT} role="img" aria-label={`Of ${num(f.assessed)} postings assessed in the last 30 days: ${summary}.`} className="block">
+          {STAGES.map(([key, label, dropped], i) => {
+            const prev = STAGES[i - 1]?.[0];
+            if (!prev) return null;
+            const from = STAGES[i - 1]?.[1] ?? "",
+              kept = f[key],
+              lost = f[prev] - kept,
+              x0 = x(i - 1) + NODE,
+              x1 = x(i),
+              top = HEAD + h(kept),
+              dropTop = top + GAP;
+            return (
+              <g key={key}>
+                <path d={band(x0, HEAD, top, x1, HEAD, top)} className="fill-chart-1 opacity-30 transition-opacity hover:opacity-50">
+                  <title>{`${from} → ${label}: ${num(kept)} (${percent(kept, f[prev])})`}</title>
+                </path>
+                {lost > 0 && (
+                  <path
+                    d={band(x0, top, top + h(lost), x1, dropTop, dropTop + h(lost))}
+                    className="fill-fg-subtle opacity-20 transition-opacity hover:opacity-40"
+                  >
+                    <title>{`${from} → ${dropped}: ${num(lost)} (${percent(lost, f[prev])})`}</title>
+                  </path>
+                )}
+                <rect x={x1} y={dropTop} width={NODE} height={h(lost)} rx={1} className="fill-fg-subtle" />
+                <text x={x1} y={dropTop + h(lost) + 16} className="fill-fg-muted text-xs">
+                  {dropped}
+                </text>
+                <text x={x1} y={dropTop + h(lost) + 32} className="tabular text-xs">
+                  <tspan className="fill-fg font-medium">{num(lost)}</tspan>
+                  <tspan className="fill-fg-muted"> {percent(lost, f[prev])}</tspan>
+                </text>
+              </g>
+            );
+          })}
+          {STAGES.map(([key, label], i) => {
+            const prev = STAGES[i - 1]?.[0];
+            return (
+              <g key={key}>
+                <rect x={x(i)} y={HEAD} width={NODE} height={h(f[key])} rx={1} className="fill-chart-1" />
+                <text x={x(i)} y={14} className="fill-fg-muted text-xs">
+                  {label}
+                </text>
+                <text x={x(i)} y={32} className="tabular text-sm">
+                  <tspan className="fill-fg font-medium">{num(f[key])}</tspan>
+                  {prev && <tspan className="fill-fg-muted text-xs"> {percent(f[key], f[prev])}</tspan>}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      ) : (
+        <div style={{ height: HEIGHT }} />
+      )}
+    </div>
+  );
+}
+
 export function Funnel() {
   const { data: st } = useStats();
   const f = st?.funnel;
-  const first = f?.assessed ?? 0;
   return (
     <WorkspaceSection
       className={LABEL_HEAD}
@@ -39,37 +129,7 @@ export function Funnel() {
           : "Postings found in the last 30 days"
       }
     >
-      {!f ? (
-        <Skeleton className="h-44" />
-      ) : (
-        <>
-          <div className="mb-2 grid grid-cols-[108px_minmax(0,1fr)_44px_72px] gap-3 text-xs text-fg-muted sm:grid-cols-[104px_minmax(0,1fr)_64px_72px] sm:gap-4">
-            <span>Stage</span>
-            <span />
-            <span className="text-right">Jobs</span>
-            <span className="text-right">Conversion</span>
-          </div>
-          <ol className="flex flex-col gap-2.5">
-            {STAGES.map(([key, label], i) => {
-              const n = f[key],
-                prior = i === 0 ? f.found : f[STAGES[i - 1]?.[0] ?? "assessed"];
-              return (
-                <li
-                  key={key}
-                  className="grid grid-cols-[108px_minmax(0,1fr)_44px_72px] items-center gap-3 sm:grid-cols-[104px_minmax(0,1fr)_64px_72px] sm:gap-4"
-                >
-                  <span className="truncate text-sm text-fg">{label}</span>
-                  <span className="h-6 overflow-hidden rounded-sm bg-subtle">
-                    <span className="block h-full rounded-sm bg-chart-1" style={{ width: first ? `max(2px, ${(n / first) * 100}%)` : 0 }} />
-                  </span>
-                  <span className="tabular text-right text-sm font-medium text-fg">{num(n)}</span>
-                  <span className="tabular text-right text-sm text-fg-muted">{percent(n, prior)}</span>
-                </li>
-              );
-            })}
-          </ol>
-        </>
-      )}
+      {f ? <Sankey funnel={f} /> : <Skeleton className="h-[240px]" />}
     </WorkspaceSection>
   );
 }

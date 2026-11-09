@@ -1,9 +1,10 @@
-import { useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { Stats } from "../../../src/api-types";
 import { Segments, Skeleton, WorkspaceSection } from "../../components/ui";
 import { useStats } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { num } from "../../lib/format";
+import { useWidth } from "../../lib/media";
 import { LABEL_HEAD } from "./rail";
 
 type Metric = "applied" | "responses" | "found";
@@ -36,23 +37,6 @@ function ticks(max: number) {
 function column(x: number, y: number, w: number, h: number) {
   const r = Math.min(4, w / 2, h);
   return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
-}
-
-function useWidth() {
-  const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([e]) => {
-      if (e) setWidth(Math.floor(e.contentRect.width));
-    });
-    ro.observe(el);
-    return () => {
-      ro.disconnect();
-    };
-  }, []);
-  return [ref, width] as const;
 }
 
 function Chart({ stats, metric }: { stats: Stats; metric: Metric }) {
