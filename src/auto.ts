@@ -31,7 +31,7 @@ function storedAssessment(job: { company?: string; practice_assessment?: string 
 export interface AutoApprovalResult {
   approve: boolean;
   note: string | null;
-  deferred?: "daily_cap";
+  deferred?: "daily_cap" | "employer";
 }
 
 export function autoApproval(
@@ -48,10 +48,10 @@ export function autoApproval(
   if (refusal) return review(refusal);
 
   if (verdict.score < rules.minScore) return review(`score ${verdict.score} is below the auto-apply bar of ${rules.minScore}`);
-  const unclear = verdict.items.filter(i => i.phase === verdict.rubric && i.required && i.answer === "unclear");
+  const unclear = verdict.items.filter(i => i.phase === verdict.rubric && i.required && !i.unclearOk && i.answer === "unclear");
   if (unclear.length) return review(`the posting does not settle: ${unclear.map(i => i.label).join(", ")}`);
   if (!rules.allowConcerns && facts.concerns?.trim()) return review("the assessment raised concerns");
-  if (facts.employerHold) return review(facts.employerHold);
+  if (facts.employerHold) return { ...review(facts.employerHold), deferred: "employer" };
   if (facts.approvedToday >= rules.perDay) {
     return {
       approve: false,

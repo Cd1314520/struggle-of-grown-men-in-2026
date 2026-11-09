@@ -201,7 +201,7 @@ export async function prep(job: Job, run: RunWorker) {
           });
           if (!moved) return WITHDRAWN;
           reported = true;
-          if (auto.deferred === "daily_cap") {
+          if (auto.deferred) {
             deferApproval(job.id);
           } else {
             forgetDeferredApproval(job.id);

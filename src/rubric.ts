@@ -14,6 +14,7 @@ interface Criterion {
   required?: boolean;
   weight?: number;
   screen?: boolean;
+  unclearOk?: boolean;
 }
 interface PhaseRubric {
   threshold: number;
@@ -33,6 +34,7 @@ export interface ChecklistItem {
   answer: Answer;
   evidence: string;
   points: number;
+  unclearOk?: boolean;
 }
 export interface Verdict {
   decision: "apply" | "hold" | "skip";
@@ -117,6 +119,7 @@ function scorePhase(r: Rubric, phase: Phase, answers: Map<string, { answer: Answ
       answer: a.answer,
       evidence: a.evidence,
       points,
+      ...(c.unclearOk ? { unclearOk: true } : {}),
     };
   });
   const possible = items.reduce((sum, i) => sum + Math.max(0, i.weight), 0);

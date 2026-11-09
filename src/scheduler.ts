@@ -18,7 +18,7 @@ import {
 } from "./db";
 import { checkAutoApprovedPractice, employerHold } from "./auto";
 import { jobBlockers, type BlockerCause } from "./blockers";
-import { forgetDeferredApproval, pumpDeferredApprovals } from "./deferred-approvals";
+import { deferApproval, forgetDeferredApproval, pumpDeferredApprovals } from "./deferred-approvals";
 import { tickQuestionDigest } from "./digest";
 import { errorMessage, isCapacityError } from "./errors";
 import { fill } from "./fill";
@@ -187,7 +187,7 @@ export function trimEmployerApprovals() {
     const hold = employerHold(job);
     if (!hold) continue;
     if (!moveJob(job.id, "approved", { ...to.awaitingApproval(`needs your review: ${hold}`), approved_by: null })) continue;
-    forgetDeferredApproval(job.id);
+    deferApproval(job.id);
     logEvent("auto", `Auto-approval withdrawn: ${hold}`, job.id);
   }
 }

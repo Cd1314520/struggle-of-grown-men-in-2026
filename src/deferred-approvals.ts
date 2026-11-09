@@ -14,7 +14,10 @@ export const forgetDeferredApproval = (jobId: number) => {
 };
 
 export function pumpDeferredApprovals() {
-  if (profileProblems().length > 0) return;
+  if (profileProblems().length === 0) reconsiderDeferred();
+}
+
+export function reconsiderDeferred() {
   const rules = autoApply();
   if (!rules.enabled) return;
 
@@ -33,11 +36,18 @@ export function pumpDeferredApprovals() {
       continue;
     }
 
+    const hold = employerHold(job);
+    if (hold) {
+      const note = `needs your review: ${hold}`;
+      if (job.note !== note) updateJob(job.id, { note });
+      continue;
+    }
+
     const result = reconsiderAutoApproval(job, {
       concerns: job.concerns,
       handPicked: false,
       approvedToday: usedToday("auto"),
-      employerHold: employerHold(job),
+      employerHold: null,
     });
 
     if (result.approved && result.verdict) {
