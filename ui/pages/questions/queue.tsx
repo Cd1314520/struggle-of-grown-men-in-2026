@@ -5,12 +5,22 @@ import { cn } from "../../lib/cn";
 import { plural } from "../../lib/format";
 import { href } from "../../lib/router";
 import { whyLabel } from "../../lib/why";
-import { questionText, sections } from "./model";
+import { contextText, queuedAfter, questionText, sections, shape, stale } from "./model";
 
 function QueueRow({ group, selected, desktopOnly }: { group: QuestionGroup; selected: boolean; desktopOnly: boolean }) {
   const company = group.jobs[0]?.company ?? "";
-  const many = group.jobs.length;
-  const gist = [whyLabel(group.why), many > 1 ? plural(many, "application") : null].filter(Boolean).join(" · ");
+  const many = group.jobs.length,
+    others = new Set(group.jobs.map(j => j.company)).size - 1,
+    after = queuedAfter(group),
+    title = questionText(group.text);
+  const gist = [
+    many > 1 ? plural(many, "application") : null,
+    shape(group),
+    group.why === "free_text" || group.why === "other" ? null : whyLabel(group.why),
+    after > 0 ? `+${after} to follow` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <ListRow
       href={href("questions", group.key)}
@@ -20,12 +30,13 @@ function QueueRow({ group, selected, desktopOnly }: { group: QuestionGroup; sele
       aria-current={selected && !desktopOnly ? "true" : undefined}
       className={cn(desktopOnly && "max-lg:bg-transparent max-lg:before:hidden")}
       lead={<CompanyMark name={company} />}
-      title={questionText(group.text)}
+      title={title}
       titleLines={3}
-      secondary={company}
-      gist={gist || null}
-      fact={<Time at={group.createdAt} short />}
-      snippet={group.missing ? `Missing: ${group.missing}` : null}
+      titleClassName="lg:line-clamp-2! lg:whitespace-normal! touch:line-clamp-3!"
+      secondary={others > 0 ? `${company} +${others}` : company}
+      gist={gist}
+      snippet={title.length < 30 ? contextText(group) || null : null}
+      fact={<Time at={group.createdAt} short className={cn(stale(group) && "text-warning-text")} />}
     />
   );
 }

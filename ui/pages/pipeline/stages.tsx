@@ -7,16 +7,18 @@ interface Stage {
 }
 export const STAGES: Record<string, Stage> = {
   needs_you: { label: "Needs you", short: "Needs you", tone: "warning" },
-  questions: { label: "Waiting on answers", short: "Answers", tone: "warning" },
   failed: { label: "Failed", short: "Failed", tone: "danger" },
+  questions: { label: "Questions", short: "Questions", tone: "warning" },
   applying: { label: "Applying", short: "Applying" },
   assessing: { label: "Assessing", short: "Assessing" },
 };
 
-export const stageSegments = (counts: ReadonlyMap<string, number> | null): Segment<string>[] =>
+export const ATTENTION = ["needs_you", "failed"];
+
+export const stageSegments = (counts: ReadonlyMap<string, number> | null, compact = false): Segment<string>[] =>
   Object.entries(STAGES).map(([key, stage]) => ({
     value: key,
-    label: stage.label,
+    label: compact ? stage.short : stage.label,
     count: counts?.get(key),
     tone: stage.tone,
     data: { "data-stage": key },

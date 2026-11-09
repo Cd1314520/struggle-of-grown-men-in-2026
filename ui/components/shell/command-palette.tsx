@@ -4,12 +4,12 @@ import { Dialog as D } from "radix-ui";
 import { Mail, Monitor, Moon, Plus, Radar, RefreshCw, Search, Sun } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import type { ListRow, ListView } from "../../../src/api-types";
-import { api, refreshAll } from "../../lib/api";
+import type { ListRow, ListView, Summary } from "../../../src/api-types";
+import { api, refreshAll, useSummary } from "../../lib/api";
 import { navigate } from "../../lib/router";
 import { setTheme } from "../../lib/theme";
-import { CompanyMark, JobStatus, Kbd, useReturnFocus } from "../ui";
-import { NAV } from "./nav";
+import { CompanyMark, Count, JobStatus, Kbd, useReturnFocus } from "../ui";
+import { NAV, type NavItem } from "./nav";
 import { useShell } from "./state";
 
 const jobPath = (view: ListView, id: number) => (view === "held" || view === "rejected" ? `archive/${view}/${id}` : `${view}/${id}`);
@@ -33,12 +33,28 @@ function Item({ onSelect, icon, children, hint, value }: { onSelect: () => void;
     <Command.Item
       value={value}
       onSelect={onSelect}
-      className="flex h-9 cursor-pointer items-center gap-3 rounded-md px-2.5 text-sm text-fg outline-none select-none data-[selected=true]:bg-subtle touch:h-11 [&>svg]:size-4 [&>svg]:text-fg-subtle"
+      className="flex min-h-9 cursor-pointer items-center gap-3 rounded-md px-2.5 text-sm text-fg outline-none select-none data-[selected=true]:bg-muted touch:min-h-11 touch:py-1.5"
     >
-      {icon}
+      <span className="flex size-6 shrink-0 items-center justify-center [&>svg]:size-4 [&>svg]:text-fg-subtle">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {hint && <span className="shrink-0 text-xs text-fg-subtle">{hint}</span>}
     </Command.Item>
+  );
+}
+
+function GoHint({ item, summary }: { item: NavItem; summary: Summary | undefined }) {
+  const badge = summary && item.badge?.(summary);
+  if (!item.go && !badge?.value) return null;
+  return (
+    <span className="flex items-center gap-3">
+      {badge && <Count value={badge.value} tone={badge.tone} />}
+      {item.go && (
+        <span className="flex items-center gap-1 touch:hidden">
+          <Kbd>G</Kbd>
+          <Kbd>{item.go.toUpperCase()}</Kbd>
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -48,6 +64,7 @@ const groupClass =
 export function CommandPalette() {
   const { paletteOpen, setPaletteOpen, setAddOpen } = useShell();
   const [q, setQ] = useState("");
+  const { data: summary } = useSummary();
   const term = useDebounced(q.trim(), 160);
   const { data: jobs, isFetching } = useQuery({
     queryKey: ["search", term],
@@ -103,8 +120,10 @@ export function CommandPalette() {
           <D.Title className="sr-only">Search and commands</D.Title>
           <D.Description className="sr-only">Search jobs and pages, or run a command</D.Description>
           <Command label="Search and commands" shouldFilter={true} loop value={selected} onValueChange={setSelected}>
-            <div className="flex items-center gap-2.5 border-b border-border px-4">
-              <Search className="size-4 text-fg-subtle" />
+            <div className="flex items-center gap-3 border-b border-border px-4">
+              <span className="flex size-6 shrink-0 items-center justify-center">
+                <Search className="size-4 text-fg-subtle" />
+              </span>
               <Command.Input
                 value={q}
                 onValueChange={setQ}
@@ -128,34 +147,14 @@ export function CommandPalette() {
                       icon={<CompanyMark name={row.company} size="sm" />}
                       hint={<JobStatus status={row.status} />}
                     >
-                      <span className="text-fg">{row.title}</span>
-                      <span className="ml-2 text-fg-subtle">{row.company}</span>
+                      <span className="flex min-w-0 flex-col sm:flex-row sm:items-baseline sm:gap-2">
+                        <span className="truncate text-fg">{row.title}</span>
+                        <span className="truncate text-fg-subtle max-sm:text-xs">{row.company}</span>
+                      </span>
                     </Item>
                   ))}
                 </Command.Group>
               )}
-              <Command.Group heading="Go to" className={groupClass}>
-                {NAV.map(n => (
-                  <Item
-                    key={n.page}
-                    value={`go ${n.label}`}
-                    icon={<n.icon strokeWidth={1.75} />}
-                    onSelect={() => {
-                      go(n.page);
-                    }}
-                    hint={
-                      n.go && (
-                        <span className="flex items-center gap-1 touch:hidden">
-                          <Kbd>G</Kbd>
-                          <Kbd>{n.go.toUpperCase()}</Kbd>
-                        </span>
-                      )
-                    }
-                  >
-                    {n.label}
-                  </Item>
-                ))}
-              </Command.Group>
               <Command.Group heading="Actions" className={groupClass}>
                 <Item
                   value="add a posting url"
@@ -195,43 +194,45 @@ export function CommandPalette() {
                   Find new companies to watch
                 </Item>
               </Command.Group>
-              <Command.Group heading="Theme" className={groupClass}>
-                {(
-                  [
-                    ["light", "Light theme", Sun],
-                    ["dark", "Dark theme", Moon],
-                    ["system", "System theme", Monitor],
-                  ] as const
-                ).map(([t, label, Icon]) => (
+              <Command.Group heading="Go to" className={groupClass}>
+                {NAV.map(n => (
                   <Item
-                    key={t}
-                    value={`theme ${label}`}
-                    icon={<Icon />}
+                    key={n.page}
+                    value={`go ${n.label}`}
+                    icon={<n.icon strokeWidth={1.75} />}
                     onSelect={() => {
-                      setTheme(t);
-                      close();
+                      go(n.page);
                     }}
+                    hint={<GoHint item={n} summary={summary} />}
                   >
-                    {label}
+                    {n.label}
                   </Item>
                 ))}
               </Command.Group>
+              {q.trim() && (
+                <Command.Group heading="Theme" className={groupClass}>
+                  {(
+                    [
+                      ["light", "Light theme", Sun],
+                      ["dark", "Dark theme", Moon],
+                      ["system", "System theme", Monitor],
+                    ] as const
+                  ).map(([t, label, Icon]) => (
+                    <Item
+                      key={t}
+                      value={`theme ${label}`}
+                      icon={<Icon />}
+                      onSelect={() => {
+                        setTheme(t);
+                        close();
+                      }}
+                    >
+                      {label}
+                    </Item>
+                  ))}
+                </Command.Group>
+              )}
             </Command.List>
-            <div className="flex items-center gap-4 border-t border-border bg-subtle/60 px-4 py-2 text-xs text-fg-subtle touch:hidden">
-              <span className="flex items-center gap-1.5">
-                <Kbd>↑</Kbd>
-                <Kbd>↓</Kbd>
-                to move
-              </span>
-              <span className="flex items-center gap-1.5">
-                <Kbd>↵</Kbd>
-                to open
-              </span>
-              <span className="ml-auto flex items-center gap-1.5">
-                <Kbd>Esc</Kbd>
-                to close
-              </span>
-            </div>
           </Command>
         </D.Content>
       </D.Portal>

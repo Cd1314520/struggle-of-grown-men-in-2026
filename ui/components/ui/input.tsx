@@ -4,14 +4,14 @@ import { cn } from "../../lib/cn";
 import { Kbd } from "./kbd";
 
 const field =
-  "w-full rounded-md border border-border bg-surface text-base text-fg shadow-xs transition-[border-color,box-shadow] outline-none placeholder:text-fg-subtle hover:border-border-strong focus:border-accent focus:ring-3 focus:ring-accent/15 disabled:cursor-not-allowed disabled:opacity-50";
+  "w-full rounded-md border border-border-strong bg-surface text-base text-fg shadow-xs transition-[border-color,box-shadow] outline-none placeholder:text-fg-subtle hover:border-fg-subtle/50 focus:border-accent focus:ring-3 focus:ring-accent/15 disabled:cursor-not-allowed disabled:opacity-50";
 
 export const Input = forwardRef<HTMLInputElement, ComponentProps<"input">>(function Input({ className, ...props }, ref) {
   return <input ref={ref} className={cn(field, "h-8 px-2.5 sm:text-sm touch:h-10 touch:text-base", className)} {...props} />;
 });
 
 export const Textarea = forwardRef<HTMLTextAreaElement, ComponentProps<"textarea">>(function Textarea({ className, ...props }, ref) {
-  return <textarea ref={ref} className={cn(field, "min-h-20 resize-y px-3 py-2 leading-relaxed touch:text-base", className)} {...props} />;
+  return <textarea ref={ref} className={cn(field, "min-h-20 resize-y px-2.5 py-2 leading-relaxed sm:text-sm touch:text-base", className)} {...props} />;
 });
 
 export const SearchInput = forwardRef<

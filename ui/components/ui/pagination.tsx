@@ -13,7 +13,7 @@ function PageField({ page, pages, onGo }: { page: number; pages: number; onGo: (
   };
   return (
     <label className="flex items-center gap-1.5 whitespace-nowrap">
-      Page
+      <span className="@max-md:sr-only">Page</span>
       <input
         inputMode="numeric"
         aria-label={`Page, of ${pages}`}
@@ -63,11 +63,11 @@ export function Pagination({
   const Frame = variant === "footer" ? ListFooter : "div";
   return (
     <Frame className={cn("@container", variant === "plain" && "flex items-center justify-between gap-3 px-1 py-3 text-sm text-fg-muted", className)}>
-      <span className="tabular min-w-0 truncate whitespace-nowrap">
+      <span className="tabular shrink-0 whitespace-nowrap">
         {(offset + 1).toLocaleString()}–{end.toLocaleString()} of {total.toLocaleString()}
         {noun && <span className="@max-md:hidden"> {noun}</span>}
       </span>
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 @max-md:gap-1">
         <Button
           size="sm"
           disabled={offset === 0}

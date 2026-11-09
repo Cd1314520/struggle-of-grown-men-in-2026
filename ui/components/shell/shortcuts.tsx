@@ -1,3 +1,4 @@
+import { cn } from "../../lib/cn";
 import { combo } from "../../lib/hotkeys";
 import { Dialog, DialogContent, Kbd } from "../ui";
 import { NAV } from "./nav";
@@ -5,43 +6,33 @@ import { useShell } from "./state";
 
 type Group = readonly [title: string, rows: readonly (readonly [keys: string[], what: string])[]];
 
-const ANYWHERE: Group = [
-  "Anywhere",
-  [
-    [[combo("K")], "Search and commands"],
-    [["?"], "Keyboard shortcuts"],
-  ],
-];
+const ANYWHERE: Group = ["Anywhere", [[[combo("K")], "Search and commands"]]];
 const GO_TO: Group = ["Go to", NAV.flatMap(n => (n.go ? [[["G", n.go.toUpperCase()], n.label] as const] : []))];
 
-const GROUPS: readonly Group[] = [
+const OPEN_JOB: Group = [
+  "An open job",
   [
-    "Lists",
-    [
-      [["J", "K"], "Next and previous job"],
-      [["/"], "Search the list"],
-      [["Esc"], "Close the open job"],
-    ],
+    [["A"], "Main action (Approve, Retry…)"],
+    [["X"], "Reject"],
+    [["H"], "Hold for later"],
+    [["1", "–", "5"], "Switch tabs"],
   ],
+];
+const LISTS: Group = [
+  "Lists",
   [
-    "An open job",
-    [
-      [["A"], "Main action (Approve, Retry…)"],
-      [["X"], "Reject"],
-      [["H"], "Hold for later"],
-      [["1", "–", "5"], "Switch tabs"],
-    ],
+    [["J", "K"], "Next and previous item"],
+    [["/"], "Search or filter the list"],
+    [["Esc"], "Close the open job"],
   ],
+];
+const QUESTIONS: Group = [
+  "Questions",
   [
-    "Questions",
-    [
-      [["J", "K"], "Next and previous question"],
-      [["1", "–", "8"], "Pick an option"],
-      [["↵"], "Type an answer"],
-      [[combo("↵")], "Save and go to the next"],
-      [["Esc"], "Leave the answer box"],
-      [["/"], "Filter the queue"],
-    ],
+    [["1", "–", "8"], "Pick an option"],
+    [["↵"], "Type an answer"],
+    [[combo("↵")], "Save and go to the next"],
+    [["Esc"], "Leave the answer box"],
   ],
 ];
 
@@ -60,7 +51,9 @@ function Section({ group: [title, rows] }: { group: Group }) {
                     {k}
                   </span>
                 ) : (
-                  <Kbd key={k}>{k}</Kbd>
+                  <Kbd key={k} className={cn("touch:inline-flex", k.length === 1 && "w-5 px-0")}>
+                    {k}
+                  </Kbd>
                 ),
               )}
             </span>
@@ -85,12 +78,12 @@ export function ShortcutsDialog() {
         <div className="grid gap-x-10 gap-y-5 sm:grid-cols-2">
           <div className="flex flex-col gap-5">
             <Section group={ANYWHERE} />
-            <Section group={GO_TO} />
+            <Section group={OPEN_JOB} />
+            <Section group={LISTS} />
           </div>
           <div className="flex flex-col gap-5">
-            {GROUPS.map(g => (
-              <Section key={g[0]} group={g} />
-            ))}
+            <Section group={QUESTIONS} />
+            <Section group={GO_TO} />
           </div>
         </div>
       </DialogContent>

@@ -1,4 +1,4 @@
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, RotateCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button, Checkbox, Combobox, ConfirmDialog, Input, Select, Switch, Textarea, Tooltip, type Option } from "../../components/ui";
@@ -43,7 +43,7 @@ function Typed({
   placeholder?: string;
   min?: number;
   step?: number;
-  multiline?: boolean;
+  multiline?: boolean | "wrap";
 }) {
   const [draft, setDraft] = useState(value);
   const [shown, setShown] = useState(value);
@@ -67,8 +67,11 @@ function Typed({
       setDraft(e.target.value);
     },
     onBlur: () => void commit(),
-    onKeyDown: (e: { key: string; ctrlKey: boolean; metaKey: boolean; currentTarget: HTMLElement }) => {
-      if (e.key === "Enter" && (!multiline || e.ctrlKey || e.metaKey)) e.currentTarget.blur();
+    onKeyDown: (e: { key: string; ctrlKey: boolean; metaKey: boolean; currentTarget: HTMLElement; preventDefault: () => void }) => {
+      if (e.key === "Enter" && (multiline !== true || e.ctrlKey || e.metaKey)) {
+        if (multiline) e.preventDefault();
+        e.currentTarget.blur();
+      }
       if (e.key === "Escape") {
         setDraft(value);
         e.currentTarget.blur();
@@ -77,6 +80,20 @@ function Typed({
     className,
   };
   return multiline ? <Textarea {...rest} {...editing} /> : <Input {...rest} {...editing} />;
+}
+
+const spinless = "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
+function Unit({ unit, children }: { unit: string | undefined; children: ReactNode }) {
+  if (!unit) return children;
+  return (
+    <span className="relative inline-flex">
+      {children}
+      <span aria-hidden className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-fg-muted">
+        {unit}
+      </span>
+    </span>
+  );
 }
 
 const number = (min: number | undefined, step: number | undefined) => (text: string) => {
@@ -105,9 +122,9 @@ function Control({
       return <Switch aria-label={label} checked={value === true} disabled={busy} onCheckedChange={v => void save(v)} />;
     case "number":
       return (
-        <>
+        <Unit unit={field.unit}>
           <Typed
-            aria-label={label}
+            aria-label={field.unit ? `${label}, ${field.unit}` : label}
             type="number"
             value={typeof value === "number" ? String(value) : ""}
             min={field.min ?? 0}
@@ -115,33 +132,32 @@ function Control({
             parse={number(field.min ?? 0, field.step ?? 1)}
             onCommit={save}
             disabled={busy}
-            className="tabular w-24 text-right"
+            className={cn("tabular text-right", spinless, field.unit ? "w-32 pr-14" : "w-24")}
           />
-          <span className="w-12 text-fg-muted">{field.unit}</span>
-        </>
+        </Unit>
       );
     case "pair": {
       const pair = Array.isArray(value) ? value : [];
       return (
         <>
           {[0, 1].map(i => (
-            <Typed
-              key={i}
-              aria-label={`${label}, ${i ? "most" : "least"}`}
-              type="number"
-              value={typeof pair[i] === "number" ? String(pair[i]) : ""}
-              min={field.min ?? 0}
-              step={field.step ?? 1}
-              parse={text => {
-                const n = number(field.min ?? 0, field.step ?? 1)(text);
-                return "error" in n ? n : { value: i ? [pair[0], n.value] : [n.value, pair[1]] };
-              }}
-              onCommit={save}
-              disabled={busy}
-              className="tabular w-20 text-right"
-            />
+            <Unit key={i} unit={field.unit}>
+              <Typed
+                aria-label={`${label}, ${i ? "most" : "least"}${field.unit ? `, ${field.unit}` : ""}`}
+                type="number"
+                value={typeof pair[i] === "number" ? String(pair[i]) : ""}
+                min={field.min ?? 0}
+                step={field.step ?? 1}
+                parse={text => {
+                  const n = number(field.min ?? 0, field.step ?? 1)(text);
+                  return "error" in n ? n : { value: i ? [pair[0], n.value] : [n.value, pair[1]] };
+                }}
+                onCommit={save}
+                disabled={busy}
+                className={cn("tabular text-right", spinless, field.unit ? "w-24 pr-9" : "w-20")}
+              />
+            </Unit>
           ))}
-          <span className="w-12 text-fg-muted">{field.unit}</span>
         </>
       );
     }
@@ -172,24 +188,25 @@ function Control({
           parse={text => ({ value: text.trim().replace(/\s+/g, " ") || null })}
           onCommit={save}
           disabled={busy}
-          className="min-h-28 w-full"
+          className="h-14 min-h-0 w-full max-sm:h-15.5 touch:h-15.5 focus:h-28!"
         />
       );
     case "list":
       return (
         <Typed
+          multiline="wrap"
           aria-label={label}
           value={Array.isArray(value) ? value.join(", ") : ""}
           placeholder={field.placeholder ?? "Comma-separated"}
           parse={text => ({
             value: text
-              .split(",")
+              .split(/[,\n]/)
               .map(s => s.trim())
               .filter(Boolean),
           })}
           onCommit={save}
           disabled={busy}
-          className="w-full sm:w-72"
+          className="field-sizing-content min-h-8 w-full resize-none py-1 sm:w-72 touch:min-h-10 touch:py-2"
         />
       );
     case "choice":
@@ -220,7 +237,7 @@ function Control({
           parse={text => (/^\d\d:\d\d$/.test(text) ? { value: text } : { error: "Enter a time" })}
           onCommit={save}
           disabled={busy}
-          className="tabular w-32"
+          className="tabular w-36"
         />
       );
     case "zone":
@@ -233,7 +250,7 @@ function Control({
           search="Search time zones…"
           empty="No time zone matches"
           disabled={busy}
-          className="w-full sm:w-64"
+          className="w-full sm:w-72"
         />
       );
   }
@@ -289,27 +306,27 @@ export function ConfigRow({
     setAsking({ next, spec });
     return Promise.resolve(false);
   };
-  const wide =
-    (field.kind === "text" && !field.short) ||
-    field.kind === "words" ||
-    field.kind === "pair" ||
-    field.kind === "list" ||
-    field.kind === "zone" ||
-    field.kind === "choices";
   return (
     <SettingRow
-      stack={wide}
+      stack={field.kind !== "bool" && field.kind !== "choice"}
       block={field.kind === "words"}
       label={label}
+      tag={
+        restart &&
+        !waiting && (
+          <Tooltip content="Read when the app starts: a change waits for a restart">
+            <span className="ml-2 inline-flex items-center gap-1 align-middle text-xs font-normal text-fg-subtle">
+              <RotateCw className="size-3" aria-hidden />
+              Restart
+            </span>
+          </Tooltip>
+        )
+      }
       description={
-        (description || restart) && (
+        (description || waiting) && (
           <>
             {description}
-            {restart && (
-              <span className={cn("block", waiting && "text-warning-text")}>
-                {waiting ? "Saved. The app uses it after a restart." : "Read when the app starts: a change waits for a restart."}
-              </span>
-            )}
+            {waiting && <span className="block text-warning-text">Saved. The app uses it after a restart.</span>}
           </>
         )
       }

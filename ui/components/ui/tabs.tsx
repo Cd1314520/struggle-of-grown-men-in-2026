@@ -4,29 +4,40 @@ import { cn } from "../../lib/cn";
 
 export const Tabs = T.Root;
 export const TabsContent = T.Content;
-export function TabsList({ className, variant, ...props }: ComponentProps<typeof T.List> & { variant?: "bar" }) {
+export function TabsList({ className, variant, style, ...props }: ComponentProps<typeof T.List> & { variant?: "bar" }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const fade = useEdgeFade(ref);
+  useRevealSelected(ref);
   return (
     <T.List
-      className={cn("flex h-11 items-center gap-1 overflow-x-auto border-b border-border touch:h-12", variant === "bar" && "h-12 border-b-0", className)}
+      ref={ref}
+      style={{ ...fade, ...style }}
+      className={cn(
+        "flex h-11 items-center gap-1 overflow-x-auto border-b border-border max-sm:gap-0.5 touch:h-12",
+        variant === "bar" && "h-12 border-b-0",
+        className,
+      )}
       {...props}
     />
   );
 }
 const PILL =
-  "inline-flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md border border-transparent px-2.5 text-sm font-medium whitespace-nowrap text-fg-muted transition-colors outline-none hover:bg-subtle hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-inset touch:h-9 touch:min-w-9";
+  "inline-flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md border border-transparent px-2.5 text-sm font-medium whitespace-nowrap text-fg-muted transition-colors outline-none hover:bg-subtle hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-inset max-sm:px-2 touch:h-9 touch:min-w-9";
 
 export function TabsTrigger({ className, count, children, ...props }: ComponentProps<typeof T.Trigger> & { count?: number | undefined }) {
   return (
     <T.Trigger
       className={cn(
         PILL,
-        "data-[state=active]:border-border data-[state=active]:bg-muted/60 data-[state=active]:text-fg data-[state=active]:shadow-xs",
+        "group data-[state=active]:border-border data-[state=active]:bg-muted/60 data-[state=active]:text-fg data-[state=active]:shadow-xs data-[state=active]:hover:bg-muted/60",
         className,
       )}
       {...props}
     >
       {children}
-      {count !== undefined && <span className="tabular text-xs font-normal text-fg-subtle">{count.toLocaleString()}</span>}
+      {count !== undefined && (
+        <span className="tabular text-xs font-normal text-fg-subtle group-data-[state=active]:text-fg-muted">{count.toLocaleString()}</span>
+      )}
     </T.Trigger>
   );
 }
@@ -59,6 +70,31 @@ export function useEdgeFade(ref: RefObject<HTMLDivElement | null>) {
   return mask ? { maskImage: mask } : undefined;
 }
 
+export function useRevealSelected(ref: RefObject<HTMLDivElement | null>) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const reveal = () => {
+      const on = el.querySelector<HTMLElement>('[aria-selected="true"]');
+      if (!on || el.scrollWidth <= el.clientWidth) return;
+      const pad = parseInt(FADE, 10) + 8;
+      const box = el.getBoundingClientRect(),
+        pill = on.getBoundingClientRect();
+      if (pill.left < box.left + pad) el.scrollLeft -= box.left + pad - pill.left;
+      else if (pill.right > box.right - pad) el.scrollLeft += pill.right - (box.right - pad);
+    };
+    reveal();
+    const watch = new MutationObserver(reveal);
+    watch.observe(el, { subtree: true, childList: true, attributes: true, attributeFilter: ["aria-selected"] });
+    const ro = new ResizeObserver(reveal);
+    ro.observe(el);
+    return () => {
+      watch.disconnect();
+      ro.disconnect();
+    };
+  }, [ref]);
+}
+
 export interface Segment<T extends string> {
   value: T;
   label: ReactNode;
@@ -81,6 +117,7 @@ export function Segments<T extends string>({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const fade = useEdgeFade(ref);
+  useRevealSelected(ref);
   return (
     <div ref={ref} style={fade} role="tablist" aria-label={ariaLabel} className={cn("flex items-center gap-1 overflow-x-auto", className)}>
       {segments.map(s => {

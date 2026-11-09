@@ -16,7 +16,7 @@ export function Score({
 }) {
   if (value == null) return <span className={cn("text-sm text-fg-subtle", className)}>–</span>;
   const tone = threshold != null && value < threshold ? "text-fg-subtle" : value >= 80 ? "text-success-text" : "text-fg";
-  if (size === "sm") return <span className={cn("tabular text-sm font-semibold", tone, className)}>{value}</span>;
+  if (size === "sm") return <span className={cn("tabular inline-block min-w-[3ch] text-right text-sm font-semibold", tone, className)}>{value}</span>;
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       <span className={cn("tabular text-2xl font-semibold", tone)}>{value}</span>

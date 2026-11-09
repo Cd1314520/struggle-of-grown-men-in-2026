@@ -99,7 +99,7 @@ export function groupsOf(items: readonly Item[]) {
   return {
     missed: sorted.filter(i => i.answer === "no"),
     unclear: sorted.filter(i => i.answer === "unclear"),
-    met: sorted.filter(i => i.answer === "yes"),
+    met: sorted.filter(i => i.answer === "yes").sort((a, b) => Number(a.required) - Number(b.required) || b.weight - a.weight),
   };
 }
 export const tally = (items: readonly Item[]) => ({
@@ -211,7 +211,7 @@ export function leadOf(j: Pick<JobDetail, "status" | "note" | "updated_at" | "su
   const note = j.note ? `: ${j.note}` : "";
   if (j.status === "offer") return { tone: "success" as Tone, text: `Offer${note}` };
   if (ENDED.includes(j.status)) return { tone: "neutral" as Tone, text: `${j.status === "withdrawn" ? "Withdrawn" : "Declined"} ${ago(j.updated_at)}${note}` };
-  if (!n) return { tone: "neutral" as Tone, text: `Sent ${ago(j.submitted_at)}. No reply yet.` };
+  if (!n) return { tone: "neutral" as Tone, text: "No reply yet" };
   if (n.whose === "you") return { tone: "warning" as Tone, text: `Your move${which}${n.due ? `, due ${stepAt(n.at)}` : ""}` };
   if (n.whose === "upcoming") return { tone: "info" as Tone, text: `Booked for ${stepAt(n.at)}${which}` };
   const days = Math.floor((now - stepMs(n.at)) / DAY);

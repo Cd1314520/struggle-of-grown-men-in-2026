@@ -1,4 +1,4 @@
-import { Check, ListFilter, SearchX } from "lucide-react";
+import { ListFilter, SearchX } from "lucide-react";
 import type { ListGroup } from "../../../src/api-types";
 import { Button, EmptyState, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Segments } from "../ui";
 import { cn } from "../../lib/cn";
@@ -45,8 +45,8 @@ export function FilterMenu({
               key={f.key}
               role="menuitemcheckbox"
               aria-checked={checked}
-              icon={<Check className={cn(checked ? "text-accent-text opacity-100" : "opacity-0")} />}
-              shortcut={f.count.toLocaleString()}
+              checked={checked}
+              count={f.count.toLocaleString()}
               onSelect={e => {
                 e.preventDefault();
                 onToggle(f.key);
@@ -103,6 +103,7 @@ export function NoMatch({ noun, q, filtered, onClear }: { noun: string; q: strin
   return (
     <EmptyState
       size="sm"
+      className="pt-24"
       icon={<SearchX />}
       title={`No ${noun} match`}
       description={q1 ? `Nothing matches “${q1}”${filtered ? " with these filters" : ""}.` : "Nothing fits these filters."}

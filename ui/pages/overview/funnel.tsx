@@ -1,6 +1,7 @@
 import type { Stats } from "../../../src/api-types";
 import { Skeleton, WorkspaceSection } from "../../components/ui";
 import { useStats } from "../../lib/api";
+import { cn } from "../../lib/cn";
 import { num } from "../../lib/format";
 import { useWidth } from "../../lib/media";
 import { LABEL_HEAD } from "./rail";
@@ -28,9 +29,9 @@ const HEAD = 42,
 
 function approvals({ auto, user }: Stats["approvals"]) {
   const n = auto + user;
-  if (!n) return "No approvals in 30 days.";
-  const who = !user ? "all by auto apply" : !auto ? "all by you" : `${num(auto)} by auto apply, ${num(user)} by you`;
-  return `${num(n)} ${n === 1 ? "approval" : "approvals"} in 30 days, ${who}.`;
+  if (!n) return "No approvals in the last 30 days";
+  const who = !user ? "all by auto apply" : !auto ? "all by you" : `${num(auto)} auto-approved, ${num(user)} by you`;
+  return `${num(n)} ${n === 1 ? "approval" : "approvals"} in the last 30 days by approval date, ${who}`;
 }
 
 const percent = (part: number, whole: number) => {
@@ -44,7 +45,37 @@ function band(x0: number, s0: number, s1: number, x1: number, t0: number, t1: nu
   return `M${x0},${s0}C${m},${s0} ${m},${t0} ${x1},${t0}V${t1}C${m},${t1} ${m},${s1} ${x0},${s1}Z`;
 }
 
-function Sankey({ funnel: f }: { funnel: Stats["funnel"] }) {
+function Stacked({ funnel: f }: { funnel: Stats["funnel"] }) {
+  return (
+    <ol className="space-y-4">
+      {STAGES.map(([key, label, dropped], i) => {
+        const prev = STAGES[i - 1]?.[0],
+          lost = prev ? f[prev] - f[key] : 0;
+        return (
+          <li key={key}>
+            <div className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="text-fg-muted">{label}</span>
+              <span className="tabular">
+                <span className="font-medium text-fg">{num(f[key])}</span>
+                {prev && <span className="text-xs text-fg-muted"> {percent(f[key], f[prev])}</span>}
+              </span>
+            </div>
+            <div className="mt-1.5 h-2 rounded-sm bg-muted">
+              <div className="h-full min-w-0.5 rounded-sm bg-chart-1" style={{ width: f.assessed ? `${(f[key] / f.assessed) * 100}%` : 0 }} />
+            </div>
+            {prev && lost > 0 && (
+              <div className="tabular mt-1 text-xs text-fg-muted">
+                {dropped} <span className="font-medium text-fg">{num(lost)}</span> {percent(lost, f[prev])}
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function Sankey({ funnel: f, approved }: { funnel: Stats["funnel"]; approved: string }) {
   const [ref, measured] = useWidth();
   const width = Math.max(measured, MIN_WIDTH),
     step = (width - RIGHT) / (STAGES.length - 1),
@@ -56,8 +87,10 @@ function Sankey({ funnel: f }: { funnel: Stats["funnel"] }) {
     .join(", ");
 
   return (
-    <div ref={ref} className="overflow-x-auto">
-      {measured > 0 ? (
+    <div ref={ref}>
+      {measured > 0 && measured < MIN_WIDTH ? (
+        <Stacked funnel={f} />
+      ) : measured > 0 ? (
         <svg width={width} height={HEIGHT} role="img" aria-label={`Of ${num(f.assessed)} postings assessed in the last 30 days: ${summary}.`} className="block">
           {STAGES.map(([key, label, dropped], i) => {
             const prev = STAGES[i - 1]?.[0];
@@ -77,7 +110,7 @@ function Sankey({ funnel: f }: { funnel: Stats["funnel"] }) {
                 {lost > 0 && (
                   <path
                     d={band(x0, top, top + h(lost), x1, dropTop, dropTop + h(lost))}
-                    className="fill-fg-subtle opacity-20 transition-opacity hover:opacity-40"
+                    className="fill-fg-subtle opacity-20 transition-opacity hover:opacity-40 dark:opacity-30 dark:hover:opacity-50"
                   >
                     <title>{`${from} → ${dropped}: ${num(lost)} (${percent(lost, f[prev])})`}</title>
                   </path>
@@ -97,7 +130,10 @@ function Sankey({ funnel: f }: { funnel: Stats["funnel"] }) {
             const prev = STAGES[i - 1]?.[0];
             return (
               <g key={key}>
-                <rect x={x(i)} y={HEAD} width={NODE} height={h(f[key])} rx={1} className="fill-chart-1" />
+                <rect x={x(i)} y={HEAD} width={NODE} height={h(f[key])} rx={1} className="fill-chart-1">
+                  {key === "approved" && <title>{approved}</title>}
+                  {key === "responded" && <title>Counts applications to postings found in the last 30 days</title>}
+                </rect>
                 <text x={x(i)} y={14} className="fill-fg-muted text-xs">
                   {label}
                 </text>
@@ -121,15 +157,15 @@ export function Funnel() {
   const f = st?.funnel;
   return (
     <WorkspaceSection
-      className={LABEL_HEAD}
+      className={cn(LABEL_HEAD, "lg:max-xl:border-b-0")}
       title="Funnel"
       description={
         st && f
-          ? `Of ${num(f.found)} postings found in the last 30 days, ${percent(f.assessed, f.found)} passed the title screen to be assessed. ${approvals(st.approvals)}`
+          ? `Postings found in the last 30 days: ${num(f.found)}, ${percent(f.assessed, f.found)} passed the title screen`
           : "Postings found in the last 30 days"
       }
     >
-      {f ? <Sankey funnel={f} /> : <Skeleton className="h-[240px]" />}
+      {st && f ? <Sankey funnel={f} approved={approvals(st.approvals)} /> : <Skeleton className="h-[240px]" />}
     </WorkspaceSection>
   );
 }

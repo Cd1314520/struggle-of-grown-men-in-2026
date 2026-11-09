@@ -1,6 +1,10 @@
 import { ArrowRight } from "lucide-react";
 import { ListGroup } from "../../components/ui";
 
+export const CLOSED = "[&>[role=row]:last-child]:after:hidden";
+
+export const RAIL_TITLE = "@max-3xl/ws:line-clamp-2! @max-3xl/ws:whitespace-normal!";
+
 export const LABEL_HEAD = "[&>div:first-child_h2]:text-sm [&>div:first-child_h2]:font-medium";
 
 export function RailHead({ label, count, link }: { label: string; count?: number | undefined; link?: { href: string; label: string } | false }) {

@@ -37,7 +37,9 @@ const BUCKETS = [
   ["Older", 7 * DAY],
   ["This week", DAY],
 ] as const;
-export const bucket = (g: QuestionGroup, now = Date.now()) => BUCKETS.find(([, ms]) => now - g.openedAt > ms)?.[0] ?? "Opened today";
+const askedAt = (g: QuestionGroup) => Date.parse(g.createdAt);
+export const byAsked = (groups: readonly QuestionGroup[]) => [...groups].sort((a, b) => askedAt(b) - askedAt(a));
+export const bucket = (g: QuestionGroup, now = Date.now()) => BUCKETS.find(([, ms]) => now - askedAt(g) > ms)?.[0] ?? "Today";
 
 export function sections(groups: readonly QuestionGroup[]) {
   const out: { label: string; groups: QuestionGroup[] }[] = [];
@@ -62,9 +64,9 @@ export function nextAfter(answered: QuestionGroup, before: readonly string[], le
 }
 
 const ELSEWHERE: readonly (readonly [GateKind, string, string])[] = [
-  ["confirm_submit", "submit to confirm", "submits to confirm"],
-  ["submission_ambiguous", "submission to check", "submissions to check"],
-  ["manual", "browser hand-off", "browser hand-offs"],
+  ["submission_ambiguous", "to check", "to check"],
+  ["confirm_submit", "to confirm", "to confirm"],
+  ["manual", "hand\u2011off", "hand\u2011offs"],
   ["cover_letter", "cover letter", "cover letters"],
 ];
 export function elsewhere(groups: readonly QuestionGroup[]) {
@@ -72,10 +74,52 @@ export function elsewhere(groups: readonly QuestionGroup[]) {
   for (const g of groups) if (!isQuestion(g)) n.set(g.kind, (n.get(g.kind) ?? 0) + g.jobs.length);
   const parts = ELSEWHERE.flatMap(([kind, one, many]) => {
     const c = n.get(kind) ?? 0;
-    return c ? [`${c} ${c === 1 ? one : many}`] : [];
+    return c ? [`${c} ${c === 1 ? one : many}`.replace(/ /g, "\u00a0")] : [];
   });
   const total = [...n.values()].reduce((a, b) => a + b, 0);
-  return { total, text: parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1) ?? ""}` : (parts[0] ?? "") };
+  return { total, text: parts.join(" · ") };
+}
+
+export const stale = (g: QuestionGroup, now = Date.now()) => bucket(g, now) === "Older";
+
+export const queuedAfter = (g: QuestionGroup) => Math.max(0, ...g.jobs.map(j => j.queuedAfter));
+
+export function employers(g: QuestionGroup, max = 3) {
+  const names = [...new Set(g.jobs.map(j => j.company))];
+  if (names.length <= max) return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1) ?? ""}` : (names[0] ?? "");
+  return `${names.slice(0, max - 1).join(", ")} and ${names.length - max + 1} more`;
+}
+
+const YES_NO = /^(yes|no)$/i;
+export function shape(g: QuestionGroup) {
+  const opts = choices(g);
+  if (opts.length === 2 && opts.every(o => YES_NO.test(o.trim()))) return "Yes / No";
+  if (opts.length === 1) return "One option";
+  if (opts.length) return `Pick 1 of ${opts.length}`;
+  return "Free text";
+}
+
+const COMMON = new Set(["whet", "when", "what", "whic", "that", "this", "with", "from", "have", "your", "they", "their", "there"]);
+const stems = (s: string) => new Set((s.toLowerCase().match(/[a-z0-9]{4,}/g) ?? []).map(w => w.slice(0, 5)).filter(w => !COMMON.has(w.slice(0, 4))));
+export function addsToQuestion(g: QuestionGroup) {
+  if (!g.missing) return false;
+  const q = stems(g.text),
+    m = [...stems(g.missing)];
+  return m.filter(w => !q.has(w)).length >= Math.max(3, m.length / 2);
+}
+
+const PRIVATE: readonly QuestionGroup["why"][] = ["agreement", "sensitive_id"];
+export function bankByDefault(g: QuestionGroup) {
+  if (g.kind !== "question" || PRIVATE.includes(g.why)) return false;
+  const names = g.jobs
+    .map(j =>
+      j.company
+        .toLowerCase()
+        .replace(/\s*\(.*\)\s*/g, "")
+        .trim(),
+    )
+    .filter(n => n.length > 2);
+  return !choices(g).some(o => names.some(n => o.toLowerCase().includes(n)));
 }
 
 export const drafts = new Map<string, string>();

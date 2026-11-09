@@ -92,7 +92,7 @@ export function Sheet({
           {...focus}
           className={cn(
             "fixed inset-y-0 z-50 flex w-full flex-col bg-surface shadow-lg outline-none",
-            side === "right" ? "right-0 max-w-2xl animate-slide-left border-l" : "left-0 max-w-[280px] border-r",
+            side === "right" ? "right-0 max-w-2xl animate-slide-left border-l" : "left-0 max-w-[280px] animate-slide-right border-r",
             className,
           )}
         >

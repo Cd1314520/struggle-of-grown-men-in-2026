@@ -10,7 +10,7 @@ import { useHotkeys } from "../../lib/hotkeys";
 import { TABLET, useMedia, WIDE } from "../../lib/media";
 import { navigate, useRoute } from "../../lib/router";
 import { FocusPane, type Answer } from "./focus";
-import { choices, drafts, elsewhere, isQuestion, matches, nextAfter } from "./model";
+import { byAsked, choices, drafts, elsewhere, isQuestion, matches, nextAfter } from "./model";
 import { Queue } from "./queue";
 
 const HOLD_MS = 600;
@@ -22,25 +22,24 @@ const open = (key: string | null) => {
 function Elsewhere({ groups }: { groups: readonly QuestionGroup[] }) {
   const { total, text } = elsewhere(groups);
   if (!total) return null;
-  const detail = text.charAt(0).toUpperCase() + text.slice(1);
   return (
-    <ListNotice tone="warning" icon={<CircleAlert />}>
-      <span className="flex flex-wrap items-center justify-between gap-x-3">
-        <span title={detail}>
-          {total.toLocaleString()} more {total === 1 ? "waits" : "wait"} on you
-        </span>
+    <ListNotice
+      tone="warning"
+      icon={<CircleAlert />}
+      action={
         <Button asChild size="sm" variant="link" className="px-0 touch:px-0">
           <a href="#pipeline?group=needs_you">
             Pipeline
             <ArrowRight />
           </a>
         </Button>
-      </span>
+      }
+    >
+      {total.toLocaleString()} more {total === 1 ? "waits" : "wait"} on you{text && ":"}
+      {text && <span className="block text-fg-muted">{text}</span>}
     </ListNotice>
   );
 }
-
-const HINT = "What application forms asked that your profile can't answer.";
 
 function Loading() {
   return (
@@ -50,11 +49,14 @@ function Loading() {
           <SkeletonRows rows={8} />
         </Workspace>
       </div>
-      <div className="hidden flex-1 flex-col gap-4 bg-surface px-10 pt-24 lg:flex">
-        <Skeleton className="h-7 w-3/5" />
-        <Skeleton className="h-4 w-2/5" />
-        <Skeleton className="mt-6 h-12 w-full max-w-2xl" />
-        <Skeleton className="h-12 w-full max-w-2xl" />
+      <div className="hidden flex-1 flex-col bg-surface lg:flex">
+        <div className="h-12 shrink-0 border-b border-border" />
+        <div className="flex w-full max-w-3xl flex-col gap-4 px-6 pt-10">
+          <Skeleton className="h-7 w-3/5" />
+          <Skeleton className="h-4 w-2/5" />
+          <Skeleton className="mt-6 h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </div>
       </div>
     </div>
   );
@@ -66,7 +68,7 @@ export function QuestionsPage() {
   const wide = useMedia(WIDE),
     tablet = useMedia(TABLET);
   const { data, isPending, isError, refetch } = useQuestions();
-  const groups = useMemo(() => (data ?? []).filter(isQuestion), [data]);
+  const groups = useMemo(() => byAsked((data ?? []).filter(isQuestion)), [data]);
   const [search, setSearch] = useState("");
   const searchBox = useRef<HTMLInputElement>(null);
   const shown = useMemo(() => (search.trim() ? groups.filter(g => matches(g, search)) : groups), [groups, search]);
@@ -125,7 +127,7 @@ export function QuestionsPage() {
       const result = await api.answer(a.gateId, a.answer, a.scope);
       drafts.delete(group.key);
       await refreshAll();
-      const left = (queryClient.getQueryData<QuestionGroup[]>(["questions"]) ?? []).filter(g => isQuestion(g) && matches(g, search));
+      const left = byAsked((queryClient.getQueryData<QuestionGroup[]>(["questions"]) ?? []).filter(g => isQuestion(g) && matches(g, search)));
       const next = nextAfter(group, before, left);
       const n = result.jobIds.length;
       const followUp = next && !before.includes(next.key);
@@ -145,7 +147,7 @@ export function QuestionsPage() {
   if (isPending) return <Loading />;
   if (isError)
     return (
-      <Workspace bar={{ title: "Questions", hint: HINT }}>
+      <Workspace bar={{ title: "Questions" }}>
         <EmptyState
           className="pt-24"
           icon={<CircleAlert />}
@@ -165,13 +167,8 @@ export function QuestionsPage() {
 
   if (!groups.length)
     return (
-      <Workspace aria-label="Questions" bar={{ title: "Questions", count: 0, hint: HINT }} notice={<Elsewhere groups={data} />}>
-        <EmptyState
-          className="pt-24"
-          icon={<CheckCheck />}
-          title="All caught up"
-          description="Nothing is waiting on an answer. When an application asks something your profile can't answer, it lands here."
-        />
+      <Workspace aria-label="Questions" bar={{ title: "Questions", count: 0 }} notice={<Elsewhere groups={data} />}>
+        <EmptyState className="pt-24" icon={<CheckCheck />} title="All caught up" />
       </Workspace>
     );
 
@@ -198,7 +195,11 @@ export function QuestionsPage() {
           />
         )
       }
-      empty={<EmptyState icon={<PanelRight />} title="No question open" description="Pick a question from the queue to answer it." className="h-full" />}
+      empty={
+        shown.length ? (
+          <EmptyState icon={<PanelRight />} title="No question open" description="Pick a question from the queue to answer it." className="h-full" />
+        ) : null
+      }
     >
       <Workspace
         frame="column"
@@ -206,7 +207,7 @@ export function QuestionsPage() {
         bodyRole="none"
         bar={{
           title: "Questions",
-          count: groups.length,
+          count: search.trim() ? shown.length : groups.length,
           ...(tablet && { noun: "to answer" }),
           search: (
             <SearchInput ref={searchBox} value={search} onValueChange={setSearch} placeholder="Filter by question or employer" aria-label="Filter questions" />

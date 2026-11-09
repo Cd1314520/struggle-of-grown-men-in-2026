@@ -4,7 +4,7 @@ import type { DigestStatus } from "../../../src/digest";
 import { ListBody, ListRow, StatusLabel } from "../../components/ui";
 import { ago, cap, MINUTE, num, plural } from "../../lib/format";
 import type { Tone } from "../../lib/labels";
-import { RailHead } from "./rail";
+import { CLOSED, RailHead } from "./rail";
 
 interface Row {
   name: string;
@@ -81,12 +81,18 @@ function rows(s: Summary): Row[] {
   return [scanner, mailbox, auto, digest, targets];
 }
 
+const NORMAL: readonly Tone[] = ["success", "neutral", "accent"];
+
 export function Health({ summary }: { summary: Summary | undefined }) {
+  const off = summary ? rows(summary).filter(r => r.pulse === true || !NORMAL.includes(r.state[1])) : [];
   return (
-    <ListBody label="System" loading={!summary}>
+    <ListBody label="System" loading={!summary} className={CLOSED}>
       <RailHead label="System" link={{ href: "#settings", label: "Settings" }} />
+      {summary && !off.length && (
+        <ListRow title="All normal" gist={summary.lastScan ? `Scanned ${ago(summary.lastScan)}` : undefined} fact={<StatusLabel tone="success" label="OK" />} />
+      )}
       {summary &&
-        rows(summary).map(r => (
+        off.map(r => (
           <ListRow
             key={r.name}
             title={r.name}

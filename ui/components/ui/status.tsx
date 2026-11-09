@@ -23,9 +23,9 @@ export function StatusDot({ tone, pulse, className }: { tone: Tone; pulse?: bool
 
 export function StatusLabel({ tone, label, pulse, className }: { tone: Tone; label: string; pulse?: boolean | undefined; className?: string | undefined }) {
   return (
-    <span className={cn("inline-flex items-center gap-2 text-sm whitespace-nowrap text-fg-muted", className)}>
-      <StatusDot tone={tone} pulse={pulse} />
-      {label}
+    <span className={cn("inline-flex items-baseline gap-2 text-sm whitespace-nowrap text-fg-muted", className)}>
+      <StatusDot tone={tone} pulse={pulse} className="self-center" />
+      <span>{label}</span>
     </span>
   );
 }

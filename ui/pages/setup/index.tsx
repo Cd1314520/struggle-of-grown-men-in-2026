@@ -1,23 +1,26 @@
-import { Check, ChevronDown, CircleCheck, Copy, ExternalLink, Minus, Radar, RefreshCw, X } from "lucide-react";
+import { Check, ChevronDown, Copy, ExternalLink, Minus, Radar, RefreshCw, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { SetupCheck, SetupResult, SetupStep, SetupStepId } from "../../../src/api-types";
-import { Button, Disclosure, ListIcon, ListNotice, SkeletonRows, Workspace } from "../../components/ui";
+import { Button, Disclosure, ListIcon, SkeletonRows, Workspace } from "../../components/ui";
 import { api, queryClient, refreshAll, useSetup, useSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
+import { ago, dateTime } from "../../lib/format";
 import { href } from "../../lib/router";
 
 function Code({ children }: { children: string }) {
   return (
     <div className="group relative my-2 rounded-md border border-border bg-subtle">
-      <pre className="overflow-x-auto px-3 py-2 pr-10 font-mono text-xs leading-5 text-fg">{children}</pre>
+      <pre className="overflow-x-auto px-3 py-2 pr-10 font-mono text-xs leading-5 text-fg max-sm:whitespace-pre-wrap max-sm:[overflow-wrap:anywhere]">
+        {children}
+      </pre>
       <button
         type="button"
         aria-label="Copy"
         onClick={() => {
           void navigator.clipboard.writeText(children).then(() => toast.success("Copied"));
         }}
-        className="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-md text-fg-subtle hover:bg-muted hover:text-fg touch:size-9"
+        className="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-md bg-subtle text-fg-subtle hover:bg-muted hover:text-fg touch:size-9"
       >
         <Copy className="size-3.5" />
       </button>
@@ -32,7 +35,11 @@ interface StepCopy {
   how?: (r: SetupResult) => ReactNode;
   action?: (props: { primary: boolean; step: SetupStep; result: SetupResult }) => ReactNode;
   shown?: (c: SetupCheck) => boolean;
+  summary?: (step: SetupStep) => string | null | undefined;
 }
+
+const detail = (step: SetupStep, key: string) => step.checks.find(c => c.key === key)?.detail;
+const lastScan = (d: string | null | undefined) => d?.match(/^Last scan (\S+)$/)?.[1];
 
 const link = (to: string, label: string) =>
   function StepLink({ primary }: { primary: boolean }) {
@@ -48,33 +55,44 @@ function ScanNow({ primary, result }: { primary: boolean; result: SetupResult })
   const profile = result.steps.find(s => s.id === "profile");
   const ready = !!profile?.checks.find(c => c.key === "targets.md")?.ok;
   return (
-    <Button
-      variant={primary ? "primary" : "secondary"}
-      icon={<Radar />}
-      loading={busy}
-      disabled={!ready || busy}
-      onClick={() => {
-        setBusy(true);
-        api.run("scan").then(
-          () => {
-            toast.success("Scan started", { description: "New postings show up in Pipeline as triage reads them." });
-            void refreshAll();
-            setBusy(false);
-          },
-          () => {
-            setBusy(false);
-          },
-        );
-      }}
-    >
-      Scan now
-    </Button>
+    <>
+      <Button
+        variant={primary ? "primary" : "secondary"}
+        icon={<Radar />}
+        loading={busy}
+        disabled={!ready || busy}
+        onClick={() => {
+          setBusy(true);
+          api.run("scan").then(
+            () => {
+              toast.success("Scan started");
+              void refreshAll();
+              setBusy(false);
+            },
+            () => {
+              setBusy(false);
+            },
+          );
+        }}
+      >
+        Scan now
+      </Button>
+      {!ready && (
+        <span className="self-center text-sm text-fg-muted">
+          Fill in{" "}
+          <a href={href("profile", "targets.md")} className="text-accent-text underline-offset-2 hover:underline">
+            targets.md
+          </a>{" "}
+          first
+        </span>
+      )}
+    </>
   );
 }
 
 const STEPS: Record<SetupStepId, StepCopy> = {
   tools: {
-    title: "Install the programs it runs",
+    title: "Programs",
     description: "The app starts these itself, so they must be on the PATH the service runs with.",
     how: () => (
       <>
@@ -90,9 +108,13 @@ const STEPS: Record<SetupStepId, StepCopy> = {
         </p>
       </>
     ),
+    summary: step => {
+      const missing = step.checks.filter(c => !c.ok).map(c => c.label);
+      return missing.length ? `Not found (optional): ${missing.join(", ")}` : `All ${step.checks.length} found`;
+    },
   },
   models: {
-    title: "Connect a model provider",
+    title: "Models",
     description: "Every agent runs through omp or Claude Code. Sign in to at least one, then choose a model for each kind of work.",
     shown: c => !c.ok || c.key === "catalog",
     how: () => (
@@ -100,43 +122,56 @@ const STEPS: Record<SetupStepId, StepCopy> = {
         <p>In a terminal on this machine, log in to a provider through omp (a subscription or an API key), or sign in to Claude Code, then check again:</p>
         <Code>omp login</Code>
         <Code>claude auth login</Code>
-        <p>
-          A stage on a <Mono>claude-code/…</Mono> model runs through Claude Code; any other through omp.
-        </p>
-        <p>
-          A stage left on omp&apos;s default uses whatever model omp picks. Cheap, fast models suit triage and the screen; assessing, tailoring and filling
-          forms need a capable one.
-        </p>
       </>
     ),
     action: link(href("settings", "models"), "Choose models"),
+    summary: step => detail(step, "catalog"),
   },
   machine: {
-    title: "Say who you are and where the app lives",
-    description: "config.local.yml holds what identifies you and this machine. It is not tracked, and is laid over config.yml key by key.",
+    title: "Identity & address",
+    description: "Your mailbox and name, kept in config.local.yml.",
     how: r => (
       <>
-        <p>Start from the example, then fill in the mailbox applications are sent from, and the name employers see on your resume:</p>
+        <p>
+          Settings saves to <Mono>{r.localConfig}</Mono>, which git does not track and which overrides <Mono>config.yml</Mono> key by key. To write it by hand,
+          copy the example and fill in the mailbox applications are sent from and the name on your resume:
+        </p>
         <Code>cp config.local.example.yml config.local.yml</Code>
         <p>
-          Set <Mono>publicUrl</Mono> when you reach the app under another name (a tailnet address, say): the app refuses requests to names it does not know, and
-          the Gmail sign-in returns there. Settings changes any of these too, writing this file: <Mono>{r.localConfig}</Mono>.
+          Set <Mono>publicUrl</Mono> when you reach the app under another name (a tailnet address, say): requests to other names are refused, and the Gmail
+          sign-in returns there.
         </p>
       </>
     ),
+    action: ({ primary }) => (
+      <>
+        <Button asChild variant={primary ? "primary" : "secondary"}>
+          <a href={href("settings", "mail")}>Set mailbox</a>
+        </Button>
+        <Button asChild variant="secondary">
+          <a href={href("settings", "server")}>Set address</a>
+        </Button>
+      </>
+    ),
+    summary: step => detail(step, "mailbox"),
   },
   resume: {
-    title: "Add your resume",
+    title: "Resume",
     description: "The stock resume every application is tailored from. Upload what you have, in any format, and an agent writes it on the template.",
     action: link(href("resume"), "Open Resume"),
+    summary: step => {
+      const pages = detail(step, "compiles");
+      return pages && `Compiles to ${pages}`;
+    },
   },
   profile: {
-    title: "Fill in your profile",
+    title: "Profile",
     description: "What you want, how postings are scored, and the answers forms ask for. They started as examples: replace every placeholder.",
     action: link(href("profile"), "Open Profile"),
+    summary: step => detail(step, "companies.yml"),
   },
   gmail: {
-    title: "Connect the application mailbox",
+    title: "Gmail",
     description: "Confirmation codes, replies and interview invitations arrive here. The app reads it and sends you a daily digest of open questions.",
     how: r => (
       <ol className="list-decimal space-y-1.5 pl-4">
@@ -161,31 +196,61 @@ const STEPS: Record<SetupStepId, StepCopy> = {
           </a>
         </Button>
       ) : null,
+    summary: step => detail(step, "connected") && `Connected as ${detail(step, "connected")}`,
   },
   scan: {
-    title: "Run the first scan",
+    title: "First scan",
     description: "Reads every watched board and feed. After this, scans run on their schedule and matches wait for you in Review.",
     action: ScanNow,
+    summary: step => {
+      const at = lastScan(detail(step, "scan"));
+      return at && `Last scan ${ago(at)}`;
+    },
   },
 };
+
+function checkLink(key: string) {
+  if (/\.(md|yml)$/.test(key) && key !== "config.local.yml") return href("profile", key);
+  if (key === "mailbox") return href("settings", "mail");
+  if (key === "publicUrl" || key === "pdfName") return href("settings", "server");
+  if (key === "catalog" || key.startsWith("stage.") || key.startsWith("harness.")) return href("settings", "models");
+  if (key === "main" || key === "compiles") return href("resume");
+  return null;
+}
 
 function CheckRow({ c, optional }: { c: SetupCheck; optional: boolean }) {
   const needed = c.required && !optional;
   const Icon = c.ok ? Check : needed ? X : Minus;
-  const file = /\.(md|yml)$/.test(c.key) ? c.key : null;
+  const to = checkLink(c.key);
+  const at = c.key === "scan" ? lastScan(c.detail) : undefined;
   return (
-    <li className="flex items-start gap-2.5 py-1">
-      <Icon className={cn("mt-0.5 size-4 shrink-0", c.ok ? "text-success-text" : needed ? "text-danger-text" : "text-fg-subtle")} aria-hidden />
+    <li className="flex items-start gap-1 py-1">
+      <Icon className={cn("mt-[3px] size-3.5 shrink-0", c.ok ? "text-success-text" : needed ? "text-danger-text" : "text-fg-subtle")} aria-hidden />
       <span className="sr-only">{c.ok ? "Done:" : needed ? "To do:" : "Optional:"}</span>
       <span className="min-w-0 flex-1 text-sm">
-        {file ? (
-          <a href={href("profile", file)} className="text-fg underline-offset-2 hover:text-accent-text hover:underline">
+        {to ? (
+          <a href={to} className="text-accent-text underline-offset-2 hover:underline">
             {c.label}
           </a>
         ) : (
           <span className="text-fg">{c.label}</span>
         )}
-        {c.detail && <span className="block break-words text-fg-muted sm:ml-2 sm:inline">{c.detail}</span>}
+        {!c.ok && !needed && (
+          <span aria-hidden className="ml-1.5 text-xs text-fg-subtle">
+            optional
+          </span>
+        )}
+        {c.detail && (
+          <span className="block break-words text-fg-muted sm:ml-2 sm:inline">
+            {at ? (
+              <time dateTime={at} title={dateTime(at)}>
+                Last scan {ago(at)}
+              </time>
+            ) : (
+              c.detail
+            )}
+          </span>
+        )}
       </span>
     </li>
   );
@@ -194,7 +259,9 @@ function CheckRow({ c, optional }: { c: SetupCheck; optional: boolean }) {
 function StepRow({ step, n, current, result }: { step: SetupStep; n: number; current: boolean; result: SetupResult }) {
   const [open, setOpen] = useState(false);
   const copy = STEPS[step.id];
-  const checks = step.checks.filter(copy.shown ?? (() => true));
+  const rank = (c: SetupCheck) => (c.ok ? 2 : c.required && step.required ? 0 : 1);
+  const checks = step.checks.filter(copy.shown ?? (() => true)).sort((a, b) => (step.done ? 0 : rank(a) - rank(b)));
+  const summary = step.done && !open ? copy.summary?.(step) : null;
   const action = copy.action?.({ primary: current, step, result });
   const list = checks.length > 0 && (
     <ul className="mt-1">
@@ -209,15 +276,17 @@ function StepRow({ step, n, current, result }: { step: SetupStep; n: number; cur
     <li
       aria-current={current ? "step" : undefined}
       className={cn(
-        "relative grid scroll-mt-14 grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-x-3 px-(--list-x) py-3 touch:py-3.5",
-        "after:absolute after:right-0 after:bottom-0 after:left-[calc(var(--list-x)+2.75rem)] after:h-px after:bg-border",
+        "relative grid scroll-mt-14 grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-x-3 px-(--list-x) py-3 max-sm:items-start touch:items-start touch:py-3.5",
+        "after:absolute after:right-0 after:bottom-0 after:left-[calc(var(--list-x)+2.75rem)] after:h-px after:bg-border/70",
         current && "bg-accent-soft/40 before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-accent",
       )}
     >
-      <ListIcon icon={step.done ? <Check /> : n} tone={step.done ? "success" : step.required ? "accent" : "neutral"} />
+      <ListIcon icon={step.done ? <Check /> : n} tone={step.done ? "success" : step.required ? "accent" : "neutral"} className="max-sm:-mt-1 touch:-mt-1" />
       <div className="min-w-0">
         <h3 className="text-base font-medium text-fg">{copy.title}</h3>
-        <p className={cn("mt-0.5 max-w-[72ch] text-sm text-fg-muted", step.done && !open && "truncate")}>{copy.description}</p>
+        <p className={cn("mt-0.5 text-sm text-fg-muted", step.done && !open ? "line-clamp-1 max-sm:line-clamp-2" : "max-w-[72ch]")}>
+          {summary || copy.description}
+        </p>
       </div>
       {step.done ? (
         <button
@@ -227,27 +296,32 @@ function StepRow({ step, n, current, result }: { step: SetupStep; n: number; cur
           onClick={() => {
             setOpen(!open);
           }}
-          className="inline-flex h-8 items-center gap-1 pl-1 text-sm text-fg-muted hover:text-fg touch:h-9"
+          className="inline-flex h-8 items-center gap-1 pl-1 text-sm text-fg-muted hover:text-fg max-sm:-mt-1 touch:h-9 touch:-mt-1.5"
         >
           Details
           <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
         </button>
+      ) : step.required ? (
+        <span className="sr-only">To do</span>
       ) : (
-        <span className={cn("pl-1 text-sm whitespace-nowrap", step.required ? "font-medium text-warning-text" : "text-fg-muted")}>
-          {step.required ? "To do" : "Optional"}
-        </span>
+        <span className="inline-flex h-8 items-center pl-1 text-sm whitespace-nowrap text-fg-muted max-sm:-mt-1 touch:-mt-1">Optional</span>
       )}
       {body && (list || (!step.done && (copy.how ?? action))) && (
-        <div id={details} className={cn("col-start-2 col-end-4 max-w-[56rem] min-w-0 pt-2", step.done && "animate-in")}>
+        <div id={details} className={cn("col-start-2 col-end-4 max-w-[72ch] min-w-0 pt-2 text-sm", step.done && "animate-in")}>
           {list}
           {!step.done && (copy.how ?? action) && (
             <div className="mt-3 flex flex-col gap-3">
-              {copy.how && (
-                <Disclosure id={`setup-${step.id}`} summary="How to do it">
-                  <div className="space-y-2">{copy.how(result)}</div>
-                </Disclosure>
-              )}
-              {action && <div className="flex flex-wrap gap-2">{action}</div>}
+              {copy.how &&
+                (current ? (
+                  <section aria-label="How to do it" className="space-y-2 text-fg-muted">
+                    {copy.how(result)}
+                  </section>
+                ) : (
+                  <Disclosure id={`setup-${step.id}`} summary="How to do it">
+                    <div className="space-y-2">{copy.how(result)}</div>
+                  </Disclosure>
+                ))}
+              {action && <div className={cn("flex flex-wrap gap-2", current && "order-first")}>{action}</div>}
             </div>
           )}
         </div>
@@ -273,30 +347,19 @@ export function SetupPage() {
   const required = data?.steps.filter(st => st.required) ?? [];
   const done = required.filter(st => st.done).length;
   const current = data?.steps.find(st => !st.done && st.required) ?? data?.steps.find(st => !st.done);
-  const progress = data && (
-    <>
-      <span className="tabular text-sm whitespace-nowrap text-fg-muted">
-        <span className="font-semibold text-fg">
-          {done} of {required.length}
-        </span>{" "}
-        <span className="max-sm:hidden">required steps </span>done
-      </span>
-      <div className="h-1.5 max-w-48 min-w-8 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden>
-        <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${(done / Math.max(1, required.length)) * 100}%` }} />
-      </div>
-    </>
-  );
+  const status =
+    data &&
+    (data.remaining ? `${done} of ${required.length} done` : s?.scanMinutes ? `Complete · scans every ${s.scanMinutes} min` : "Complete · scheduled scans off");
   return (
     <Workspace
       className="max-lg:[&_div:has(>[data-lead])]:flex-1"
       bar={{
         title: "Setup",
-        meta: data && (data.remaining ? `${data.remaining} to do` : "Complete"),
-        hint: "Everything a new install needs, checked against this machine as it is now. Work down the list.",
-        controls: progress && (
-          <div data-lead className="flex min-w-0 items-center gap-3 lg:hidden">
-            {progress}
-          </div>
+        meta: status,
+        controls: status && (
+          <span data-lead className="tabular flex-1 text-sm text-fg-muted lg:hidden">
+            {status}
+          </span>
         ),
         actions: (
           <Button size="sm" icon={<RefreshCw />} loading={checking} onClick={() => void recheck()}>
@@ -304,17 +367,6 @@ export function SetupPage() {
           </Button>
         ),
       }}
-      strip={progress && <div className="flex h-12 shrink-0 items-center gap-4 border-b border-border px-(--list-x) max-lg:hidden">{progress}</div>}
-      notice={
-        data?.remaining === 0 && (
-          <ListNotice icon={<CircleCheck />}>
-            <span className="font-medium">Setup is complete.</span>{" "}
-            {s?.scanMinutes
-              ? `Boards are scanned every ${s.scanMinutes} minutes. Matches wait for you in Review; questions the agents can't answer wait in Questions.`
-              : "Scheduled scans are off: start one from the sidebar. Matches wait for you in Review."}
-          </ListNotice>
-        )
-      }
     >
       {isPending || !data ? (
         <SkeletonRows rows={6} />

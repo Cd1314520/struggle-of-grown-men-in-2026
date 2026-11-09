@@ -30,9 +30,7 @@ import {
   Dialog,
   DialogContent,
   Disclosure,
-  Kbd,
   Linkified,
-  ListIcon,
   Menu,
   MenuContent,
   MenuItem,
@@ -44,7 +42,7 @@ import {
   Textarea,
   Time,
 } from "../../components/ui";
-import { useSummary } from "../../lib/api";
+import { useQuestions, useSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { ago, cap, plain } from "../../lib/format";
 import { combo, useHotkeys } from "../../lib/hotkeys";
@@ -52,7 +50,7 @@ import type { Tone } from "../../lib/labels";
 import { href } from "../../lib/router";
 import { whyLabel } from "../../lib/why";
 import { useDraft, type JobActions } from "./actions";
-import { enteredOf, IN_PROGRESS, parsePending, setAsideOf, type DecisionKind } from "./model";
+import { enteredOf, IN_PROGRESS, parsePending, resumeNote, setAsideOf, type DecisionKind } from "./model";
 
 interface Act {
   key: string;
@@ -72,18 +70,16 @@ export interface Decision {
   title: string;
   lead?: ReactNode;
   body?: ReactNode;
+  after?: ReactNode;
   primary?: Act | undefined;
   secondary: Act[];
   menu: Act[];
-  why: string[];
   evidence: boolean;
   running?: boolean;
-  saveKey?: boolean;
 }
 
-const CHECKPOINT_WHY =
-  "A local checkpoint does not prove the employer saved the page. The worker verifies the existing draft before continuing. Its former browser may now belong to another application.";
-const RESERVED_WHY = "You reserved this browser for inspection. Release browser when finished so other applications can use the slot.";
+const CHECK_ROW = "flex flex-col gap-2 py-3 @md:flex-row @md:items-center @md:gap-4";
+const CHECK_LABEL = "text-sm text-fg-muted @md:w-36 @md:shrink-0";
 
 const RUNNING_TITLE: Partial<Record<JobDetail["status"], string>> = {
   approved: "Queued to apply",
@@ -122,10 +118,8 @@ function WhyAsked({ gate }: { gate: NonNullable<JobDetail["gate"]> }) {
   const label = whyLabel(gate.why);
   if (!label && !gate.missing) return null;
   return (
-    <p className="text-sm break-words text-fg-muted">
-      {label && <span className="font-medium text-fg">{label}</span>}
-      {label && gate.missing && " · "}
-      {gate.missing && `Missing: ${gate.missing}`}
+    <p className="text-sm break-words text-fg-muted" title={label && gate.missing ? `Missing: ${gate.missing}` : undefined}>
+      {label ? <span className="font-medium text-fg">{label}</span> : `Missing: ${gate.missing}`}
     </p>
   );
 }
@@ -262,7 +256,8 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
   const [confirm, setConfirm] = useState<"mark_submitted" | "confirmed_not_submitted" | null>(null);
 
   const ambiguous = job.submissionAmbiguous;
-  const checkpointWhy = job.checkpoint ? [CHECKPOINT_WHY] : [];
+  const { data: questions } = useQuestions();
+  const sharing = (gate && questions?.find(q => q.key === gate.groupKey)?.jobs.length) ?? 0;
   const asked = gate?.createdAt ? `Asked ${ago(gate.createdAt)}` : "";
   const hold: Act[] = ambiguous ? [] : [{ key: "hold", label: "Hold for later", icon: <Pause />, shortcut: "H", run: () => void a.act("hold") }];
   const reject = (label = "Reject"): Act => ({ key: "reject", label, icon: <X />, danger: true, shortcut: "X", run: () => void a.act("reject") });
@@ -359,7 +354,7 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
   );
 
   const evidence = !!gate?.shot || !!job.checkpoint;
-  const base = { secondary: [] as Act[], menu: [] as Act[], why: [] as string[], evidence: false };
+  const base = { secondary: [] as Act[], menu: [] as Act[], evidence: false };
   let d: Decision | null = null;
 
   if (kind === "verify") {
@@ -374,69 +369,80 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       lead: running ? "The agent is checking the exact application and mail in the browser." : "Waiting for an eligible browser worker.",
       body: <PriorNote note={job.note} />,
       menu: [reject("Reject application")],
-      why: ["No new submit happens while the status is unknown.", ...checkpointWhy],
       evidence,
     };
   } else if (kind === "ambiguous") {
     const context = (gate?.context || parsePending(job.pending)?.context || "").trim();
     const reason = context && context !== gate?.text ? context : (gate?.text ?? job.note ?? "");
+    const cut = /^(.{1,240}?[.!?])\s+(?=\S)/s.exec(reason);
+    const read = cut ? cut[1] : reason;
+    const rest = cut ? reason.slice(cut[0].length).trim() : "";
     d = {
       ...base,
       placement: "card",
       tone: "warning",
       icon: <ShieldAlert />,
       title: "Submission outcome unknown",
-      lead: "The final submit may already have happened. Check before anything is sent again.",
-      body: (
-        <div className="flex flex-col gap-4">
-          {reason && (
-            <p className="text-base text-fg">
-              <Linkified text={reason} />
-            </p>
+      lead: "The final submit may already have happened. Never start a new application to check.",
+      body: read ? (
+        <p className="text-base break-words text-fg">
+          <span className="text-fg-muted">Agent's read: </span>
+          <span className="font-medium">
+            <Linkified text={read} />
+          </span>
+        </p>
+      ) : undefined,
+      after: (
+        <div className="@container flex flex-col gap-3">
+          {rest && (
+            <Disclosure id="agent-notes" summary="Agent's notes">
+              <p className="text-sm break-words text-fg-muted">
+                <Linkified text={rest} />
+              </p>
+            </Disclosure>
           )}
-          <div className="divide-y divide-border border-y border-border">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
-              <span className="min-w-36 flex-1 text-sm text-fg-muted">Look for yourself</span>
-              {job.manualBrowserReserved ? (
-                <>
-                  {live.map(l => (
-                    <ActButton key={l.key} act={l} busy={a.busy} size="sm" />
-                  ))}
-                  <ActButton act={release} busy={a.busy} size="sm" />
-                </>
-              ) : (
-                <ActButton act={reserve} busy={a.busy} size="sm" />
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
-              <span className="min-w-36 flex-1 text-sm text-fg-muted">I checked it myself</span>
-              <ActButton act={markSubmitted("Verified submitted")} busy={a.busy} size="sm" />
-              <ActButton
-                act={{
-                  key: "confirmed_not_submitted",
-                  label: "Verified not submitted",
-                  icon: <RotateCcw />,
-                  run: () => {
-                    setConfirm("confirmed_not_submitted");
-                  },
-                }}
-                busy={a.busy}
-                size="sm"
-              />
+          <div>
+            <p className="text-sm font-medium text-fg">Or check it yourself</p>
+            <div className="mt-1 divide-y divide-border border-y border-border">
+              <div className={CHECK_ROW}>
+                <span className={CHECK_LABEL}>Look for yourself</span>
+                <div className="flex flex-wrap gap-2">
+                  {job.manualBrowserReserved ? (
+                    <>
+                      {live.map(l => (
+                        <ActButton key={l.key} act={l} busy={a.busy} size="sm" />
+                      ))}
+                      <ActButton act={release} busy={a.busy} size="sm" />
+                    </>
+                  ) : (
+                    <ActButton act={reserve} busy={a.busy} size="sm" />
+                  )}
+                </div>
+              </div>
+              <div className={CHECK_ROW}>
+                <span className={CHECK_LABEL}>I checked it myself</span>
+                <div className="flex flex-wrap gap-2">
+                  <ActButton act={markSubmitted("Verified submitted")} busy={a.busy} size="sm" />
+                  <ActButton
+                    act={{
+                      key: "confirmed_not_submitted",
+                      label: "Verified not submitted",
+                      icon: <RotateCcw />,
+                      run: () => {
+                        setConfirm("confirmed_not_submitted");
+                      },
+                    }}
+                    busy={a.busy}
+                    size="sm"
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
       ),
       primary: a.gateId ? { ...recover, keyable: true } : undefined,
       menu: [reject()],
-      why: [
-        "Check status and recover: the agent signs in with saved credentials and checks the exact application and mail; no new submit while the status is unknown.",
-        "To check yourself, inspect the existing application/account and confirmation mail. Ordinary retry and response are disabled; never create another application to check.",
-        job.manualBrowserReserved
-          ? RESERVED_WHY
-          : "This blocker releases its slot after the worker exits. Reserve the browser only when you need to inspect it. The saved draft, checkpoint and submission protection remain intact.",
-        ...checkpointWhy,
-      ],
       evidence,
     };
   } else if (kind === "review") {
@@ -446,25 +452,30 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       tone: "accent",
       icon: <Send />,
       title: "Apply to this job?",
-      lead: job.resumeFrozen
-        ? "This application already started with its frozen resume, so the resume can no longer be changed."
-        : summary?.approval === "auto"
-          ? "The agent fills the form and sends it."
-          : "The agent fills the form, then asks before sending.",
-      primary: { key: "approve", label: "Approve", icon: <Check />, keyable: true, run: () => void a.act("approve") },
-      secondary: job.resumeFrozen
-        ? []
-        : [
-            {
-              key: "redo",
-              label: "Change resume",
-              icon: <PenLine />,
-              run: () => {
-                setRedoOpen(true);
+      lead: resumeNote(job),
+      primary: {
+        key: "approve",
+        label: summary?.approval === "auto" && !job.resumeFrozen ? "Approve and send" : "Approve",
+        icon: <Check />,
+        keyable: true,
+        run: () => void a.act("approve"),
+      },
+      secondary: [reject()],
+      menu: [
+        ...(job.resumeFrozen
+          ? []
+          : [
+              {
+                key: "redo",
+                label: "Change resume",
+                icon: <PenLine />,
+                run: () => {
+                  setRedoOpen(true);
+                },
               },
-            },
-          ],
-      menu: [...hold, reject()],
+            ]),
+        ...hold,
+      ],
     };
   } else if ((kind === "question" || kind === "cover_letter") && gate) {
     const letter = kind === "cover_letter";
@@ -487,32 +498,32 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
           {!letter && <Options options={gate.options} value={answer} onPick={setAnswer} />}
           <AnswerBox
             label={letter ? "Cover letter" : "Your answer"}
-            hint={letter ? (answer ? `${words(answer)} words` : "Entered exactly as you write it") : "For this application only"}
+            hint={
+              letter ? (
+                answer ? (
+                  `${words(answer)} words`
+                ) : (
+                  "Entered exactly as you write it"
+                )
+              ) : (
+                <>
+                  For this application only.{" "}
+                  <a href={href("questions", gate.groupKey)} className="text-accent-text underline-offset-2 hover:underline">
+                    {sharing > 1 ? `Answer all ${sharing} that ask this in Questions` : "Answer in Questions"}
+                  </a>
+                </>
+              )
+            }
             rows={letter ? 12 : 3}
             value={answer}
             onChange={setAnswer}
             onSubmit={save}
             placeholder={letter ? "Dear hiring team," : "Type the answer the agent should enter"}
           />
-          {!letter && (
-            <p className="text-sm text-fg-muted">
-              Other applications ask this too?{" "}
-              <a href={href("questions", gate.groupKey)} className="text-accent-text underline-offset-2 hover:underline">
-                Answer all matching in Questions
-              </a>
-            </p>
-          )}
         </div>
       ),
-      primary: { key: "respond", label: letter ? "Save letter and queue" : "Save and queue", icon: <ArrowRight />, run: save },
-      saveKey: true,
+      primary: { key: "respond", label: letter ? "Save letter and queue" : "Save and queue", icon: <ArrowRight />, shortcut: combo("↵"), run: save },
       menu: [...hold, reject()],
-      why: [
-        letter
-          ? "The letter is stored for this application only and typed into the form as written."
-          : "Stored for this application only, not added to your answers. To add it to them as well, answer it from Questions.",
-        ...checkpointWhy,
-      ],
       evidence,
     };
   } else if (kind === "confirm_submit" && gate) {
@@ -522,7 +533,7 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       tone: "warning",
       icon: <FileCheck2 />,
       title: "Submit this application?",
-      lead: `Filled in and waiting. ${asked}`.trim(),
+      lead: asked || undefined,
       body: (
         <div className="flex flex-col gap-4">
           <Entered text={gate.text} />
@@ -580,7 +591,6 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
             },
           ],
       menu: [...hold, reject()],
-      why: ["Approval applies only to this application's exact saved summary. The worker resumes and verifies it before submitting.", ...checkpointWhy],
       evidence,
     };
   } else if (kind === "manual" && gate) {
@@ -592,7 +602,7 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       tone: "warning",
       icon: <Hand />,
       title: "Browser hand-off",
-      lead: `The agent needs you to take over. ${asked}`.trim(),
+      lead: [reserved ? "Hand control back when you finish." : "Reserve the browser to take over.", asked].filter(Boolean).join(" "),
       body: (
         <div className="flex flex-col gap-3">
           <Asked text={gate.text} context={gate.context} />
@@ -602,13 +612,6 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       primary: reserved ? handBack : { ...reserve, keyable: true },
       secondary: reserved ? live : [recover],
       menu: reserved ? [release, recover, markSubmitted("I submitted it"), ...hold, reject()] : [markSubmitted("I submitted it"), ...hold, reject()],
-      why: [
-        reserved
-          ? RESERVED_WHY
-          : "This blocker releases its slot after the worker exits. Reserve the browser before inspecting or changing it. The saved draft and checkpoint remain intact.",
-        "Hand control back and Check status and recover resume the authorized application after checking its current state; existing drafts are reused and submission approval rules still apply.",
-        ...checkpointWhy,
-      ],
       evidence,
     };
   } else if (kind === "failed") {
@@ -634,8 +637,7 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       placement: "bar",
       tone: "neutral",
       icon: <Pause />,
-      title: "Held for later",
-      lead: <SetAside job={job} />,
+      title: setAsideOf(job)?.label ?? "Held for later",
       primary: { key: "retry", label: "Assess now", icon: <RotateCcw />, keyable: true, run: () => void a.act("retry") },
       menu: [reject()],
     };
@@ -647,7 +649,7 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       tone: "neutral",
       icon: <Ban />,
       title: kind === "rejected" ? "Rejected" : "Skipped by the assessment",
-      lead: blocked ? "Rejected with an unresolved submission marker. Reconsidering is disabled to prevent a duplicate application." : <SetAside job={job} />,
+      ...(blocked && { lead: "Rejected with an unresolved submission marker. Reconsidering is disabled to prevent a duplicate application." }),
       secondary: blocked ? [] : [{ key: "retry", label: "Reconsider", icon: <RotateCcw />, run: () => void a.act("retry") }],
     };
   } else if (kind === "running") {
@@ -670,17 +672,10 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
           : "Waiting for a free worker.",
       body: <PriorNote note={job.note} />,
       menu: [reject("Stop and reject")],
-      why: checkpointWhy,
       evidence,
     };
   }
   return { decision: d, dialogs };
-}
-
-function SetAside({ job }: { job: JobDetail }) {
-  const why = setAsideOf(job);
-  if (!why) return null;
-  return <span title={why.detail ?? undefined}>{why.label}</span>;
 }
 
 const toastTypeFirst = () => toast.error("Type something first.");
@@ -716,7 +711,7 @@ function ActButton({
       icon={act.icon}
       loading={busy === act.key}
       disabled={!!busy && busy !== act.key}
-      {...(variant === "primary" && act.keyable && { shortcut: "A" })}
+      {...(variant === "primary" && (act.keyable ? { shortcut: "A" } : act.shortcut && { shortcut: act.shortcut }))}
       onClick={act.run}
     >
       {act.label}
@@ -724,14 +719,14 @@ function ActButton({
   );
 }
 
-function MoreMenu({ acts, busy, label = "More actions" }: { acts: Act[]; busy: string | null; label?: string }) {
+function MoreMenu({ acts, busy, label = "More actions", className }: { acts: Act[]; busy: string | null; label?: string; className?: string }) {
   if (!acts.length) return null;
   const safe = acts.filter(x => !x.danger),
     risky = acts.filter(x => x.danger);
   return (
     <Menu>
       <MenuTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label={label} disabled={!!busy}>
+        <Button variant="ghost" size="icon" aria-label={label} disabled={!!busy} className={className}>
           <MoreHorizontal />
         </Button>
       </MenuTrigger>
@@ -753,7 +748,7 @@ function MoreMenu({ acts, busy, label = "More actions" }: { acts: Act[]; busy: s
 }
 
 export function useDecisionKeys(d: Decision | null, busy: string | null) {
-  const find = (key: string) => d?.menu.find(x => x.key === key);
+  const find = (key: string) => [...(d?.menu ?? []), ...(d?.secondary ?? [])].find(x => x.key === key);
   useHotkeys([
     {
       key: "a",
@@ -798,9 +793,8 @@ function Evidence({ job }: { job: JobDetail }) {
             items={[
               ["Saved", <Time key="t" at={c.savedAt} />],
               ["Step", c.step],
-              ["Page", c.url ? <Linkified text={c.url} /> : "Not recorded"],
+              c.url ? ["Page", <Linkified key="p" text={c.url} />] : null,
               c.notes ? ["Notes", <Linkified key="n" text={c.notes} />] : null,
-              ["Resume", c.resumeSha ? <code className="font-mono text-xs">{c.resumeSha.slice(0, 16)}</code> : "Not recorded"],
             ]}
           />
         )}
@@ -813,17 +807,14 @@ export function DecisionCard({ d, job, busy }: { d: Decision; job: JobDetail; bu
   const hasActions = !!d.primary || d.secondary.length > 0;
   return (
     <section data-decision={d.title}>
-      <div className="flex items-start gap-3">
-        <ListIcon icon={d.icon} tone={d.tone} />
-        <div className="min-w-0 flex-1 pt-0.5">
-          <h3 className="flex items-center gap-2 text-lg font-semibold text-fg">
-            {d.title}
-            {d.running && <StatusDot tone="info" pulse />}
-          </h3>
-          {d.lead && <p className="mt-0.5 text-sm text-fg-muted">{d.lead}</p>}
-        </div>
-        <MoreMenu acts={d.menu} busy={busy} />
+      <div className="flex items-center gap-3">
+        <h3 className="flex min-w-0 flex-1 items-center gap-2 text-lg font-semibold text-fg">
+          {d.title}
+          {d.running && <StatusDot tone="info" pulse />}
+        </h3>
+        <MoreMenu acts={d.menu} busy={busy} className="-mr-2 touch:-mr-3" />
       </div>
+      {d.lead && <p className="mt-2 text-sm text-fg-muted">{d.lead}</p>}
       {d.body && <div className="pt-4">{d.body}</div>}
       {hasActions && (
         <div className="flex flex-wrap items-center gap-2 pt-5">
@@ -831,26 +822,12 @@ export function DecisionCard({ d, job, busy }: { d: Decision; job: JobDetail; bu
           {d.secondary.map(x => (
             <ActButton key={x.key + x.label} act={x} busy={busy} />
           ))}
-          {d.saveKey && (
-            <span className="ml-auto hidden items-center gap-1.5 text-xs text-fg-muted sm:inline-flex">
-              <Kbd>{combo("↵")}</Kbd>
-              to save
-            </span>
-          )}
         </div>
       )}
-      {(d.why.length > 0 || d.evidence) && (
-        <div className="mt-4 flex flex-col gap-1 border-t border-border pt-3">
-          {d.why.length > 0 && (
-            <Disclosure id="gate-why" summary="How this works">
-              <div className="flex flex-col gap-1.5">
-                {d.why.map(w => (
-                  <p key={w}>{w}</p>
-                ))}
-              </div>
-            </Disclosure>
-          )}
-          {d.evidence && <Evidence job={job} />}
+      {d.after && <div className="pt-5">{d.after}</div>}
+      {d.evidence && (
+        <div className="mt-4 border-t border-border pt-3">
+          <Evidence job={job} />
         </div>
       )}
     </section>
@@ -864,14 +841,29 @@ export function DecisionBar({ d, busy, docked }: { d: Decision; busy: string | n
     <div
       className={cn(
         "border-t border-border bg-surface/95 backdrop-blur",
-        docked ? "sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 animate-slide-up px-(--list-x) py-3 lg:bottom-0" : "px-4 py-3 sm:px-6",
+        docked
+          ? "sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 animate-slide-up px-(--list-x) py-3 lg:bottom-0"
+          : "flex min-h-11 items-center px-4 py-1 sm:px-6",
       )}
       data-decision={d.title}
     >
-      <div className="@container flex max-w-3xl items-center gap-3">
-        <div className={cn("min-w-0 flex-1", (d.primary ?? d.secondary.length) && "hidden @lg:block")}>
-          <p className="truncate text-sm font-medium text-fg">{d.title}</p>
-          {d.lead && <div className="line-clamp-2 text-sm text-fg-muted">{d.lead}</div>}
+      <div className="@container flex flex-1 items-center gap-3 lg:max-w-3xl">
+        <div
+          className={cn(
+            "min-w-0 flex-1",
+            !docked && "flex items-baseline gap-2",
+            (d.primary ?? d.secondary.length) && (docked ? "hidden @lg:block" : "hidden @lg:flex"),
+          )}
+        >
+          <p className={cn("truncate text-sm font-medium text-fg", !docked && "shrink-0")}>{d.title}</p>
+          {d.lead && (
+            <div
+              className={cn("text-sm text-fg-muted", docked ? "line-clamp-2" : "hidden min-w-0 truncate @3xl:block")}
+              title={typeof d.lead === "string" ? d.lead : undefined}
+            >
+              {d.lead}
+            </div>
+          )}
         </div>
         <MoreMenu acts={d.menu} busy={busy} />
         {d.secondary.map(x => (

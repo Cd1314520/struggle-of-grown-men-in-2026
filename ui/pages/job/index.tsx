@@ -25,7 +25,7 @@ export function JobPage() {
     <Workspace>
       <div className="z-20 flex h-[calc(3rem+1px)] min-w-0 items-center gap-1 border-b border-border bg-surface px-(--list-x) lg:sticky lg:top-0">
         {home && (
-          <Button asChild variant="ghost" size="sm" className="-ml-2">
+          <Button asChild variant="ghost" size="sm" className="-ml-2.5 touch:-ml-3">
             <a href={`${home[1]}/${id}`}>
               <ArrowLeft className="lg:hidden" />
               {home[0]}

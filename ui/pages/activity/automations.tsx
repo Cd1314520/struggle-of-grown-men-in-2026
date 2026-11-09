@@ -76,11 +76,10 @@ export function RunMenu({ s, size }: { s: Summary | undefined; size?: "sm" | "md
               <MenuItem
                 key={a.run}
                 icon={going ? <Spinner /> : <a.icon />}
-                description={a.status}
+                description={`${a.status} · ${a.detail}`}
                 disabled={going || a.blocked}
                 aria-label={`Run: ${a.name}`}
                 aria-description={`${a.status}. ${a.detail}`}
-                title={a.detail}
                 onSelect={() => void run(a.run)}
               >
                 {a.name}

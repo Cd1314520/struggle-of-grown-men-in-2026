@@ -40,6 +40,7 @@ export function WorkspaceBar({
   const col = frame === "column";
   const inline = !col && !tabs;
   const tools = !!(search || controls || actions);
+  const split = col && !!tabs && tools;
   return (
     <div
       className={cn(
@@ -70,28 +71,40 @@ export function WorkspaceBar({
         <div
           className={cn(
             LINE,
-            "order-9 h-11 basis-full pb-1 [&>*]:-mx-1 [&>*]:px-1",
-            inline && "lg:@[68rem]/bar:order-2 lg:@[68rem]/bar:ml-3 lg:@[68rem]/bar:h-12 lg:@[68rem]/bar:flex-1 lg:@[68rem]/bar:basis-0 lg:@[68rem]/bar:pb-0",
+            "order-9 h-10 basis-full pb-1.5 max-lg:[&>*]:-mx-(--list-x) max-lg:[&>*]:scroll-px-(--list-x) max-lg:[&>*]:px-(--list-x) touch:h-11 touch:pb-1 lg:h-11 lg:pb-1 lg:[&>*]:-mx-1 lg:[&>*]:px-1",
+            inline && "lg:@[88rem]/bar:order-2 lg:@[88rem]/bar:ml-3 lg:@[88rem]/bar:h-12 lg:@[88rem]/bar:flex-1 lg:@[88rem]/bar:basis-0 lg:@[88rem]/bar:pb-0",
           )}
         >
           {segments}
         </div>
       )}
-      {tabs && tools && <div aria-hidden className="order-3 basis-full lg:hidden" />}
+      {tabs && tools && <div aria-hidden className={cn("order-3 basis-full", !split && "lg:hidden")} />}
       {search && (
         <div
           className={cn(
             LINE,
-            "order-4 h-14 flex-1 [&>*]:w-full",
-            col ? "lg:order-2 lg:h-12 lg:basis-24 lg:[&_input]:text-ellipsis" : "lg:ml-auto lg:h-12 lg:w-56 lg:flex-none lg:@[80rem]/bar:w-64",
+            "order-4 h-12 flex-1 touch:h-14 [&>*]:w-full",
+            col
+              ? cn("lg:h-12 lg:min-w-36 lg:[&_input]:text-ellipsis", split ? "lg:order-4" : "lg:order-2 lg:basis-24")
+              : "lg:ml-auto lg:h-12 lg:w-56 lg:flex-none lg:@[80rem]/bar:w-64",
           )}
         >
           {search}
         </div>
       )}
-      {controls && <div className={cn(LINE, "order-5 h-14 gap-2 lg:h-12", !search && !col && "lg:ml-auto")}>{controls}</div>}
+      {controls && <div className={cn(LINE, "order-5 h-12 gap-2 touch:h-14 lg:h-12", !search && !col && "lg:ml-auto")}>{controls}</div>}
       {actions && (
-        <div className={cn(LINE, "order-6 h-14 gap-1.5 lg:h-12", tabs && "max-lg:order-2 max-lg:h-12", !search && !controls && "ml-auto")}>{actions}</div>
+        <div
+          className={cn(
+            LINE,
+            "order-6 h-12 gap-1.5 touch:h-14 lg:h-12",
+            tabs && "max-lg:order-2 max-lg:h-12",
+            controls && "lg:-ml-1",
+            !search && !controls && "ml-auto",
+          )}
+        >
+          {actions}
+        </div>
       )}
       {hint && !col && (
         <div className={cn(LINE, "order-7 h-12 max-lg:hidden", !tools && "ml-auto")}>
@@ -132,12 +145,12 @@ export function Workspace({
   "aria-rowcount"?: number | undefined;
 }) {
   const col = frame === "column";
-  const two = bar?.segments && (bar.tabs ? "lg:[--group-top:calc(5.75rem+1px)]" : "lg:@max-[68rem]/ws:[--group-top:calc(5.75rem+1px)]");
+  const two = bar?.segments && (bar.tabs ? "lg:[--group-top:calc(5.75rem+1px)]" : "lg:@max-[88rem]/ws:[--group-top:calc(5.75rem+1px)]");
   return (
     <section
       aria-label={ariaLabel}
       className={cn(
-        "@container/ws flex min-w-0 flex-col bg-surface [--list-x:1rem] max-lg:min-h-[calc(100dvh-3rem)] max-lg:pb-24",
+        "@container/ws flex min-w-0 flex-col bg-surface [--list-x:1rem] max-lg:min-h-[calc(100dvh-3rem)] max-lg:pb-[calc(3.5rem+1px+env(safe-area-inset-bottom))]",
         col ? "max-lg:sm:[--list-x:1.5rem] lg:h-full" : "min-h-full sm:[--list-x:1.5rem]",
         className,
       )}
@@ -151,7 +164,7 @@ export function Workspace({
         aria-rowcount={rowCount}
         className={cn(
           "min-w-0 [--group-top:3rem]",
-          col ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:[--group-top:0px]" : cn("lg:[--group-top:calc(3rem+1px)]", two),
+          col ? "lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:[--group-top:0px]" : cn("flex flex-1 flex-col lg:[--group-top:calc(3rem+1px)]", two),
           loading && "opacity-60 transition-opacity",
         )}
       >
@@ -217,7 +230,7 @@ export function WorkspaceSection({
 const ASIDE = {
   nav: "lg:w-52",
   rail: "xl:w-88",
-  pane: "lg:w-104",
+  pane: "lg:w-80 xl:w-104",
 };
 export function WorkspaceBody({
   aside,

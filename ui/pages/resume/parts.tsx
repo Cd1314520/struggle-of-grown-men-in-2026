@@ -1,8 +1,7 @@
-import { ExternalLink, FileText, FileUp, X } from "lucide-react";
+import { FileText, FileUp, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button, Field, Skeleton, Textarea } from "../../components/ui";
 import { cn } from "../../lib/cn";
-import { plural } from "../../lib/format";
 
 export function Sheets({ src, pages, version, pdf, label }: { src: string; pages: number | null; version: string; pdf: string; label: string }) {
   return (
@@ -26,15 +25,8 @@ function Sheet({ src, pdf, alt }: { src: string; pdf: string; alt: string }) {
       </div>
     );
   return (
-    <a href={pdf} target="_blank" rel="noopener noreferrer" className={cn(frame, "block transition-shadow hover:shadow-lg")}>
+    <a href={pdf} target="_blank" rel="noopener noreferrer" title="Open the PDF" className={cn(frame, "block transition-shadow hover:shadow-lg")}>
       {!loaded && <Skeleton className="absolute inset-0 rounded-none" />}
-      <span
-        aria-hidden
-        className="absolute right-3 bottom-3 z-10 hidden h-8 items-center gap-1.5 rounded-md bg-surface px-3 text-sm font-medium text-fg shadow-md ring-1 ring-border touch:inline-flex"
-      >
-        <ExternalLink className="size-3.5" />
-        Open PDF
-      </span>
       <img
         src={src}
         alt={alt}
@@ -99,17 +91,20 @@ export function Upload({
         }}
         className={cn(
           "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-6 text-center transition-colors focus-within:border-accent focus-within:ring-3 focus-within:ring-accent/15",
-          compact ? "py-6" : "py-12",
+          compact ? "py-5" : "py-12",
           over ? "border-accent bg-accent-soft" : "border-border-strong bg-subtle/50 hover:bg-subtle",
         )}
       >
-        <span className="flex size-10 items-center justify-center rounded-lg bg-surface text-fg-subtle shadow-xs ring-1 ring-border">
-          <FileUp className="size-5" />
-        </span>
+        {!compact && (
+          <span className="flex size-10 items-center justify-center rounded-lg bg-surface text-fg-subtle shadow-xs ring-1 ring-border">
+            <FileUp className="size-5" />
+          </span>
+        )}
         <span className="text-sm font-medium text-fg touch:hidden">Drop files here, or choose them</span>
         <span className="hidden text-sm font-medium text-fg touch:inline">Choose files</span>
         <span className="max-w-sm text-sm text-fg-muted">
-          An old resume in any format, a LinkedIn PDF, a list of projects: anything that says what you have done. Up to {limits.files} files.
+          {!compact && "An old resume in any format, a LinkedIn PDF, a list of projects: anything that says what you have done. "}
+          Up to {limits.files} files, {size(limits.bytes)} total.
         </span>
         <input
           ref={input}
@@ -148,11 +143,9 @@ export function Upload({
           These come to {size(total)}; the limit is {size(limits.bytes)} together.
         </p>
       )}
-      <Field
-        label="Anything the agent should know"
-        hint="Optional. For example: keep it to one page; lead with the backend work; leave out the 2019 internship."
-      >
+      <Field label="Note for the agent (optional)">
         <Textarea
+          placeholder="Keep it to one page; lead with the backend work; leave out the 2019 internship."
           value={note}
           onChange={e => {
             setNote(e.target.value);
@@ -160,12 +153,9 @@ export function Upload({
           rows={compact ? 2 : 3}
         />
       </Field>
-      <div className="flex items-center gap-3">
-        <Button type="submit" variant="primary" icon={<FileUp />} loading={busy} disabled={!files.length || tooBig || busy}>
-          {submit}
-        </Button>
-        {files.length > 0 && <span className="text-sm text-fg-muted">{plural(files.length, "file")}</span>}
-      </div>
+      <Button type="submit" variant="primary" icon={<FileUp />} loading={busy} disabled={!files.length || tooBig || busy} className="self-start">
+        {submit}
+      </Button>
     </form>
   );
 }

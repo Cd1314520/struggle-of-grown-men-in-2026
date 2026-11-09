@@ -5,23 +5,22 @@ import { useSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { typing, useHotkeys } from "../../lib/hotkeys";
 import { useOnline } from "../../lib/live";
-import { href, navigate, useRoute, type Page } from "../../lib/router";
+import { href, navigate, useRoute } from "../../lib/router";
 import { useTheme } from "../../lib/theme";
 import { Count, Sheet } from "../ui";
 import { AddPostingDialog } from "./add-posting";
 import { CommandPalette } from "./command-palette";
-import { NAV, navItem } from "./nav";
+import { NAV, navItem, TABS } from "./nav";
 import { ShortcutsDialog } from "./shortcuts";
-import { Logo, SidebarContent } from "./sidebar";
+import { SidebarContent } from "./sidebar";
 import { useShell } from "./state";
-
-const TABS: readonly Page[] = ["overview", "review", "questions", "pipeline"];
 
 function TabBar() {
   const { page } = useRoute();
   const { data: s } = useSummary();
   const { setMenuOpen } = useShell();
   const onMenu = !TABS.includes(page);
+  const behind = s ? NAV.filter(n => !TABS.includes(n.page)).reduce((sum, n) => sum + (n.badge?.(s)?.value ?? 0), 0) : 0;
   return (
     <nav
       aria-label="Sections"
@@ -38,23 +37,28 @@ function TabBar() {
             href={href(p)}
             data-nav={p}
             aria-current={on ? "page" : undefined}
-            className={cn("relative flex h-14 flex-col items-center justify-center gap-1 text-2xs font-medium", on ? "text-fg" : "text-fg-subtle")}
+            className={cn("relative flex h-14 flex-col items-center justify-center gap-1 text-2xs font-medium", on ? "text-fg" : "text-fg-muted")}
           >
             <item.icon className="size-5" strokeWidth={on ? 2 : 1.75} />
             {item.label}
-            {badge && badge.value > 0 && <Count value={badge.value} tone={badge.tone} badge className="absolute top-1.5 left-1/2 ml-1.5" />}
+            {badge && badge.value > 0 && (
+              <Count value={badge.value} tone={badge.tone} badge className="absolute top-1 left-[calc(50%+6px)] ring-2 ring-surface" />
+            )}
           </a>
         );
       })}
       <button
         type="button"
+        aria-label="More"
+        aria-description={behind ? `${behind.toLocaleString()} waiting on you` : undefined}
         onClick={() => {
           setMenuOpen(true);
         }}
-        className={cn("flex h-14 flex-col items-center justify-center gap-1 text-2xs font-medium", onMenu ? "text-fg" : "text-fg-subtle")}
+        className={cn("relative flex h-14 flex-col items-center justify-center gap-1 text-2xs font-medium", onMenu ? "text-fg" : "text-fg-muted")}
       >
         <MenuIcon className="size-5" strokeWidth={onMenu ? 2 : 1.75} />
         More
+        <Count value={behind} tone="warning" badge className="absolute top-1 left-[calc(50%+6px)] ring-2 ring-surface" />
       </button>
     </nav>
   );
@@ -64,8 +68,7 @@ function TopBar() {
   const { page } = useRoute();
   const { setPaletteOpen, setAddOpen } = useShell();
   return (
-    <header className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-border bg-surface/95 px-3 backdrop-blur lg:hidden">
-      <Logo />
+    <header className="sticky top-0 z-30 flex h-[calc(3rem+env(safe-area-inset-top))] items-center gap-2 border-b border-border bg-surface pt-[env(safe-area-inset-top)] pr-[max(1rem,env(safe-area-inset-right))] pl-[max(1rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] lg:hidden">
       <span className="flex-1 truncate text-base font-semibold text-fg">{navItem(page)?.label ?? "Job"}</span>
       <button
         type="button"
@@ -83,7 +86,7 @@ function TopBar() {
         onClick={() => {
           setAddOpen(true);
         }}
-        className="flex size-9 items-center justify-center rounded-md text-fg-muted hover:bg-subtle"
+        className="-mr-2 flex size-9 items-center justify-center rounded-md text-fg-muted hover:bg-subtle"
       >
         <Plus className="size-5" />
       </button>
@@ -98,10 +101,12 @@ function OfflineBanner() {
     <div
       id="offline"
       role="alert"
-      className="sticky top-12 z-40 flex items-center justify-center gap-2 bg-warning-soft px-4 py-1.5 text-sm text-warning-text lg:top-0"
+      className="sticky top-[calc(3rem+env(safe-area-inset-top))] z-40 flex items-start justify-center gap-2 bg-warning-soft px-4 py-1.5 text-sm text-warning-text lg:top-0"
     >
-      <WifiOff className="size-3.5" />
-      Connection lost. What you see may be out of date. Reconnecting…
+      <WifiOff className="mt-[3px] size-3.5 shrink-0" />
+      <span>
+        Connection lost.<span className="max-sm:hidden"> What you see may be out of date.</span> Reconnecting…
+      </span>
     </div>
   );
 }
@@ -161,8 +166,15 @@ export function AppShell({ children }: { children: ReactNode }) {
         {children}
       </main>
       <TabBar />
-      <Sheet open={shell.menuOpen} onOpenChange={shell.setMenuOpen} side="left" title="Navigation" className="bg-canvas">
+      <Sheet
+        open={shell.menuOpen}
+        onOpenChange={shell.setMenuOpen}
+        side="left"
+        title="Navigation"
+        className="bg-canvas pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+      >
         <SidebarContent
+          more
           onNavigate={() => {
             shell.setMenuOpen(false);
           }}
@@ -174,13 +186,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Toaster
         theme={theme}
         position="bottom-right"
-        offset={{ bottom: 88, right: 16 }}
-        mobileOffset={{ bottom: page === "job" ? 136 : 72 }}
+        offset={{ bottom: page === "job" ? 88 : 24, right: 24 }}
+        mobileOffset={{ bottom: `calc(${page === "job" ? 136 : 72}px + env(safe-area-inset-bottom))` }}
         toastOptions={{
           classNames: {
-            toast: "!rounded-lg !border !border-border !bg-surface !text-fg !shadow-lg !font-sans !text-sm",
+            toast: "!rounded-lg !border !border-border-strong !bg-surface dark:!bg-subtle !text-fg !shadow-lg !font-sans !text-sm",
             description: "!text-fg-muted",
-            actionButton: "!bg-accent !text-accent-fg !font-medium",
+            actionButton: "!bg-accent !text-accent-fg !font-medium !h-7 !px-2.5 !text-sm !rounded-md touch:!h-9",
             success: "[&_[data-icon]]:text-success-text",
             error: "[&_[data-icon]]:text-danger-text",
             warning: "[&_[data-icon]]:text-warning-text",

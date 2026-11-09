@@ -1,10 +1,9 @@
-import { ExternalLink, Plus, RotateCw } from "lucide-react";
+import { ExternalLink, MailWarning, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Summary } from "../../../src/api-types";
-import { shellActions } from "../../components/shell/state";
-import { Button, ConfirmDialog, Disclosure, ListNotice, SectionNav, Skeleton, SkeletonRows, StatusLabel, Workspace, WorkspaceBody } from "../../components/ui";
-import { api, refreshAll, useSettings, useSummary } from "../../lib/api";
+import { Button, ConfirmDialog, ListNotice, SectionNav, Skeleton, SkeletonRows, StatusLabel, Workspace, WorkspaceBody } from "../../components/ui";
+import { api, refreshAll, useModels, useSettings, useSummary } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { num, plural } from "../../lib/format";
 import { href, useRoute } from "../../lib/router";
@@ -12,16 +11,16 @@ import { onPageScroll, pageScroller } from "../../lib/scroller";
 import { Mail } from "./mail";
 import { Models } from "./models";
 import { ConfigRow, type Confirm } from "./field";
-import { SavedLocally, SettingFold, SettingRow, SettingsPanel } from "./parts";
+import { SettingRow, SettingsPanel } from "./parts";
 import { BrowserRows, Schedule, Server, Sources } from "./sections";
 
 const SECTIONS = [
   ["general", "General"],
-  ["models", "Models"],
   ["auto-apply", "Auto-apply"],
-  ["schedule", "Schedule & limits"],
-  ["sources", "Sources"],
   ["mail", "Mail & digest"],
+  ["schedule", "Schedule & limits"],
+  ["models", "Models"],
+  ["sources", "Sources"],
   ["browser", "Browser"],
   ["server", "Server"],
   ["danger", "Danger zone"],
@@ -38,7 +37,7 @@ function Nav({ ready }: { ready: boolean }) {
       let current: Section = SECTIONS[0][0];
       for (const [id] of SECTIONS) {
         const top = document.getElementById(id)?.getBoundingClientRect().top;
-        if (top !== undefined && top <= 120) current = id;
+        if (top !== undefined && top <= 140) current = id;
       }
       const page = pageScroller();
       if (page.scrollTop + page.clientHeight >= page.scrollHeight - 2) current = "danger";
@@ -76,6 +75,35 @@ function RestartNotice() {
   );
 }
 
+function MailNotice({ s }: { s: Summary }) {
+  const d = s.digest;
+  const digestDown = d.enabled && (d.deliveryState === "failed" || d.deliveryState === "abandoned");
+  if (s.gmail.connected && !digestDown) return null;
+  return (
+    <ListNotice tone="warning" icon={<MailWarning />}>
+      {!s.gmail.connected ? (
+        <>
+          Gmail isn&apos;t connected: applications that need an account or an emailed code stop, and no digest goes out.{" "}
+          <a className="font-medium underline underline-offset-2" href="/oauth/start">
+            Connect Gmail
+          </a>
+        </>
+      ) : (
+        <>
+          {d.deliveryState === "abandoned" ? "The questions digest gave up after repeated failures" : "The last questions digest failed to send"}
+          {d.lastError ? `: ${d.lastError}` : "."}{" "}
+          <a className="font-medium underline underline-offset-2" href={href("settings", "mail")}>
+            Mail &amp; digest
+          </a>
+        </>
+      )}
+    </ListNotice>
+  );
+}
+
+const link = "text-accent-text underline-offset-2 hover:underline";
+const APPROVAL_LABEL: Record<string, string> = { auto: "Auto-apply", gated: "Gated" };
+
 const holdBackConfirm =
   (s: Summary) =>
   (next: unknown): Confirm | null =>
@@ -97,16 +125,30 @@ const holdBackConfirm =
 
 function General({ s }: { s: Summary }) {
   const held = s.counts["held"] ?? 0;
-  const t = s.thresholds;
+  const raw = useSettings().data?.values["approval"];
+  const saved = typeof raw === "string" ? raw : undefined;
+  const a = s.autoApply;
   return (
-    <SettingsPanel id="general" title="General" footer={<SavedLocally />}>
+    <SettingsPanel id="general" title="General">
       <ConfigRow
         path="approval"
         label="Approval"
         description={
-          s.approval === "auto"
-            ? "The app approves the jobs that clear the auto-apply bar and sends every application without asking. Jobs you add by hand, and questions it can't answer, still wait for you."
-            : "You approve every job in Review, and OK every filled-in application before it's sent."
+          <>
+            {(saved ?? s.approval) === "auto"
+              ? "Approves and sends jobs that clear the auto-apply bar. Hand-picked jobs and questions it can't answer still wait for you."
+              : "You approve every job in Review and OK every application before it's sent."}
+            {saved !== undefined && saved !== s.approval && (
+              <span className="block text-warning-text">
+                Saved as {APPROVAL_LABEL[saved] ?? saved}; the app is running {APPROVAL_LABEL[s.approval] ?? s.approval}.
+              </span>
+            )}
+            {a.enabled && (
+              <span className="block">
+                {num(a.approvedToday)} of {num(a.perDay)} auto-approvals used today.
+              </span>
+            )}
+          </>
         }
         field={{ kind: "choice", options: APPROVALS }}
       />
@@ -121,74 +163,67 @@ function General({ s }: { s: Summary }) {
         field={{ kind: "bool" }}
         confirm={holdBackConfirm(s)}
       />
+      {s.targets.holdBack && (
+        <SettingRow label="Held for later" description="Released back through triage when you stop holding them back.">
+          <span className="tabular">{num(held)}</span>
+          <Button asChild size="sm" variant="link" className="-my-1 px-0 touch:-my-1.5 touch:px-0">
+            <a href={href("archive", "held")}>View</a>
+          </Button>
+        </SettingRow>
+      )}
       <ConfigRow
         path="targets.describe"
         label="Target employers"
         description={
           <>
             Besides the frontier list in{" "}
-            <a className="text-accent-text underline-offset-2 hover:underline" href={href("profile", "employers.yml")}>
+            <a className={link} href={href("profile", "employers.yml")}>
               employers.yml
             </a>
-            , any employer the assessment judges to fit this description. Empty: the list alone. Changing it judges employers afresh.
+            , employers the assessment judges to fit this. Empty: the list alone.
           </>
         }
         field={{ kind: "words", placeholder: "The list alone" }}
       />
-      {s.targets.holdBack && (
-        <SettingRow label="Held for later" description="Jobs at target employers go back through triage once you stop holding them back.">
-          <span className="tabular font-medium">{num(held)}</span>
-          <Button asChild size="sm" variant="link" className="-my-1 px-0 touch:-my-1.5 touch:px-0">
-            <a href={href("archive", "held")}>View</a>
-          </Button>
-        </SettingRow>
-      )}
-      {t && (
-        <SettingRow label="Fit thresholds" description="Postings that score below them are skipped. Set in profile/rubric.yml, on the Profile page.">
-          <span className="tabular">
-            Practice <span className="font-medium">{t.practice}</span>, real <span className="font-medium">{t.real}</span>
-          </span>
-        </SettingRow>
-      )}
-      <SettingRow stack label="Add a posting" description="Paste a job URL to have it assessed like any posting a scan finds.">
-        <Button
-          size="sm"
-          icon={<Plus />}
-          onClick={() => {
-            shellActions.setAddOpen(true);
-          }}
-        >
-          Add a posting
-        </Button>
-      </SettingRow>
     </SettingsPanel>
   );
 }
 
 function AutoApply({ s }: { s: Summary }) {
   const a = s.autoApply;
+  const t = s.thresholds;
   const used = Math.min(1, a.perDay ? a.approvedToday / a.perDay : 0);
   return (
     <SettingsPanel
       id="auto-apply"
       title="Auto-apply"
-      description="The bar for the approvals the app gives itself while Approval is Auto-apply."
-      footer={<SavedLocally />}
+      description={a.enabled ? "Used while Approval is Auto-apply." : "Off: Approval is Gated, so every job waits for you in Review."}
     >
-      <SettingRow
-        label="Status"
-        description={
-          a.enabled
-            ? `Jobs scoring ${a.minScore} or more${a.allowConcerns ? "" : " with no concerns raised"} are approved and sent for you.`
-            : "Approval is Gated: every application waits for you in Review."
-        }
-      >
+      <SettingRow stack label="Status" description="Approvals reset at midnight UTC.">
         <StatusLabel tone={a.enabled ? "success" : "neutral"} label={a.enabled ? "On" : "Off"} className="text-fg" />
+        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted" aria-hidden>
+          <div className={cn("h-full rounded-full", used >= 1 ? "bg-warning" : "bg-accent")} style={{ width: `${used * 100}%` }} />
+        </div>
+        <span className="tabular">
+          {a.approvedToday > a.perDay ? `${num(a.approvedToday)} today, limit ${num(a.perDay)}` : `${num(a.approvedToday)} of ${num(a.perDay)} today`}
+        </span>
       </SettingRow>
       <ConfigRow
         path="autoApply.minScore"
         label="Minimum fit"
-        description="Align it with the practice interview-fit threshold: a score alone never makes a job practice."
+        description={
+          t ? (
+            <>
+              Fit thresholds in{" "}
+              <a className={link} href={href("profile", "rubric.yml")}>
+                rubric.yml
+              </a>
+              : practice {t.practice}, real {t.real}. A score alone never makes a job practice.
+            </>
+          ) : (
+            "A score alone never makes a job practice."
+          )
+        }
         field={{ kind: "number" }}
       />
       <ConfigRow
@@ -200,7 +235,7 @@ function AutoApply({ s }: { s: Summary }) {
       <ConfigRow
         path="autoApply.perDay"
         label="Approvals a day"
-        description="New applications a day (Schedule & limits) still caps what starts."
+        description={`New applications are still capped at ${num(s.applyPerDay)} a day.`}
         field={{ kind: "number", unit: "a day" }}
       />
       <ConfigRow
@@ -209,34 +244,6 @@ function AutoApply({ s }: { s: Summary }) {
         description="Ever, sent or under way. Further passing roles there wait for your review."
         field={{ kind: "number" }}
       />
-      <SettingRow stack label="Approved today" description="Daily quotas reset at midnight UTC.">
-        <div className="flex items-center gap-3">
-          <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted" aria-hidden>
-            <div className={cn("h-full rounded-full", used >= 1 ? "bg-warning" : "bg-accent")} style={{ width: `${used * 100}%` }} />
-          </div>
-          <span className="tabular">
-            {a.approvedToday > a.perDay ? `${num(a.approvedToday)} today, limit ${num(a.perDay)}` : `${num(a.approvedToday)} of ${num(a.perDay)} today`}
-          </span>
-        </div>
-      </SettingRow>
-      <SettingFold>
-        <Disclosure id="settings-auto" summary="How auto-apply decides">
-          <div className="space-y-3">
-            <p>
-              <span className="font-medium text-fg">Target employers. </span>
-              {s.targets.holdBack
-                ? "While they are held back, a job counts as practice only when its employer is not a target: on your practice list, or judged not to fit your description of a target employer and not on your frontier list. Anything else is held for later. Pay, location and a low real score are not practice proof."
-                : "They are not held back, so a job at one may be approved too, on its real-rubric score. Its employer must still have been judged."}
-            </p>
-            <p>
-              <span className="font-medium text-fg">Safeguards. </span>Missing employer evidence never qualifies; low fit or failed qualifications are skipped.
-              Hand-picked postings{a.allowConcerns ? "" : " and jobs with concerns"} wait in Review.
-              {a.allowConcerns ? " Concerns alone do not block a job." : ""} Auto-approvals that no longer qualify are held before they fill, and stop for your
-              OK before they're sent.
-            </p>
-          </div>
-        </Disclosure>
-      </SettingFold>
     </SettingsPanel>
   );
 }
@@ -244,37 +251,24 @@ function AutoApply({ s }: { s: Summary }) {
 function Browser({ s }: { s: Summary }) {
   const slots = s.browsers;
   return (
-    <SettingsPanel id="browser" title="Browser" footer={<SavedLocally />}>
-      <SettingRow
-        stack
-        label={slots.length > 1 ? "Browser slots" : "Browser"}
-        description={
-          slots.length > 1
-            ? `Up to ${slots.length} browser slots run on this machine.`
-            : slots.length
-              ? "Chrome runs on this machine."
-              : "Chrome runs on this machine. Viewing it from here needs a live view port (below)."
-        }
-      >
-        {slots.length
-          ? slots.map((u, i) => (
-              <Button key={u} asChild size="sm">
-                <a href={u} target="_blank" rel="noopener noreferrer">
-                  {slots.length > 1 ? `Open browser ${i + 1}` : "Open browser"}
-                  <ExternalLink />
-                </a>
-              </Button>
-            ))
-          : undefined}
-      </SettingRow>
+    <SettingsPanel
+      id="browser"
+      title="Browser"
+      description={slots.length ? undefined : "Live view is off: set a live view port to watch the browser from here."}
+    >
+      {slots.length > 0 && (
+        <SettingRow stack label="Live view" description="Shared browser slots. Check which application a browser is on before you take it over.">
+          {slots.map((u, i) => (
+            <Button key={u} asChild size="sm">
+              <a href={u} target="_blank" rel="noopener noreferrer">
+                {slots.length > 1 ? `Open browser ${i + 1}` : "Open browser"}
+                <ExternalLink />
+              </a>
+            </Button>
+          ))}
+        </SettingRow>
+      )}
       <BrowserRows />
-      <SettingFold>
-        <Disclosure id="settings-browser" summary="Before you take over a browser">
-          These are shared slot views, not application links. Ordinary parked applications release their slots; inspect their saved screenshot and checkpoint
-          instead. Only explicitly reserved manual hand-offs and ambiguous submissions expose a browser link on their application page. Do not take over a
-          browser without checking its current application.
-        </Disclosure>
-      </SettingFold>
     </SettingsPanel>
   );
 }
@@ -300,12 +294,20 @@ function DangerZone({ s }: { s: Summary }) {
         stack
         label="Release held jobs"
         description={
-          held
-            ? `Send all ${plural(held, "held job")} back through triage, where each is assessed again against the current targets.`
-            : "No jobs are held back."
+          held ? (
+            <>
+              Sends {plural(held, "held job")} back through triage to be assessed again.{" "}
+              <a className={link} href={href("archive", "held")}>
+                View
+              </a>
+            </>
+          ) : (
+            "No jobs are held back."
+          )
         }
       >
         <Button
+          size="sm"
           variant="danger"
           disabled={!held || busy}
           loading={busy}
@@ -331,27 +333,31 @@ function DangerZone({ s }: { s: Summary }) {
 
 export function SettingsPage() {
   const { data: s } = useSummary();
+  const { data: settings } = useSettings();
+  const { isPending: modelsPending } = useModels();
   const { parts } = useRoute();
   const section = parts[0];
   const ready = !!s;
+  const settled = ready && !!settings && !modelsPending;
   useEffect(() => {
-    if (ready && section) document.getElementById(section)?.scrollIntoView({ block: "start" });
-  }, [ready, section]);
+    if (settled && section) requestAnimationFrame(() => document.getElementById(section)?.scrollIntoView({ block: "start" }));
+  }, [settled, section]);
   return (
     <Workspace
       className="max-lg:[&>:first-child]:border-b-0"
-      bar={{ title: "Settings", hint: "How the app runs: what it may do on its own, where mail goes, and the browser it applies with." }}
+      bar={{ title: "Settings", hint: "Changes are saved to config.local.yml, laid over config.yml; reset goes back to config.yml." }}
     >
       <WorkspaceBody asideSide="left" asideWidth="nav" aside={<Nav ready={ready} />}>
         {s ? (
           <>
             <RestartNotice />
+            <MailNotice s={s} />
             <General s={s} />
-            <Models />
             <AutoApply s={s} />
-            <Schedule />
-            <Sources />
             <Mail s={s} />
+            <Schedule />
+            <Models />
+            <Sources />
             <Browser s={s} />
             <Server />
             <DangerZone s={s} />

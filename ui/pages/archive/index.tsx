@@ -20,7 +20,7 @@ import {
   Workspace,
 } from "../../components/ui";
 import { api, refreshAll, useSummary } from "../../lib/api";
-import { num, plural } from "../../lib/format";
+import { plural } from "../../lib/format";
 import { useListParams } from "../../lib/list-params";
 import { useMedia, WIDE } from "../../lib/media";
 import { navigate, setParams, useRoute } from "../../lib/router";
@@ -65,8 +65,6 @@ export function ArchivePage() {
   const sorts = SORTS[view];
   const segmented = !!list && list.groups.length > 1 && list.total > 0;
   const [emptyTitle, emptyText] = EMPTY[view];
-  const first = rows[0]?.reason?.label;
-  const uniform = rows.length > 1 && !!first && rows.every(r => r.reason?.label === first);
   const tools = list?.all !== 0;
 
   const panel = (
@@ -86,7 +84,6 @@ export function ArchivePage() {
         loading={query.isPlaceholderData}
         bar={{
           title: "Archive",
-          hint: "Jobs set aside: held back from applying, or turned down.",
           tabs: (
             <TabsList variant="bar">
               {(["held", "rejected"] as const).map(v => (
@@ -131,14 +128,6 @@ export function ArchivePage() {
             segments: segmented && <GroupSegments label="Fit" groups={list.groups} value={lp.group} onChange={lp.setGroup} />,
           }),
         }}
-        notice={
-          uniform && (
-            <p className="flex min-h-10 items-center border-b border-border px-(--list-x) py-2 text-sm text-fg-muted">
-              All {num(rows.length)}
-              {list && list.total > rows.length && " on this page"}: {first}.
-            </p>
-          )
-        }
         footer={list && <Pagination variant="footer" noun="jobs" offset={list.offset} limit={list.limit} total={list.total} onChange={record.setPage} />}
       >
         {list?.all === 0 ? (
@@ -148,7 +137,9 @@ export function ArchivePage() {
         ) : rows.length === 0 ? (
           <NoMatch noun="jobs" q={lp.q} filtered={lp.filters.length > 0 || !!lp.group} onClear={lp.clear} />
         ) : (
-          rows.map(job => <ArchiveRow key={job.id} job={job} threshold={thresholdOf(job.rubric, summary)} uniform={uniform} link={record.rowProps(job.id)} />)
+          rows.map(job => (
+            <ArchiveRow key={job.id} job={job} threshold={thresholdOf(job.rubric, summary)} rejected={view === "rejected"} link={record.rowProps(job.id)} />
+          ))
         )}
       </Workspace>
     </Tabs>
@@ -192,7 +183,7 @@ function ReleaseHeld({ count }: { count: number }) {
         open={confirming}
         onOpenChange={setConfirming}
         title="Release all held jobs?"
-        description={`Send all ${count.toLocaleString()} held jobs back through triage? Each one is assessed again.`}
+        description={`Send all ${count.toLocaleString()} held jobs back through triage, including target and frontier employers held for the real search and jobs held by the phase rules? Each one is assessed again.`}
         confirm={`Release ${plural(count, "job")}`}
         danger
         onConfirm={() => {

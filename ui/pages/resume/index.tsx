@@ -1,5 +1,5 @@
 import { Download, FileText, NotebookPen, Pencil } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { ResumeState } from "../../../src/api-types";
 import {
@@ -17,6 +17,7 @@ import {
   WorkspaceSection,
 } from "../../components/ui";
 import { api, refreshAll, useResume } from "../../lib/api";
+import { cn } from "../../lib/cn";
 import { plural } from "../../lib/format";
 import { href } from "../../lib/router";
 import { Sheets, Upload } from "./parts";
@@ -47,7 +48,7 @@ function Running({ r }: { r: ResumeState }) {
   return (
     <WorkspaceSection
       title={imp.feedback.length ? "Changing the draft" : "Converting your files"}
-      description="An agent is reading them and writing your resume on the template. This usually takes a few minutes; you can leave this page."
+      description="Takes a few minutes; you can leave this page."
       actions={
         <Button
           size="sm"
@@ -78,11 +79,12 @@ function Running({ r }: { r: ResumeState }) {
             ))}
           </ul>
         )}
-        <p className="text-sm text-fg-muted">From {imp.files.join(", ")}</p>
       </div>
     </WorkspaceSection>
   );
 }
+
+const RETRY = "The last attempt did not finish. Try again.";
 
 function Draft({ r }: { r: ResumeState }) {
   const imp = r.import;
@@ -105,10 +107,15 @@ function Draft({ r }: { r: ResumeState }) {
     });
   };
   const warnings = imp.warnings?.split("\n").filter(l => l.trim()) ?? [];
+  const current = r.stock.exists && r.stock.pages && imp.pages && r.stock.pages !== imp.pages ? r.stock.pages : null;
+  const asked = imp.feedback.filter(f => f !== RETRY);
   return (
     <>
-      <WorkspaceSection title="Review the draft" description={imp.pages ? plural(imp.pages, "page") : undefined}>
+      <WorkspaceSection title="Review the draft" description={imp.pages ? `${plural(imp.pages, "page")}${current ? ` (current: ${current})` : ""}` : undefined}>
         <div className="flex flex-col gap-4">
+          {current && imp.pages && imp.pages > current && (
+            <p className="text-sm text-warning-text">Longer than your current resume, so every tailored copy may run to {plural(imp.pages, "page")}.</p>
+          )}
           {imp.summary && <p className="text-sm text-fg">{imp.summary}</p>}
           {warnings.length > 0 && (
             <div role="alert" className="border-l-2 border-warning pl-3 text-sm">
@@ -129,10 +136,7 @@ function Draft({ r }: { r: ResumeState }) {
                 }}
                 className="mt-0.5"
               />
-              <span>
-                Also update the resume notes
-                <span className="block text-fg-muted">With what didn&apos;t fit on the page, so tailoring can swap it in.</span>
-              </span>
+              <span>Also update the resume notes</span>
             </label>
           )}
           <div className="flex flex-wrap gap-2">
@@ -153,6 +157,26 @@ function Draft({ r }: { r: ResumeState }) {
       </WorkspaceSection>
       <WorkspaceSection title={<label htmlFor="resume-feedback">Ask for changes</label>}>
         <div className="flex flex-col gap-3">
+          {(imp.note || asked.length > 0) && (
+            <dl className="space-y-2 border-l-2 border-border pl-3 text-sm">
+              {imp.note && (
+                <div>
+                  <dt className="text-fg-muted">Your note</dt>
+                  <dd className="break-words text-fg">{imp.note}</dd>
+                </div>
+              )}
+              {asked.length > 0 && (
+                <div>
+                  <dt className="text-fg-muted">Asked so far</dt>
+                  {asked.map((f, i) => (
+                    <dd key={i} className="break-words text-fg">
+                      {f}
+                    </dd>
+                  ))}
+                </div>
+              )}
+            </dl>
+          )}
           <Textarea
             id="resume-feedback"
             value={feedback}
@@ -187,9 +211,9 @@ function Failed({ r }: { r: ResumeState }) {
     <WorkspaceSection tone="danger" title="The import didn't finish">
       <div role="alert" className="flex flex-col gap-3">
         <p className="text-sm break-words text-fg">{imp.error}</p>
-        <div className="flex gap-2">
+        {imp.files.length > 0 && <p className="text-sm break-words text-fg-muted">From {imp.files.join(", ")}</p>}
+        <div className="flex flex-wrap gap-2">
           <Button
-            size="sm"
             loading={busy}
             onClick={() => {
               setBusy(true);
@@ -200,7 +224,7 @@ function Failed({ r }: { r: ResumeState }) {
           >
             Try again
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => void act(api.discardImport)}>
+          <Button variant="ghost" onClick={() => void act(api.discardImport)}>
             Discard
           </Button>
         </div>
@@ -209,40 +233,83 @@ function Failed({ r }: { r: ResumeState }) {
   );
 }
 
+const notesState = (r: ResumeState) => (r.notes.empty ? "Empty" : r.notes.example ? "Still the example" : null);
+
 function Notes({ r }: { r: ResumeState }) {
-  const state = r.notes.empty ? "Empty" : r.notes.example ? "Still the example" : null;
+  const state = notesState(r);
   return (
     <WorkspaceSection
       title="Resume notes"
-      description="Confirmed extra material: more bullets for each job, other projects, skills. Tailoring swaps these in where they fit a posting better than the stock resume does."
-    >
-      <div className="flex flex-col gap-4">
-        {state && (
-          <p className="text-sm text-fg-muted">
-            <span className="font-medium text-fg">{state}. </span>
-            Without notes, tailoring can only reorder and trim the stock resume. Importing files adds what doesn&apos;t fit on the page.
-          </p>
-        )}
-        <Button asChild className="self-start">
+      description={state ? undefined : "Extra bullets, projects and skills that tailoring swaps in where they fit a posting."}
+      flush={!state}
+      actions={
+        <Button asChild size="sm">
           <a href={href("profile", "resume-notes.md")}>
             <NotebookPen />
             Edit notes
           </a>
         </Button>
-        <Disclosure id="resume-tailoring" summary="How each resume is tailored">
-          <div className="space-y-2">
-            <p>
-              For each job that clears assessment, an agent copies the stock resume, reorders and trims bullets so the most relevant evidence comes first, and
-              swaps in entries from your notes where they fit the posting better. It mirrors the posting&apos;s words only where they truly describe your work.
-            </p>
-            <p>
-              Nothing is added that isn&apos;t in the stock resume or the notes, and a tailored copy never runs longer than the stock one. You see each copy,
-              and what changed, on the job&apos;s page before you approve it.
-            </p>
-          </div>
-        </Disclosure>
-      </div>
+      }
+    >
+      {state && (
+        <p className="text-sm text-fg-muted">
+          <span className="font-medium text-warning-text">{state}. </span>
+          Tailoring can only reorder and trim the stock resume until you add notes.
+        </p>
+      )}
     </WorkspaceSection>
+  );
+}
+
+function Meta({ r, short }: { r: ResumeState; short?: boolean }) {
+  const s = r.stock;
+  const imp = r.import;
+  const notes = notesState(r);
+  const parts: ReactNode[] = [];
+  if (imp.status === "ready" && short) {
+    parts.push("Draft");
+  } else if (imp.status === "ready") {
+    parts.push(
+      <>
+        Draft{imp.pages ? `, ${plural(imp.pages, "page")}` : ""}
+        {imp.finishedAt && (
+          <>
+            , <Time at={imp.finishedAt} prefix="finished " />
+          </>
+        )}
+      </>,
+    );
+  } else if (s.error) {
+    parts.push(<span className="text-danger-text">Doesn&apos;t compile</span>);
+  } else if (s.exists && short) {
+    if (!notes)
+      parts.push(
+        <>
+          {s.pages ? `${plural(s.pages, "page")} · ` : ""}
+          <Time at={s.updatedAt} />
+        </>,
+      );
+  } else if (s.exists) {
+    parts.push(
+      <>
+        {s.pages ? `${plural(s.pages, "page")}, ` : ""}
+        <Time at={s.updatedAt} prefix="changed " />
+      </>,
+    );
+  }
+  if (notes && (s.exists || imp.status === "ready"))
+    parts.push(
+      <span className="text-warning-text">{notes === "Empty" ? (short ? "No notes" : "no notes") : short ? "Example notes" : "notes still the example"}</span>,
+    );
+  return (
+    <>
+      {parts.map((p, i) => (
+        <Fragment key={i}>
+          {i > 0 && " · "}
+          {p}
+        </Fragment>
+      ))}
+    </>
   );
 }
 
@@ -258,43 +325,53 @@ export function ResumePage() {
   };
   const status = r?.import.status;
   const s = r?.stock;
-  const meta = s?.exists && (
-    <>
-      {s.pages ? `${plural(s.pages, "page")}, ` : ""}
-      <Time at={s.updatedAt} prefix="changed " />
-    </>
-  );
+  const ready = status === "ready";
+  const lead = status === "running" || status === "ready" || status === "failed";
+  const shown = !!s && (s.exists || ready);
   return (
     <Workspace
       className="max-lg:[&_div:has(>[data-lead])]:flex-1"
       bar={{
         title: "Resume",
         hint: "The stock resume every application is tailored from, and the notes tailoring may draw on.",
-        meta,
-        controls: s?.exists && (
-          <div data-lead className="min-w-0 text-sm lg:hidden">
-            {!!s.pages && <p className="truncate font-medium text-fg">{plural(s.pages, "page")}</p>}
-            <p className="truncate text-fg-muted">
-              <Time at={s.updatedAt} prefix="Changed " />
-            </p>
-          </div>
+        meta: r && shown && <Meta r={r} />,
+        controls: r && shown && (
+          <p data-lead className="min-w-0 truncate text-sm text-fg-muted lg:hidden">
+            <Meta r={r} short />
+          </p>
         ),
-        actions: r && s?.exists && (
+        actions: r && s && shown && (
           <>
-            {!s.error && (
+            {ready ? (
               <Button asChild size="sm">
-                <a href="/api/resume/stock.pdf" download={r.pdfName}>
+                <a href="/api/resume/draft.pdf" download={r.pdfName.replace(/(\.pdf)?$/i, "-draft.pdf")}>
                   <Download />
-                  <span className="max-sm:sr-only">Download PDF</span>
+                  <span>
+                    <span className="max-sm:hidden">Download draft</span>
+                    <span className="sm:hidden">Draft PDF</span>
+                  </span>
+                </a>
+              </Button>
+            ) : (
+              !s.error && (
+                <Button asChild size="sm">
+                  <a href="/api/resume/stock.pdf" download={r.pdfName}>
+                    <Download />
+                    <span>
+                      <span className="max-sm:hidden">Download </span>PDF
+                    </span>
+                  </a>
+                </Button>
+              )
+            )}
+            {s.exists && (
+              <Button asChild variant="ghost" size="sm">
+                <a href={href("profile", r.main)}>
+                  <Pencil />
+                  Edit source
                 </a>
               </Button>
             )}
-            <Button asChild variant="ghost" size="sm">
-              <a href={href("profile", r.main)}>
-                <Pencil />
-                Edit source
-              </a>
-            </Button>
           </>
         ),
       }}
@@ -308,45 +385,57 @@ export function ResumePage() {
       ) : (
         <WorkspaceBody
           asideWidth="pane"
+          className={cn(lead && "max-lg:[&>aside]:order-first max-lg:[&>aside]:border-t-0")}
           aside={
-            <div className="lg:sticky lg:top-[calc(3rem+1px)]">
-              {status === "failed" && <Failed r={r} />}
-              {status === "running" ? (
+            <div className="lg:sticky lg:top-[calc(3rem+1px)] lg:max-h-[calc(var(--app-h)-3rem-1px)] lg:overflow-y-auto">
+              {status === "failed" ? (
+                <Failed r={r} />
+              ) : status === "running" ? (
                 <Running r={r} />
-              ) : status === "ready" ? (
+              ) : ready ? (
                 <Draft r={r} />
+              ) : s.exists ? (
+                <>
+                  <Notes r={r} />
+                  <div className="border-b border-border px-(--list-x) py-4">
+                    <Disclosure id="resume-import" summary="Import from files" inset={false}>
+                      <div className="pt-2">
+                        <Upload compact limits={r.limits} submit="Convert" busy={sending} onSubmit={start} />
+                      </div>
+                    </Disclosure>
+                  </div>
+                </>
               ) : (
                 <WorkspaceSection
-                  title={s.exists ? "Import from files" : "Import your resume"}
-                  description={
-                    s.exists
-                      ? "Build a new draft from an updated resume or anything else. Your current resume stays until you accept it."
-                      : "Upload whatever you have. An agent writes it on the app's Typst template, keeping every fact as your files give it, and you review the result before it is used."
-                  }
+                  title="Import your resume"
+                  description="Upload whatever you have. An agent writes it on the app's Typst template, keeping every fact as your files give it, and you review the result before it is used."
                 >
-                  <Upload compact={s.exists} limits={r.limits} submit={s.exists ? "Convert" : "Convert to a resume"} busy={sending} onSubmit={start} />
-                  {!s.exists && (
-                    <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border pt-3 text-sm text-fg-muted">
-                      <FileText className="size-4 text-fg-subtle" />
-                      <span>Rather write Typst yourself?</span>
-                      <Button
-                        variant="link"
-                        onClick={() => {
-                          setExample(true);
-                        }}
-                      >
-                        Start from the example
-                      </Button>
-                    </div>
-                  )}
+                  <Upload limits={r.limits} submit="Convert to a resume" busy={sending} onSubmit={start} />
+                  <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border pt-4 text-sm text-fg-muted">
+                    <FileText className="size-4 shrink-0 text-fg-subtle" />
+                    <span>Rather write Typst yourself?</span>
+                    <Button
+                      variant="link"
+                      onClick={() => {
+                        setExample(true);
+                      }}
+                    >
+                      Start from the example
+                    </Button>
+                  </div>
                 </WorkspaceSection>
               )}
-              <Notes r={r} />
+              {(lead || !s.exists) && (
+                <div className={cn(lead && "max-lg:hidden")}>
+                  <Notes r={r} />
+                </div>
+              )}
             </div>
           }
         >
-          {status === "ready" ? (
+          {ready ? (
             <Viewer>
+              <p className="mb-3 text-sm font-medium text-fg-muted">Draft, not in use yet</p>
               <Sheets
                 src="/api/resume/draft.png"
                 pages={r.import.pages}
@@ -356,7 +445,18 @@ export function ResumePage() {
               />
             </Viewer>
           ) : s.error ? (
-            <WorkspaceSection tone="danger" title={`${r.main} doesn't compile`}>
+            <WorkspaceSection
+              tone="danger"
+              title={`${r.main} doesn't compile`}
+              actions={
+                <Button asChild variant="primary" size="sm">
+                  <a href={href("profile", r.main)}>
+                    <Pencil />
+                    Edit source
+                  </a>
+                </Button>
+              }
+            >
               <pre role="alert" className="max-w-[56rem] overflow-x-auto font-mono text-xs whitespace-pre-wrap text-fg">
                 {s.error}
               </pre>
@@ -369,6 +469,11 @@ export function ResumePage() {
             <Viewer>
               <EmptyState icon={<FileText />} title="No resume yet" description="Import what you have, or start from the example. Its pages show here." />
             </Viewer>
+          )}
+          {lead && (
+            <div className="border-t border-border lg:hidden">
+              <Notes r={r} />
+            </div>
           )}
         </WorkspaceBody>
       )}
