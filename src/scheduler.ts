@@ -2,7 +2,6 @@ import * as chrome from "./chrome";
 import { browserCount, config, describing } from "./config";
 import {
   dedupeExisting,
-  employerApplications,
   getJob,
   jobsByStatus,
   jobsInStatuses,
@@ -17,7 +16,7 @@ import {
   requeueInterruptedPrep,
   type Job,
 } from "./db";
-import { autoApply, checkAutoApprovedPractice, employerCapNote } from "./auto";
+import { checkAutoApprovedPractice, employerHold } from "./auto";
 import { jobBlockers, type BlockerCause } from "./blockers";
 import { forgetDeferredApproval, pumpDeferredApprovals } from "./deferred-approvals";
 import { tickQuestionDigest } from "./digest";
@@ -182,11 +181,11 @@ export function trimEmployerApprovals() {
     .filter(job => job.approved_by === "auto" && !applicationStarted(job))
     .sort((a, b) => (a.score ?? -1) - (b.score ?? -1) || b.id - a.id);
   for (const job of queued) {
-    const others = employerApplications(job);
-    if (others < autoApply().perEmployer) continue;
-    if (!moveJob(job.id, "approved", { ...to.awaitingApproval(`needs your review: ${employerCapNote(others)}`), approved_by: null })) continue;
+    const hold = employerHold(job);
+    if (!hold) continue;
+    if (!moveJob(job.id, "approved", { ...to.awaitingApproval(`needs your review: ${hold}`), approved_by: null })) continue;
     forgetDeferredApproval(job.id);
-    logEvent("auto", `Auto-approval withdrawn: ${employerCapNote(others)}`, job.id);
+    logEvent("auto", `Auto-approval withdrawn: ${hold}`, job.id);
   }
 }
 

@@ -36,6 +36,7 @@ export interface AppState {
     allowConcerns: boolean;
     perDay: number;
     perEmployer: number | null;
+    cooldownDays: number;
     approvedToday: number;
   };
   applyPerDay: number;

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
-import { autoApply, autoApproval, employerCapNote } from "./auto";
+import { autoApply, autoApproval, employerHold } from "./auto";
 import { config, describing, jobDir, readProfile } from "./config";
-import { appliedLocation, employerApplications, getJob, jobSources, logEvent, moveJob, updateJob, type Job } from "./db";
+import { appliedLocation, getJob, jobSources, logEvent, moveJob, updateJob, type Job } from "./db";
 import { deferApproval, forgetDeferredApproval } from "./deferred-approvals";
 import { countOne, uncountOne, usedToday } from "./limits";
 import { placeOf } from "./location";
@@ -189,7 +189,7 @@ export async function prep(job: Job, run: RunWorker) {
             concerns,
             handPicked,
             approvedToday: usedToday("auto"),
-            employerApplications: employerApplications(job),
+            employerHold: employerHold(job),
           });
           const moved = moveJob(job.id, "prepping", {
             ...(auto.approve ? to.approved("auto") : { ...to.awaitingApproval(auto.note), approved_by: null }),
@@ -224,10 +224,7 @@ export async function prep(job: Job, run: RunWorker) {
 }
 
 function employerCapped(job: Job): string | null {
-  const rules = autoApply();
-  if (!rules.enabled) return null;
-  const others = employerApplications(job);
-  return others >= rules.perEmployer ? employerCapNote(others) : null;
+  return autoApply().enabled ? employerHold(job) : null;
 }
 
 function settledByEmployer(job: Job): { reason: string; practice: PracticeAssessment | null } | null {

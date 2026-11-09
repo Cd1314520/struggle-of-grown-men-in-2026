@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { autoApply, reconsiderAutoApproval } from "./auto";
-import { db, deferredJobs, employerApplications, logEvent, moveJob, notifyJobChange, openedAt, updateJob } from "./db";
+import { autoApply, employerHold, reconsiderAutoApproval } from "./auto";
+import { db, deferredJobs, logEvent, moveJob, notifyJobChange, openedAt, updateJob } from "./db";
 import { countOne, usedToday } from "./limits";
 import { profileProblems } from "./profile";
 import { workingPdf } from "./resume";
@@ -37,7 +37,7 @@ export function pumpDeferredApprovals() {
       concerns: job.concerns,
       handPicked: false,
       approvedToday: usedToday("auto"),
-      employerApplications: employerApplications(job),
+      employerHold: employerHold(job),
     });
 
     if (result.approved && result.verdict) {

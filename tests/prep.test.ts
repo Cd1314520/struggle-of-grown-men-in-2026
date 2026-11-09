@@ -78,6 +78,25 @@ describe("prep before the full assessment", () => {
     expect(usedToday("prep")).toBe(before - 1);
   });
 
+  it("lets a further role through once the employer's application closes, unless it closed after an interview", async () => {
+    config.approval = "auto";
+    config.autoApply = { ...config.autoApply, perEmployer: 1, cooldownDays: 180 };
+    const declined = preppingJob("Declined Co");
+    db.run("UPDATE jobs SET status = 'rejected_by_company', submitted_at = datetime('now') WHERE id = ?", [declined.id]);
+    const next = preppingJob("Declined Co");
+    const { run, started } = fakeRun();
+    await prep(next, run);
+    expect(started).not.toEqual([]);
+
+    const interviewed = preppingJob("Interviewed Co");
+    db.run("UPDATE jobs SET status = 'rejected_by_company', submitted_at = datetime('now') WHERE id = ?", [interviewed.id]);
+    db.run("INSERT INTO application_steps (job_id, kind, title, source) VALUES (?, 'interview', 'Onsite', 'user')", [interviewed.id]);
+    const after = preppingJob("Interviewed Co");
+    await prep(after, fakeRun().run);
+    expect(getJob(after.id)?.status).toBe("skipped");
+    expect(getJob(after.id)?.note).toMatch(/turned you down after interviewing on \d{4}-\d{2}-\d{2} \(auto apply waits 180 days\)$/);
+  });
+
   it("skips a job the screen rules out, and gives back the day's count", async () => {
     config.targets.holdBack = true;
     const job = preppingJob("Screened Co");

@@ -176,6 +176,31 @@ describe("job queries", () => {
   `);
   });
 
+  it("counts open applications per employer and remembers rejections after an interview", () => {
+    scenario(`
+    job(1, { status: "triaged", company_key: "acme" });
+    job(2, { status: "submitted", company_key: "acme" });
+    job(3, { status: "rejected_by_company", company_key: "acme", submitted_at: "2026-01-01 00:00:00", updated_at: "2026-01-02 00:00:00" });
+    job(4, { status: "withdrawn", company_key: "acme", submitted_at: "2026-01-01 00:00:00" });
+    job(5, { status: "held", company_key: "acme", submitted_at: "2026-01-01 00:00:00" });
+    assert.equal(store.employerApplications(store.getJob(1)), 2, "closed applications free their place");
+    assert.equal(store.employerRejectionAfterInterview(store.getJob(1), 180), null, "a rejection without an interview starts no wait");
+
+    job(6, { status: "rejected_by_company", company_key: "beta" });
+    db.run("INSERT INTO application_steps (job_id, kind, title, source) VALUES (6, 'interview', 'Onsite', 'user')");
+    job(7, { status: "triaged", company_key: "beta" });
+    assert.match(store.employerRejectionAfterInterview(store.getJob(7), 180) ?? "", /^\\d{4}-\\d{2}-\\d{2}/);
+    assert.equal(store.employerRejectionAfterInterview(store.getJob(7), 0), null, "0 days turns the wait off");
+    assert.equal(store.employerRejectionAfterInterview(store.getJob(6), 180), null, "a job does not wait on itself");
+
+    job(8, { status: "rejected_by_company", company_key: "gamma", updated_at: "2020-01-01 00:00:00" });
+    db.run("INSERT INTO status_changes (job_id, from_status, to_status, at) VALUES (8, 'submitted', 'interview', '2019-12-01 00:00:00'), (8, 'interview', 'rejected_by_company', '2020-01-01 00:00:00')");
+    job(9, { status: "triaged", company_key: "gamma" });
+    assert.equal(store.employerRejectionAfterInterview(store.getJob(9), 180), null, "an old rejection has served its wait");
+    assert.equal(store.employerRejectionAfterInterview(store.getJob(9), 365 * 10), "2020-01-01 00:00:00");
+  `);
+  });
+
   it("reads events newest first, with and without worker chatter", () => {
     scenario(`
     job(1);

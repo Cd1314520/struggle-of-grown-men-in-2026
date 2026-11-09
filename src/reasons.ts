@@ -25,7 +25,11 @@ const TARGET_RULES: readonly Rule[] = [
   [n => (n.toLowerCase().includes(TARGET) ? "Target employer" : null), n => /\((.+)\)(; .*)?$/.exec(n)?.[1] ?? cap(n)],
   [n => (n.toLowerCase().includes(TECH_SCALED) ? cap(TECH_SCALED) : null), n => /\((.+)\)$/.exec(n)?.[1] ?? cap(n)],
 ];
-const RULES: readonly Rule[] = [...TARGET_RULES, [n => (/\(auto apply allows \d+/i.test(n) ? "Already applying at this employer" : null)]];
+const RULES: readonly Rule[] = [
+  ...TARGET_RULES,
+  [n => (/\(auto apply allows \d+/i.test(n) ? "Already applying at this employer" : null)],
+  [n => (/\(auto apply waits \d+ days\)/i.test(n) ? "Turned down after an interview here" : null)],
+];
 
 const STOPPED: Partial<Record<Status, string>> = {
   awaiting_approval: "Turned down at review",

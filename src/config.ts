@@ -26,6 +26,7 @@ export interface Config {
     allowConcerns?: boolean;
     perDay?: number;
     perEmployer?: number;
+    cooldownDays?: number;
   };
   schedule: { scanMinutes: number; discoverMinutes: number; trackMinutes: number };
   quietDays?: number;

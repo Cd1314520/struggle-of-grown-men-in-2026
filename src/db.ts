@@ -151,26 +151,37 @@ export const statusCounts = (): Record<string, number> =>
       .map(r => [r.status, r.n]),
   );
 
-const APPLICATIONS: readonly Status[] = [
-  "approved",
-  "filling",
-  "needs_input",
-  "awaiting_submit",
-  "needs_manual",
-  "submitted",
-  "interview",
-  "offer",
-  "rejected_by_company",
-  "withdrawn",
-];
+const OPEN_APPLICATIONS: readonly Status[] = ["approved", "filling", "needs_input", "awaiting_submit", "needs_manual", "submitted", "interview", "offer"];
+const CLOSED_APPLICATIONS: readonly Status[] = ["rejected_by_company", "withdrawn"];
 export const employerApplications = (job: Pick<Job, "id" | "company_key">) =>
   job.company_key
     ? (db
-        .query<{ n: number }, [number, string, string]>(
-          "SELECT count(*) AS n FROM jobs WHERE id != ? AND company_key = ? AND (status IN (SELECT value FROM json_each(?)) OR submitted_at IS NOT NULL)",
+        .query<{ n: number }, [number, string, string, string]>(
+          `SELECT count(*) AS n FROM jobs WHERE id != ? AND company_key = ?
+          AND (status IN (SELECT value FROM json_each(?)) OR (submitted_at IS NOT NULL AND status NOT IN (SELECT value FROM json_each(?))))`,
         )
-        .get(job.id, job.company_key, JSON.stringify(APPLICATIONS))?.n ?? 0)
+        .get(job.id, job.company_key, JSON.stringify(OPEN_APPLICATIONS), JSON.stringify(CLOSED_APPLICATIONS))?.n ?? 0)
     : 0;
+
+export const employerRejectionAfterInterview = (job: Pick<Job, "id" | "company_key">, days: number): string | null =>
+  job.company_key && days > 0
+    ? (db
+        .query<{ at: string | null }, [number, string, number]>(
+          `SELECT max(closed) AS at FROM (
+            SELECT j.id, COALESCE(
+              (SELECT max(c.at) FROM status_changes c WHERE c.job_id = j.id AND c.to_status = 'rejected_by_company'),
+              j.updated_at
+            ) AS closed
+            FROM jobs j
+            WHERE j.id != ? AND j.company_key = ? AND j.status = 'rejected_by_company'
+            AND (
+              EXISTS (SELECT 1 FROM status_changes c WHERE c.job_id = j.id AND c.to_status IN ('interview', 'offer'))
+              OR EXISTS (SELECT 1 FROM application_steps s WHERE s.job_id = j.id AND s.kind = 'interview')
+            )
+          ) WHERE closed >= datetime('now', '-' || ? || ' days')`,
+        )
+        .get(job.id, job.company_key, days)?.at ?? null)
+    : null;
 
 export const employerAssessments = (job: Pick<Job, "id" | "company_key">) =>
   job.company_key
