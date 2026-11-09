@@ -28,6 +28,7 @@ import { fill } from "./fill";
 import { defaultCheckpoint, endSession, ownsFill, stopFailedFill, type Browser, type FillRuntime, type FillSession } from "./fill-session";
 import { beginAttempt, dropManualLease, fillPhase, isRecovering, isSubmitting, isVerifying, lastSlot, manualLeaseGate, markAmbiguous } from "./fill-state";
 import { backedOff, backOff, clearBackoff, countOne, due, usedToday } from "./limits";
+import { briefInterviews } from "./interview-prep";
 import { preferUsListings } from "./listings";
 import { locateEmployerPostings, locatePerDay } from "./locate";
 import { runWorker, stageOf, type RunWorker } from "./worker";
@@ -59,6 +60,7 @@ import { applicationStarted, FILL_STAGE, PARKED, to } from "./status";
 import { trackMailbox } from "./track";
 import { gmailStatus } from "./gmail";
 import { syncReferralMail } from "./outreach";
+import { stepsNeedingBrief } from "./steps";
 
 // The outside world a scheduler acts on. The defaults are the real agent runner and the real browsers.
 export interface SchedulerDeps {
@@ -334,8 +336,14 @@ export class Scheduler {
     });
   }
 
-  track() {
-    return this.exclusive("track", () => trackMailbox(this.run));
+  async track() {
+    await this.exclusive("track", () => trackMailbox(this.run));
+    await this.interviewPrep();
+  }
+
+  interviewPrep() {
+    if (backedOff() || !stepsNeedingBrief(1).length) return Promise.resolve();
+    return this.exclusive("interview-prep", () => briefInterviews(this.run));
   }
 
   // Answers kept for the answer bank go into answers.md first, so the recheck answers what they now settle.
@@ -598,6 +606,7 @@ export class Scheduler {
           },
         );
       }
+      if (!this.isRunning("interview-prep") && stepsNeedingBrief(1).length) void this.interviewPrep();
       retryPassingHandoffs();
       this.pump();
     };

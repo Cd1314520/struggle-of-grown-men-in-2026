@@ -215,7 +215,8 @@ export function leadOf(j: Pick<JobDetail, "status" | "note" | "updated_at" | "su
   if (n.whose === "you") return { tone: "warning" as Tone, text: `Your move${which}${n.due ? `, due ${stepAt(n.at)}` : ""}` };
   if (n.whose === "upcoming") return { tone: "info" as Tone, text: `Booked for ${stepAt(n.at)}${which}` };
   const days = Math.floor((now - stepMs(n.at)) / DAY);
-  return { tone: "neutral" as Tone, text: `Waiting on ${j.company} since ${stepAt(n.at)}${n.quiet ? `, quiet for ${days} days` : ""}` };
+  if (n.quiet) return { tone: "warning" as Tone, text: `No reply from ${j.company} for ${days} days since ${stepAt(n.at)}. Worth a nudge?` };
+  return { tone: "neutral" as Tone, text: `Waiting on ${j.company} since ${stepAt(n.at)}` };
 }
 
 const ACTED: Record<string, string> = {
@@ -239,6 +240,7 @@ const WORKER: Record<string, string> = {
   track: "Mailbox",
   locate: "Locator",
   recheck: "Recheck",
+  interview: "Interview prep",
 };
 export const workerName = (w: string | null) => (w ? (WORKER[w] ?? cap(w)) : "App");
 

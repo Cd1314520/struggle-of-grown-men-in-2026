@@ -31,6 +31,12 @@ export const STAGES: readonly { stage: ModelStage; label: string; description: s
     core: false,
   },
   { stage: "import", label: "Resume import", description: "Turns uploaded files into your Typst resume.", core: false },
+  {
+    stage: "interview",
+    label: "Interview prep",
+    description: "Writes what to brush up on for an interview step: topics, likely questions and company background.",
+    core: false,
+  },
 ];
 
 const DEFAULT = "__default__";

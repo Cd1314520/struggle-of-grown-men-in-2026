@@ -196,4 +196,26 @@ describe("job lists", () => {
       assert.equal(listJobs({ view: "held", filters: ["near"] }).total, 2);
     `);
   });
+
+  it("put a quiet application only under Gone quiet, longest quiet first", () => {
+    scenario(`
+      config.quietDays = 10;
+      const DAY = 86400000;
+      const sent = (company, doneDaysAgo) => {
+        const id = job({ company, status: "interview", submitted_at: "2026-09-01T00:00:00Z" });
+        const done = doneDaysAgo === null ? null : new Date(Date.now() - doneDaysAgo * DAY).toISOString();
+        if (done) db.query("INSERT INTO application_steps (job_id, kind, title, state, source, done_at) VALUES (?, 'assessment', 'OA', 'done', 'user', ?)").run(id, done);
+        return id;
+      };
+      const fresh = sent("Fresh", 3), old = sent("Old", 12), older = sent("Older", 30);
+      const bare = job({ company: "Bare", status: "submitted", submitted_at: "2026-09-01T00:00:00Z" });
+      const all = listJobs({ view: "applications", limit: 100 });
+      const count = key => all.groups.find(g => g.key === key).count;
+      assert.deepEqual(["waiting", "quiet", "no_reply"].map(count), [1, 2, 1]);
+      assert.deepEqual(listJobs({ view: "applications", group: "quiet" }).rows.map(j => j.id), [older, old]);
+      assert.deepEqual(listJobs({ view: "applications", group: "waiting" }).rows.map(j => j.id), [fresh]);
+      assert.deepEqual(listJobs({ view: "applications", group: "no_reply" }).rows.map(j => j.id), [bare]);
+      assert.deepEqual(all.rows.map(j => j.id), [fresh, older, old, bare]);
+    `);
+  });
 });

@@ -1,13 +1,15 @@
-import { Inbox } from "lucide-react";
+import { ArrowRight, Inbox, MessageCircleWarning } from "lucide-react";
 import { Fragment, useRef } from "react";
 import type { Summary } from "../../../src/api-types";
 import { SENT } from "../../../src/status";
 import {
+  Button,
   CompanyMark,
   EmptyState,
   JobStatus,
   ListGroup,
   ListRow,
+  ListNotice,
   Pagination,
   SearchInput,
   Segments,
@@ -19,7 +21,7 @@ import {
 } from "../../components/ui";
 import { ListDetail, NoMatch, useOpenRecord } from "../../components/list";
 import { useSummary } from "../../lib/api";
-import { date, place, unent } from "../../lib/format";
+import { date, place, plural, unent } from "../../lib/format";
 import { useListParams } from "../../lib/list-params";
 import { useMedia, WIDE } from "../../lib/media";
 import { JobDetail } from "../job/detail";
@@ -37,6 +39,7 @@ const EMPTY: Record<string, readonly [title: string, description: string]> = {
   your_move: ["Nothing waiting on you", "When an employer asks for something, an assessment or a time to talk, it lands here."],
   upcoming: ["Nothing booked", "Interviews and calls with a time show up here."],
   waiting: ["Not waiting on anyone", "Applications where you've done your part and the employer owes a reply."],
+  quiet: ["Nothing has gone quiet", "Applications that have waited on the employer for a while after a step wait here."],
   no_reply: ["Every application has had a reply", "Applications with no word back yet wait here."],
   closed: ["Nothing closed", "Declined and withdrawn applications move here."],
 };
@@ -77,12 +80,17 @@ export function ApplicationsPage() {
     { value: "all", label: "All", count: groups.reduce((t, g) => t + g.count, 0) },
     ...groups
       .filter(g => g.key !== "offer" || g.count > 0)
-      .map(g => ({ value: g.key, label: g.label, count: g.count, tone: g.key === "your_move" ? ("warning" as const) : undefined })),
+      .map(g => ({ value: g.key, label: g.label, count: g.count, tone: g.key === "your_move" || g.key === "quiet" ? ("warning" as const) : undefined })),
   ];
   const segment = lp.group ?? "all";
   const headed = !lp.group && !lp.sort;
   const labelOf = new Map(groups.map(g => [g.key, g]));
   const empty = EMPTY[segment];
+  const quiet = groups.find(g => g.key === "quiet")?.count ?? 0;
+  const emptyText =
+    segment === "quiet" && summary
+      ? ([empty?.[0] ?? "", `Applications that have waited on the employer for ${summary.quietDays} days or more after a step wait here.`] as const)
+      : empty;
 
   const list = (
     <Workspace
@@ -127,6 +135,31 @@ export function ApplicationsPage() {
           />
         ),
       }}
+      notice={
+        segment === "all" &&
+        quiet > 0 && (
+          <ListNotice
+            tone="warning"
+            icon={<MessageCircleWarning />}
+            action={
+              <Button
+                size="sm"
+                variant="link"
+                className="px-0 touch:px-0"
+                onClick={() => {
+                  lp.setGroup("quiet");
+                }}
+              >
+                See them
+                <ArrowRight />
+              </Button>
+            }
+          >
+            {plural(quiet, "application")} {quiet === 1 ? "has" : "have"} had no reply for {summary?.quietDays ?? "a while"}
+            {summary ? "+ days" : ""} after your last step.
+          </ListNotice>
+        )
+      }
       strip={wide && !compact && <Kpis counts={summary?.counts} />}
       footer={data && <Pagination variant="footer" noun="applications" offset={data.offset} limit={data.limit} total={data.total} onChange={record.setPage} />}
     >
@@ -143,7 +176,7 @@ export function ApplicationsPage() {
             }}
           />
         ) : (
-          <EmptyState icon={<Inbox />} title={empty?.[0] ?? "Nothing here"} description={empty?.[1]} className="pt-24" />
+          <EmptyState icon={<Inbox />} title={emptyText?.[0] ?? "Nothing here"} description={emptyText?.[1]} className="pt-24" />
         )
       ) : (
         rows.map((r, i) => {

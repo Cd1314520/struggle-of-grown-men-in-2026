@@ -105,6 +105,7 @@ export const api = {
   // ---- writes. Each shows the server's refusal as a toast and rethrows it.
   jobAction: (id: number, body: { action: string; text?: string; gateId?: string | undefined }) => post(`/api/jobs/${id}/action`, { text: "", ...body }),
   stepAction: (id: number, body: Record<string, unknown>) => post(`/api/jobs/${id}/steps`, body),
+  refreshBrief: (id: number, step: number) => post(`/api/jobs/${id}/steps/${step}/brief`, {}),
   browserAction: (id: number, body: { action: "reserve" | "release"; gateId: string }) => post(`/api/jobs/${id}/browser`, body),
   recover: (id: number, gateId: string) => post(`/api/jobs/${id}/recover`, { gateId }),
   prepNote: (id: number) => post(`/api/jobs/${id}/prep-note`, {}),

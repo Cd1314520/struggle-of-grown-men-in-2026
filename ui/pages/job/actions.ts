@@ -115,6 +115,7 @@ export function useJobActions(job: JobDetail, onActed?: (action: string) => void
     },
     step: (op: string, body: Record<string, unknown> = {}) =>
       run(`step:${op}:${typeof body["step"] === "number" ? body["step"] : ""}`, () => api.stepAction(id, { op, ...body }), STEP_DONE[op] ?? "Saved"),
+    refreshBrief: (stepId: number) => run(`brief:${stepId}`, () => api.refreshBrief(id, stepId), "Writing the interview prep again"),
   };
 }
 export type JobActions = ReturnType<typeof useJobActions>;

@@ -47,7 +47,7 @@ export const NAV: readonly NavItem[] = [
       return { value: a.confirmSubmit + a.manual + a.coverLetter + a.ambiguous + a.failed, tone: "warning" };
     },
   },
-  { page: "applications", label: "Applications", icon: Send, group: "workspace", go: "a" },
+  { page: "applications", label: "Applications", icon: Send, group: "workspace", go: "a", badge: s => ({ value: s.quiet, tone: "warning" }) },
   { page: "referrals", label: "Referrals", icon: Handshake, group: "workspace" },
   { page: "archive", label: "Archive", icon: Archive, group: "library", go: "h" },
   { page: "activity", label: "Activity", icon: Activity, group: "library", go: "l" },

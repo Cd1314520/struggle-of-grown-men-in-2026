@@ -10,6 +10,7 @@ import {
   NotebookPen,
   Pencil,
   Plus,
+  RefreshCw,
   RotateCcw,
   ThumbsDown,
   Trash2,
@@ -22,10 +23,12 @@ import type { JobDetail } from "../../../src/api-types";
 import type { Step, StepKind } from "../../../src/steps";
 import {
   Button,
+  Disclosure,
   ConfirmDialog,
   Field,
   Input,
   Linkified,
+  Markdown,
   Menu,
   MenuContent,
   MenuItem,
@@ -196,6 +199,17 @@ function StepItem({ step, company, a, last }: { step: Step; company: string; a: 
             op("cancel");
           },
         },
+        ...(step.kind === "interview"
+          ? [
+              {
+                label: "Refresh prep",
+                icon: <RefreshCw />,
+                run: () => {
+                  void a.refreshBrief(step.id);
+                },
+              },
+            ]
+          : []),
       ]
     : [
         {
@@ -277,6 +291,22 @@ function StepItem({ step, company, a, last }: { step: Step; company: string; a: 
             <span className="font-medium">Your note </span>
             <Linkified text={step.done_note} />
           </p>
+        )}
+        {step.kind === "interview" && step.brief && (
+          <Disclosure id={`interview-prep-${step.id}`} summary="Interview prep">
+            <Markdown text={step.brief} className="pt-2" />
+          </Disclosure>
+        )}
+        {step.kind === "interview" && !step.brief && step.brief_tries < 2 && (step.state === "todo" || state.label === "Booked") && (
+          <p className="text-sm text-fg-subtle">Interview prep is being written</p>
+        )}
+        {step.kind === "interview" && !step.brief && step.brief_tries >= 2 && open && (
+          <div className="flex items-center gap-2 text-sm text-fg-muted">
+            Interview prep could not be written
+            <Button variant="ghost" size="sm" loading={a.busy === `brief:${step.id}`} onClick={() => void a.refreshBrief(step.id)}>
+              Refresh prep
+            </Button>
+          </div>
         )}
 
         {mode === "note" && (

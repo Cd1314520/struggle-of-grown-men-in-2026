@@ -121,6 +121,7 @@ const SPECS: Record<ListView, Spec> = {
       ["your_move", "Your move"],
       ["upcoming", "Upcoming"],
       ["waiting", "Waiting on them"],
+      ["quiet", "Gone quiet"],
       ["no_reply", "No reply yet"],
       ["closed", "Closed"],
     ],
@@ -133,12 +134,15 @@ const SPECS: Record<ListView, Spec> = {
             ? "your_move"
             : j.next?.whose === "upcoming"
               ? "upcoming"
-              : j.next || j.status === "interview"
-                ? "waiting"
-                : "no_reply",
+              : j.next?.quiet
+                ? "quiet"
+                : j.next || j.status === "interview"
+                  ? "waiting"
+                  : "no_reply",
     sorts: {
       default: (a, b) => {
         if (a.next && b.next && a.next.whose !== "them" && b.next.whose !== "them") return stamp(a.next.at) - stamp(b.next.at);
+        if (a.next?.quiet && b.next?.quiet) return stamp(a.next.at) - stamp(b.next.at);
         return (b.next ? stamp(b.next.at) : sentAt(b)) - (a.next ? stamp(a.next.at) : sentAt(a));
       },
       sent: (a, b) => sentAt(b) - sentAt(a),

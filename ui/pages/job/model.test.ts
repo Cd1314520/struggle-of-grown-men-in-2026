@@ -99,7 +99,12 @@ describe("a sent application's next steps", () => {
     expect(leadOf({ ...base, next, steps: [step({})] }, now).text).toMatch(/^Your move, due /);
     expect(leadOf({ ...base, next, steps: [step({}), step({ state: "done" })] }, now).text).toMatch(/^Your move: Take-home, due /);
     const them = { ...next, whose: "them", at: "2026-10-15T12:00:00Z", due: false, quiet: true } as const;
-    expect(leadOf({ ...base, next: them, steps: [step({ state: "done" })] }, now).text).toMatch(/^Waiting on Loenbro since .*, quiet for 10 days$/);
+    const lead = leadOf({ ...base, next: them, steps: [step({ state: "done" })] }, now);
+    expect(lead.tone).toBe("warning");
+    expect(lead.text).toMatch(/^No reply from Loenbro for 10 days since .*\. Worth a nudge\?$/);
+    const calm = leadOf({ ...base, next: { ...them, quiet: false }, steps: [step({ state: "done" })] }, now);
+    expect(calm.tone).toBe("neutral");
+    expect(calm.text).toMatch(/^Waiting on Loenbro since (?!.*nudge)/);
   });
 
   it("reads a step's state against the clock", () => {

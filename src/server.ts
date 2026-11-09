@@ -48,7 +48,20 @@ import { errorMessage } from "./errors";
 import { isAmbiguous, recoveryMode } from "./fill-state";
 import { RETRYABLE, to, wasSent, type Status } from "./status";
 import { interviewPrep } from "./interview";
-import { addStep, changeStep, jobSteps, nextStepOf, nextSteps, recordOutcome, removeStep, STEP_KINDS, stepOf } from "./steps";
+import {
+  addStep,
+  changeStep,
+  clearBrief,
+  jobSteps,
+  nextStepOf,
+  nextSteps,
+  quietApplications,
+  quietDays,
+  recordOutcome,
+  removeStep,
+  STEP_KINDS,
+  stepOf,
+} from "./steps";
 import { serveUi } from "./ui";
 import { isListView, listJobs } from "./listing";
 import { stats } from "./stats";
@@ -110,6 +123,8 @@ function boardCount() {
 function settings(scheduler: Scheduler): Omit<Summary, "attention"> {
   return {
     counts: statusCounts(),
+    quiet: quietApplications().length,
+    quietDays: quietDays(),
     digest: digestStatus(),
     gmail: gmail.gmailStatus(),
     profileProblems: profileProblems(),
@@ -460,13 +475,22 @@ export function createHandler(scheduler: Scheduler) {
       );
     }
 
-    const jobMatch = /^\/api\/jobs\/(\d+)(\/[\w.]+)?$/.exec(path);
+    const jobMatch = /^\/api\/jobs\/(\d+)(\/[\w./]+)?$/.exec(path);
     if (jobMatch) {
       const job = getJob(Number(jobMatch[1]));
       if (!job) return fail("no such job", 404);
       const sub = jobMatch[2];
       if (!sub) {
         return json(jobDetail(scheduler, job));
+      }
+      const briefMatch = /^\/steps\/(\d+)\/brief$/.exec(sub);
+      if (briefMatch && req.method === "POST") {
+        const step = stepOf(job.id, Number(briefMatch[1]));
+        if (step?.kind !== "interview") return fail("no such interview step on this application", 404);
+        if (!wasSent(job)) return fail("this application was not sent", 409);
+        clearBrief(step.id);
+        void scheduler.interviewPrep();
+        return json({ ok: true });
       }
       if (sub === "/resume.pdf") {
         const file = Bun.file(resumeFiles(job.id, job.resume_sha).pdf);

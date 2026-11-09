@@ -62,6 +62,7 @@ models:
   track: claude-code/sonnet
   recheck: claude-code/opus # adds kept answers to answers.md, and answers parked questions the profile now settles
   import: claude-code/opus # turns uploaded resume files into the Typst resume (Resume page)
+  interview: claude-code/sonnet # writes what to brush up on for a booked or requested interview (shown on the step)
   # A stage's own fallbacks (one model or a list), which replace the global `fallback` below for that
   # stage. Set in config.local.yml, for example:
   #   fallback:
@@ -103,6 +104,11 @@ screen:
 triage:
   batch: 100
   waitHours: 2
+
+# Days an application waits on the employer after a step of yours (a done assessment, a held interview) before the
+# app flags it as quiet. An application with no step yet is never flagged: no reply to the application itself
+# just means it is still under review, or passed over.
+quietDays: 14
 
 # Remote-job aggregators, read during a scan but no more often than `minutes` each (they ask for a
 # few requests a day). A role also listed on a company board is folded into that one job.

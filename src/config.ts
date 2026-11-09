@@ -12,7 +12,7 @@ export const PROMPTS = join(ROOT, "prompts");
 mkdirSync(join(DATA, "jobs"), { recursive: true });
 
 // The kinds of agent work, each run on the model `models.<stage>` names (null: omp's default).
-export const MODEL_STAGES = ["triage", "discover", "locate", "screen", "prep", "fill", "track", "recheck", "import"] as const;
+export const MODEL_STAGES = ["triage", "discover", "locate", "screen", "prep", "fill", "track", "recheck", "import", "interview"] as const;
 export type ModelStage = (typeof MODEL_STAGES)[number];
 
 export interface Config {
@@ -26,7 +26,11 @@ export interface Config {
   // judges to fit `describe`. While holdBack is on their jobs are held instead of applied to.
   targets: { holdBack: boolean; describe?: string | null };
   // `fallback`: per stage, the models it moves to when its provider is out, replacing the global `fallback` (src/providers.ts).
-  models: Record<Exclude<ModelStage, "import">, string | null> & { import?: string | null; fallback?: Partial<Record<ModelStage, string | string[]>> };
+  models: Record<Exclude<ModelStage, "import" | "interview">, string | null> & {
+    import?: string | null;
+    interview?: string | null;
+    fallback?: Partial<Record<ModelStage, string | string[]>>;
+  };
   autoApply?: {
     minScore?: number;
     allowConcerns?: boolean;
@@ -34,6 +38,7 @@ export interface Config {
     perEmployer?: number;
   };
   schedule: { scanMinutes: number; discoverMinutes: number; trackMinutes: number };
+  quietDays?: number;
   questionDigest?: { enabled: boolean; time: string; timeZone: string };
   // A form that requires a cover letter: "skip" drops the application; "draft" has the fill worker
   // draft one and park it for the owner to edit and approve, whatever `approval` says.
