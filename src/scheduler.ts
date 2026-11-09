@@ -120,9 +120,11 @@ function recoverCapacityHandoffs() {
   }
 }
 
-const RETRIED: Partial<Record<BlockerCause, { afterMs: number; tries: number }>> = {
-  browser: { afterMs: 0, tries: 1 },
-  site_down: { afterMs: 3 * 60 * 60 * 1000, tries: 2 },
+const HOUR = 60 * 60 * 1000;
+const RETRIED: Partial<Record<BlockerCause, readonly number[]>> = {
+  browser: [0, HOUR],
+  site_down: [3 * HOUR, 3 * HOUR],
+  unknown: [HOUR / 2],
 };
 export function retryPassingHandoffs() {
   for (const job of jobsByStatus("needs_manual")) {
@@ -130,14 +132,15 @@ export function retryPassingHandoffs() {
     if (gate?.kind !== "manual" || isSubmitting(job.id) || manualLeaseGate(job.id) || !readCheckpoint(job.id)) continue;
     const blockers = jobBlockers(job.id);
     const last = blockers.at(-1);
-    const rule = last && RETRIED[last.cause];
-    if (!last || !rule || last.gate_id !== gate.id) continue;
+    const waits = last && RETRIED[last.cause];
+    if (!last || !waits || last.gate_id !== gate.id) continue;
     const parkedAt = Date.parse(gate.createdAt);
     const tried = blockers.filter(b => b.cause === last.cause).length - 1;
-    if (tried >= rule.tries || Date.now() - parkedAt < rule.afterMs) continue;
+    const wait = waits[tried];
+    if (wait === undefined || Date.now() - parkedAt < wait) continue;
     try {
       queueRecovery(job.id, gate.id);
-      logEvent("system", `Stopped by ${last.cause.replace("_", " ")}: retrying the same draft (try ${tried + 1} of ${rule.tries})`, job.id);
+      logEvent("system", `Stopped by ${last.cause.replace("_", " ")}: retrying the same draft (try ${tried + 1} of ${waits.length})`, job.id);
     } catch (err) {
       logEvent("error", `Automatic retry: ${errorMessage(err)}`, job.id);
     }

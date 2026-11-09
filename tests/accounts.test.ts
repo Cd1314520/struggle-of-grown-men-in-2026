@@ -74,12 +74,36 @@ describe("account resolution behavioral semantics", () => {
     const created = JSON.parse(await resolveAccount("acrisure.wd5.myworkdayjobs.com", "app@example.com", true));
     assert.equal(created.existing, false);
     assert.equal(created.email, "app@example.com");
-    assert.ok(typeof created.password === "string" && created.password.length === 14);
+    assert.ok(typeof created.password === "string" && created.password.length === 16);
 
     const row = db.query("SELECT email, password FROM accounts WHERE domain = ?").get("acrisure.wd5.myworkdayjobs.com");
     assert.ok(row !== null);
     assert.equal(row.email, "app@example.com");
     assert.equal(row.password, created.password);
+  `);
+  });
+
+  it("fits a new password to the site's stated limits, and replaces a stored one only when it breaks them", () => {
+    scenario(`
+    const strong = /^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^a-zA-Z0-9])/;
+    const long = JSON.parse(resolveAccount("comcast.wd115.myworkdayjobs.com", "app@example.com", true, { min: 20 }));
+    assert.equal(long.password.length, 20);
+    assert.match(long.password, strong);
+    const short = JSON.parse(resolveAccount("careers.short.example", "app@example.com", true, { max: 12 }));
+    assert.equal(short.password.length, 12);
+    assert.match(short.password, strong);
+
+    db.query("INSERT INTO accounts (domain, email, password) VALUES ('career55.sapsf.eu?company=wipro', 'app@example.com', 'abcdefghijklmnopaA1!')").run();
+    const kept = JSON.parse(resolveAccount("https://career55.sapsf.eu/careers?company=wipro", "app@example.com", true, { min: 8, max: 20 }));
+    assert.equal(kept.existing, true);
+    assert.equal(kept.password, "abcdefghijklmnopaA1!");
+    const lookup = JSON.parse(resolveAccount("https://career55.sapsf.eu/careers?company=wipro", "app@example.com", false, { max: 18 }));
+    assert.equal(lookup.password, "abcdefghijklmnopaA1!", "a lookup never replaces");
+    const replaced = JSON.parse(resolveAccount("https://career55.sapsf.eu/careers?company=wipro", "app@example.com", true, { max: 18 }));
+    assert.equal(replaced.existing, false);
+    assert.equal(replaced.password.length, 16);
+    assert.match(replaced.replaced, /never|could not/);
+    assert.equal(db.query("SELECT password FROM accounts WHERE domain = 'career55.sapsf.eu?company=wipro'").get().password, replaced.password);
   `);
   });
 

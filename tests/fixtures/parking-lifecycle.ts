@@ -459,6 +459,62 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.match(jobRow(1).note ?? "", /^requires a cover letter: Cover Letter\*/);
   assert.equal(core.getOpenGate(1), null);
   await until(() => !scheduler.activeFillSession(1));
+} else if (scenario === "skip-after-submit") {
+  assert.equal(authorizeSubmit(1), true);
+  assert.match(await call(first, "skip_application", { requires: "references", note: "References*" }), /cannot be skipped/);
+  assert.equal(jobRow(1).status, "filling");
+  assert.match(await call(first, "skip_application", { requires: "hcaptcha", note: "Three drag puzzles rejected; form came back" }), /skipped/);
+  first.exit();
+  assert.equal(jobRow(1).status, "skipped");
+  assert.match(jobRow(1).note ?? "", /^requires an hCaptcha this machine cannot pass: Three drag/);
+  assert.equal(isSubmitting(1), false);
+  assert.equal(core.getOpenGate(1), null);
+  await until(() => !scheduler.activeFillSession(1));
+} else if (scenario === "refused-submit" || scenario === "unclear-submit") {
+  assert.equal(authorizeSubmit(1), true);
+  const refused = scenario === "refused-submit";
+  const parking = call(first, "need_manual", {
+    ...navigation,
+    cause: "site_down",
+    reason: "Submit returned HTTP 500 three times",
+    ...(refused ? { not_submitted: "Unable to accept your application. Please try again later." } : {}),
+  });
+  await until(() => core.getOpenGate(1) !== null);
+  first.exit();
+  await parking;
+  await until(() => !scheduler.activeFillSession(1));
+  assert.equal(openGate(1).kind, refused ? "manual" : "submission_ambiguous");
+  assert.equal(isSubmitting(1), !refused);
+  db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 4 * 3600_000).toISOString());
+  retryPassingHandoffs();
+  scheduler.pump();
+  if (refused) {
+    await until(() => workers.length === 2);
+    assert.equal(workerAt(1).options.jobId, 1, "the site's own refusal makes the outage retryable");
+  } else {
+    await Bun.sleep(20);
+    assert.equal(workers.length, 1, "an unclear outcome still waits for inspection");
+    assert.equal(jobRow(1).status, "needs_manual");
+  }
+} else if (scenario === "retry-crash") {
+  first.fail("worker crashed");
+  await until(() => core.getOpenGate(1) !== null);
+  await until(() => !scheduler.activeFillSession(1));
+  retryPassingHandoffs();
+  assert.equal(jobRow(1).status, "needs_manual", "a host-recorded stop waits half an hour");
+  db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 3600_000).toISOString());
+  retryPassingHandoffs();
+  scheduler.pump();
+  await until(() => workers.length === 2);
+  assert.equal(workerAt(1).options.jobId, 1);
+  workerAt(1).fail("worker crashed again");
+  await until(() => core.getOpenGate(1) !== null && jobRow(1).status === "needs_manual");
+  await until(() => !scheduler.activeFillSession(1));
+  db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 3600_000).toISOString());
+  retryPassingHandoffs();
+  scheduler.pump();
+  await Bun.sleep(20);
+  assert.equal(workers.length, 2, "one retry only");
 } else if (scenario === "paced") {
   await call(first, "report_result", { outcome: "submitted", note: "Submitted" });
   first.exit();
@@ -542,8 +598,22 @@ if (scenario === "release" || scenario === "quick-answer") {
     await until(() => !scheduler.activeFillSession(1));
     retryPassingHandoffs();
     scheduler.pump();
-    assert.equal(jobRow(1).status, "needs_manual", "one retry only: the second stop waits for the user");
+    assert.equal(jobRow(1).status, "needs_manual", "the second retry waits an hour");
     assert.equal(workers.length, 2);
+    db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 2 * 3600_000).toISOString());
+    retryPassingHandoffs();
+    scheduler.pump();
+    await until(() => workers.length === 3);
+    const third = call(workerAt(2), "need_manual", { ...navigation, cause, reason: "Clicks still time out" });
+    await until(() => core.getOpenGate(1) !== null);
+    workerAt(2).exit();
+    await third;
+    await until(() => !scheduler.activeFillSession(1));
+    db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 2 * 3600_000).toISOString());
+    retryPassingHandoffs();
+    scheduler.pump();
+    assert.equal(jobRow(1).status, "needs_manual", "two retries only: the third stop waits for the user");
+    assert.equal(workers.length, 3);
   }
 } else if (scenario === "manual-same-employer") {
   const parking = call(first, "need_manual", { ...navigation, cause: "other", reason: "CAPTCHA/session needs human" });

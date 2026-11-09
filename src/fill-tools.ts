@@ -2,9 +2,9 @@ import { resolveAccount } from "./accounts";
 import { CAUSE_GUIDE, recordBlocker, WORKER_CAUSES } from "./blockers";
 import { connectTab } from "./cdp-tab";
 import type { JobBrowser } from "./chrome";
-import { db, moveJob, notifyJobChange, type Job } from "./db";
+import { db, logEvent, moveJob, notifyJobChange, type Job } from "./db";
 import { errorMessage } from "./errors";
-import { isSubmitting, resetFillPhase } from "./fill-state";
+import { fillPhase, isSubmitting, refuseSubmit, resetFillPhase } from "./fill-state";
 import {
   checkpointFrom,
   confirmSubmission,
@@ -100,7 +100,23 @@ async function verifyStatus(rt: FillRuntime, ctx: FillContext, args: ToolArgs): 
   return "Recorded: Ambiguity resolved. Verified draft queued for normal fill with fresh confirm_submit required.";
 }
 
-const SKIPPED_FOR = { cover_letter: "a cover letter", references: "references" };
+const SKIPPED_FOR = {
+  cover_letter: "a cover letter",
+  references: "references",
+  recording: "a recording the candidate must make",
+  own_work: "work the candidate must produce",
+  phone_code: "a code sent to the candidate's phone",
+  personal_login: "a personal account the candidate must sign in to",
+  hcaptcha: "an hCaptcha this machine cannot pass",
+};
+const SKIP_GUIDE =
+  "What the form requires. cover_letter and references: as the task says. " +
+  "recording: a video or audio recording of the candidate. " +
+  "own_work: a portfolio file, work sample or take-home the candidate has not supplied, or an answer the employer says must be written without AI. " +
+  "phone_code: a code texted or phoned to the candidate, or an authenticator app, with no email alternative. " +
+  "personal_login: signing in to a personal account you have no credentials for (Google, LinkedIn, Microsoft, Apple). " +
+  "hcaptcha: an hCaptcha that rejected every honest attempt allowed, or a form on jobs.lever.co.";
+const SKIPPED_AFTER_SUBMIT = ["own_work", "phone_code", "hcaptcha"];
 
 const causeParam = { type: "string", enum: WORKER_CAUSES, description: CAUSE_GUIDE };
 
@@ -155,12 +171,16 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
         {
           domain: S.str("Site domain, e.g. acme.wd5.myworkdayjobs.com"),
           register: { type: "boolean", description: "Set true only if the site explicitly confirmed no existing account and registration is required" },
+          password_min: S.int("With register: the shortest password the site's sign-up form accepts, when it states one"),
+          password_max: S.int("With register: the longest password the site's sign-up form accepts, when it states one"),
         },
         ["domain"],
       ),
       handler: args => {
         const allowCreate = args["register"] === true && !isVerification && !isSubmitting(job.id);
-        return resolveAccount(arg.str(args, "domain"), mailbox, allowCreate);
+        const min = arg.optInt(args, "password_min"),
+          max = arg.optInt(args, "password_max");
+        return resolveAccount(arg.str(args, "domain"), mailbox, allowCreate, { ...(min ? { min } : {}), ...(max ? { max } : {}) });
       },
     },
     ask_user: {
@@ -188,14 +208,15 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
     },
     skip_application: {
       description:
-        "Drop this application, unsubmitted, because the form requires something the candidate does not give: a cover letter or references. Terminates the worker.",
+        "Drop this application, unsubmitted, because it requires something the candidate does not give or this machine cannot do. Terminates the worker.",
       parameters: schema({
-        requires: { type: "string", enum: Object.keys(SKIPPED_FOR), description: "What the form requires" },
-        note: S.str("The required field's label and the posting or form text that makes it required"),
+        requires: { type: "string", enum: Object.keys(SKIPPED_FOR), description: SKIP_GUIDE },
+        note: S.str("The required field's label and the posting or form text that makes it required, or what the site showed"),
       }),
       handler: args => {
-        if (isVerification || isSubmitting(job.id)) return "ERROR: an authorized or ambiguous submission cannot be skipped; report it as usual.";
         const requires = arg.oneOf(args, "requires", Object.keys(SKIPPED_FOR) as (keyof typeof SKIPPED_FOR)[]);
+        const refused = fillPhase(job.id) === "submitting" && SKIPPED_AFTER_SUBMIT.includes(requires);
+        if (isVerification || (isSubmitting(job.id) && !refused)) return "ERROR: an authorized or ambiguous submission cannot be skipped; report it as usual.";
         const skipped = db.transaction(() => {
           if (!moveJob(job.id, "filling", to.skipped(`requires ${SKIPPED_FOR[requires]}: ${arg.str(args, "note")}`), { quiet: true })) return false;
           cancelJobGates(job.id);
@@ -220,9 +241,22 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
     need_manual: {
       description:
         "Persist the blocker and draft checkpoint, then terminate the worker. The slot is reusable after exit; a human must explicitly reserve the browser before inspecting it.",
-      parameters: schema({ cause: causeParam, reason: S.str("Blocking evidence and what the candidate needs to do"), ...navigationFields }),
+      parameters: schema(
+        {
+          cause: causeParam,
+          reason: S.str("Blocking evidence and what the candidate needs to do"),
+          not_submitted: S.str(
+            "Only after final submit was authorized, and only when the site itself showed that the application was not sent: its message verbatim (a validation error, an error toast, a failed challenge with the form back). Leave out when you cannot tell.",
+          ),
+          ...navigationFields,
+        },
+        ["cause", "reason", ...Object.keys(navigationFields)],
+      ),
       handler: async args => {
         const cause = arg.oneOf(args, "cause", WORKER_CAUSES);
+        const refusal = arg.optStr(args, "not_submitted")?.trim();
+        if (refusal && refusal.length >= 5 && !isVerification && ownsFill(rt, session) && refuseSubmit(job.id))
+          logEvent("auto", `The site refused the submission, so this stop can be retried: ${refusal}`, job.id, "fill");
         let checkpoint = session.checkpoint;
         let reason = arg.str(args, "reason");
         try {

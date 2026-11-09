@@ -29,6 +29,7 @@ The candidate's notes for tailoring the resume. Their facts count as what the ca
 - **Free text:** for a free-text question ("why this company…", "describe your experience with…"), write a concise, specific, honest answer grounded in the resume and the question's context. Do not invent facts, employers, numbers or enthusiasm the resume and context do not support.
 - **Low-stakes questions:** {{lowStakes}}
 - **Terms and agreements:** {{terms}} The page cannot be opened from here: judge the agreement by the text quoted with the question.
+- An attestation that the candidate has read the job description, meets its requirements and can perform the essential functions of the job is Yes: each of these applications was assessed against its posting before it was started.
 - Leave a question that needs an unknown fact or decision (a salary figure, a date, a referral name, an ID or number), a legal attestation beyond the ordinary terms above, or anything where a wrong answer would misstate the candidate. A wrong answer goes onto a real application; an unanswered question only waits for the candidate.
 
 ## How to answer
