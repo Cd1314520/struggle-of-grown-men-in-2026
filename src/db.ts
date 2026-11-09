@@ -86,6 +86,8 @@ export const jobsInStatuses = (statuses: readonly Status[]) =>
 
 export const jobsWithCheckpoint = () => db.query<Job, []>("SELECT * FROM jobs WHERE fill_checkpoint IS NOT NULL").all();
 
+export const jobsWithResume = () => db.query<Job, []>("SELECT * FROM jobs WHERE resume_sha IS NOT NULL ORDER BY id").all();
+
 export const applicationsAwaitingOutcome = (limit = 300) =>
   db
     .query<Job, [string, number]>("SELECT * FROM jobs WHERE status IN (SELECT value FROM json_each(?)) ORDER BY submitted_at DESC LIMIT ?")

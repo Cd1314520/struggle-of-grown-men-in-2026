@@ -29,6 +29,17 @@ To reassess previously scored backlog, stop the service, run `bun run reassess-b
 
 Only the fill worker has a browser, and it only starts after an approval, so gate 1 is structural. Every worker is instructed to call `confirm_submit` before the final click. That host tool reads the current job and immediately authorizes eligible automatic submissions; jobs requiring confirmation park for your decision. Manual final approval is application-scoped, exact-summary and one-use; changed answers or a changed summary require review again. The restart-protection marker is set only when final submission is authorized, not when filling begins. The browser itself cannot enforce use of the tool.
 
+## ATS scoring
+
+`bun run ats` scores a resume PDF against a job posting without compiling anything: it extracts the PDF text with poppler (`pdftotext`, `pdffonts`, `pdfinfo`), rates how cleanly a parser would read it (extractable text, glyphs, contact details, standard section headings, dates, reading order, bullets, fonts and page count), and measures how much of the posting's weighted keyword list the resume covers. The posting's platform is detected from its URL and decides the weighting. Verdicts are `pass` (80 and up), `warn` (60 and up) and `fail`; unreadable text or broken glyphs force a fail.
+
+- `bun run ats --job <id> [--job <id>...]`: the job's frozen (or working) resume against its posting.
+- `bun run ats --submitted`: every job that was sent and has a resume, with a coverage summary by platform. `--all` covers every job with a resume.
+- `bun run ats --pdf <path> --url <posting url> [--title <t>] [--description-file <path>]`: any PDF against any posting.
+- `--json` prints machine output, `--min <n>` exits 1 when any overall score is below n, `--limit <n>` caps the jobs scored, and `--verbose` lists per-dimension findings and missing keywords.
+
+The platform tiers (parse-and-prefill portals versus search-and-review boards) are a heuristic, not vendor-validated: they only shift weight between parse quality and keyword match. The score is a deterministic readiness check, not a prediction of any employer's ranking. The same report is served by the job's `/ats` API route and shown on the job's Resume tab when it has a PDF.
+
 ## Prefill
 
 Before the fill agent reads a page of an application form, it runs `src/prefill.ts` in its own JavaScript session (prompts/fill.md says how). The script fills what the candidate details settle with no judgment: name, contact details, address, links, current job, school, the resume upload, and the plain work-authorisation, sponsorship, age, EEO, referral, source and text-message questions, whose answers are the `prefill:` block of `profile/personal.yml` (a question it has no answer for there is left alone). It clicks and types one field at a time through the same paced browser as the agent, corrects plain text a site filled in from the resume, reads every field back once the page settles, and prints a short report of what it filled and what it left. The agent then spends its turns only on the fields left. Fields revealed by an answer (race after "not Hispanic") are picked up in the same call; a field that wants one of its own suggestions picked (Lever's location) is reported as not having stuck. It reads the top-level page only, so a form inside a frame is opened at the frame's own address first. `fill.ts` writes the facts it reads to `data/jobs/<id>/prefill.json` when each fill starts.

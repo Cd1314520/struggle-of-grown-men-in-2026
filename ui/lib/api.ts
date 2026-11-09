@@ -2,6 +2,7 @@ import { keepPreviousData, QueryClient, useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { toast } from "sonner";
 import type {
+  AtsReport,
   ActivityResult,
   AnswerResult,
   BlockersResult,
@@ -76,6 +77,7 @@ export const api = {
   stats: () => request<Stats>("/api/stats"),
   list: (p: ListParams) => request<ListResult>(listUrl(p)),
   job: (id: number) => request<JobDetail>(`/api/jobs/${id}`),
+  ats: (id: number) => request<AtsReport>(`/api/jobs/${id}/ats`),
   questions: async () => (await request<{ groups: QuestionGroup[] }>("/api/questions")).groups,
   blockers: async () => (await request<BlockersResult>("/api/blockers")).blockers,
   activity: (p: { feed: "highlights" | "all"; kinds?: readonly string[]; before?: number | null; limit?: number }) => {
@@ -137,6 +139,8 @@ export function useJobList(p: ListParams) {
   return query;
 }
 export const useJob = (id: number | null) => useQuery({ queryKey: ["job", id], queryFn: () => api.job(id ?? 0), enabled: id !== null });
+export const useAtsReport = (id: number, version: string, enabled: boolean) =>
+  useQuery({ queryKey: ["ats", id, version], queryFn: () => api.ats(id), enabled, staleTime: Infinity, retry: false });
 export const prefetchJobs = (ids: readonly (number | undefined)[]) => {
   for (const id of ids) if (id !== undefined) queryClient.query({ queryKey: ["job", id], queryFn: () => api.job(id) }).catch(() => undefined);
 };

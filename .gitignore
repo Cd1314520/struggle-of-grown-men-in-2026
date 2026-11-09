@@ -10,7 +10,3 @@ config.local.yml
 artifacts/
 .playwright-mcp/
 reports/auto-apply-journal.md
-basic-resume/ats-tests/last_run.json
-.venv/
-__pycache__/
-*.pyc

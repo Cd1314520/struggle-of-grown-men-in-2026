@@ -145,3 +145,5 @@ export interface ResumeState {
   main: string;
   limits: { files: number; bytes: number };
 }
+
+export type { AtsReport, Dimension, Keyword } from "./ats-score";
