@@ -4,7 +4,7 @@ import { DATA } from "./config";
 import { placeOf } from "./location";
 import { companyKey, squash } from "./company-key";
 import { connectDatabase, migrate } from "./schema";
-import { AWAITING_OUTCOME, NOT_STARTED, OFF_BOARD, to, UNASSESSED, type Status } from "./status";
+import { applicationStarted, AWAITING_OUTCOME, canMove, NOT_STARTED, OFF_BOARD, PARKED, to, UNASSESSED, type HoldReason, type Status } from "./status";
 
 // SQL lives with the module that owns the table: jobs, job_sources, status_changes, events and kv here,
 // accounts in accounts.ts, gates and answers in questions.ts, fill_state in fill-state.ts, application_steps
@@ -51,6 +51,11 @@ export interface Job {
   checklist: string | null; // JSON: every rubric item with its answer, evidence and points
   practice_assessment: string | null; // JSON: PracticeAssessment { version: 1, ... }
   fill_checkpoint: string | null; // JSON: versioned FillCheckpoint; navigation only, never answer values
+  hold_reason: HoldReason | null;
+  feedback: string | null;
+  hand_picked: 0 | 1;
+  locate_tries: number;
+  deferred_at: string | null;
 }
 
 type Listener = (change: { type: "job" | "event"; jobId?: number }) => void;
@@ -124,8 +129,8 @@ export type BoardJob = Pick<
 // With the practice assessment, which decides the rubric a row's score is on.
 export const listedJobs = (statuses: readonly Status[]) =>
   db
-    .query<BoardJob & Pick<Job, "practice_assessment">, [string]>(
-      `SELECT id, url, source, company, title, location, status, score, pending, note, found_at, posted_at, updated_at, submitted_at, practice_assessment
+    .query<BoardJob & Pick<Job, "practice_assessment" | "hold_reason">, [string]>(
+      `SELECT id, url, source, company, title, location, status, score, pending, note, found_at, posted_at, updated_at, submitted_at, practice_assessment, hold_reason
       FROM jobs WHERE status IN (SELECT value FROM json_each(?))`,
     )
     .all(JSON.stringify(statuses));
@@ -368,11 +373,11 @@ export function betterListing(job: Pick<Job, "source" | "location">, listing: { 
 
 function fold(into: Job, url: string, source: string, location: string | null, description: string | null) {
   // Only a job no application was ever started for changes where it applies here; see preferUsListings.
-  if (NOT_STARTED.includes(into.status) && !into.resume_sha && betterListing(into, { source, location })) {
+  if (NOT_STARTED.includes(into.status) && !applicationStarted(into) && betterListing(into, { source, location })) {
     const cameHome = AGGREGATORS.has(into.source) === AGGREGATORS.has(source);
     applyThrough(into, url, source, location);
     // What was decided about the listing abroad says nothing about this one: assess the job again.
-    if (cameHome && !UNASSESSED.includes(into.status)) writeJob(into.id, { status: "found", note: null });
+    if (cameHome && !UNASSESSED.includes(into.status)) moveJob(into.id, NOT_STARTED, { status: "found", note: null });
   } else addSource(into.id, url, source, location);
   // Until it has been assessed, let the extra listing widen the location and fill a missing description.
   if (UNASSESSED.includes(into.status))
@@ -413,12 +418,11 @@ export function insertJob(
 function deleteJob(id: number) {
   db.query("DELETE FROM events WHERE job_id = ?").run(id);
   db.query("DELETE FROM jobs WHERE id = ?").run(id);
-  for (const key of ["feedback", "locate.tries", "auto.deferred"]) kvDelete(`${key}.${id}`);
 }
 
 // Points a job found on a job-search site at the employer's own posting. When that posting is already
 // a job here, this one is folded into it instead.
-export function relocateJob(job: Job, rawUrl: string, description: string | null): "moved" | "merged" {
+export function relocateJob(job: Job, rawUrl: string, description: string | null): "moved" | "merged" | "stale" {
   const url = normalizeUrl(rawUrl);
   const other = jobIdForUrl(url);
   if (other !== null && other !== job.id) {
@@ -428,8 +432,13 @@ export function relocateJob(job: Job, rawUrl: string, description: string | null
     emit({ type: "job", jobId: other });
     return "merged";
   }
-  addSource(job.id, job.url, job.source, job.location);
-  updateJob(job.id, { ...to.triaged(), url, description: description || job.description });
+  const moved = db.transaction(() => {
+    if (!moveJob(job.id, "locating", { ...to.triaged(), url, description: description || job.description }, { quiet: true })) return false;
+    addSource(job.id, job.url, job.source, job.location);
+    return true;
+  })();
+  if (!moved) return "stale";
+  notifyJobChange(job.id);
   return "moved";
 }
 
@@ -451,7 +460,7 @@ export function dedupeExisting() {
         .map(g => g.company_key)
     : [...new Set(unkeyed.map(j => companyKey(j.company)))];
   // Only rows nothing has acted on yet may be folded away; the most advanced row of a set is kept.
-  const rank = (st: string) => ({ skipped: 0, found: 1, held: 2, locating: 3, triaged: 3 })[st] ?? 9;
+  const rank = (st: Status) => (st === "skipped" ? 0 : st === "found" ? 1 : st === "held" ? 2 : UNASSESSED.includes(st) ? 3 : 9);
   let merged = 0;
   for (const company of companies) {
     const rows = db
@@ -476,15 +485,15 @@ export function dedupeExisting() {
 }
 
 // Every column a caller may set. `id` never changes and `updated_at` is stamped on every write.
-export type JobFields = Partial<Omit<Job, "id" | "updated_at">>;
-const WRITABLE_JOB_COLUMNS: Record<keyof JobFields, true> = {
+export type JobFields = Partial<Omit<Job, "id" | "updated_at" | "status">> & { status?: never };
+export type Move = Omit<JobFields, "status"> & { status: Status };
+const WRITABLE_JOB_COLUMNS: Record<Exclude<keyof JobFields, "status">, true> = {
   url: true,
   source: true,
   company: true,
   title: true,
   location: true,
   description: true,
-  status: true,
   score: true,
   rationale: true,
   concerns: true,
@@ -502,16 +511,24 @@ const WRITABLE_JOB_COLUMNS: Record<keyof JobFields, true> = {
   checklist: true,
   practice_assessment: true,
   fill_checkpoint: true,
+  hold_reason: true,
+  feedback: true,
+  hand_picked: true,
+  locate_tries: true,
+  deferred_at: true,
 };
 
-// Writes the given columns without telling listeners. For callers inside a transaction, which call
-// notifyJobChange themselves once it has committed; everything else uses updateJob.
-export function writeJob(id: number, fields: JobFields) {
-  const keys = Object.keys(fields) as (keyof JobFields)[];
-  if (!keys.length) return;
-  // Column names cannot be bound as parameters, so only known ones ever reach the statement.
+function writableKeys(fields: object) {
+  const keys = Object.keys(fields);
+  if (keys.includes("status")) throw new Error("jobs.status can only change through moveJob");
   const unknown = keys.filter(k => !Object.hasOwn(WRITABLE_JOB_COLUMNS, k));
   if (unknown.length) throw new Error(`Not a writable jobs column: ${unknown.join(", ")}`);
+  return keys as (keyof JobFields)[];
+}
+
+export function writeJob(id: number, fields: JobFields) {
+  const keys = writableKeys(fields);
+  if (!keys.length) return;
   const sets = keys.map(k => `${k} = ?`).join(", ");
   db.query(`UPDATE jobs SET ${sets}, updated_at = datetime('now') WHERE id = ?`).run(...keys.map(k => fields[k] ?? null), id);
 }
@@ -522,21 +539,63 @@ export function updateJob(id: number, fields: JobFields) {
   emit({ type: "job", jobId: id });
 }
 
+const closeGates = (ids: readonly number[]) => {
+  const list = JSON.stringify(ids);
+  db.query("UPDATE question_gates SET state = 'closed' WHERE state = 'open' AND job_id IN (SELECT value FROM json_each(?))").run(list);
+  db.query("UPDATE fill_state SET manual_gate = NULL WHERE manual_gate IS NOT NULL AND job_id IN (SELECT value FROM json_each(?))").run(list);
+};
+
+export function moveJob(id: number, from: Status | readonly Status[], move: Move, opts: { quiet?: boolean } = {}): boolean {
+  const sources: readonly Status[] = typeof from === "string" ? [from] : from;
+  const { status: target, ...columns } = move;
+  for (const source of sources) if (!canMove(source, target)) throw new Error(`illegal job transition ${source} → ${target}`);
+  if (target === "held" && !columns.hold_reason) throw new Error("a held job needs a hold_reason");
+  const fields: JobFields = { ...columns, hold_reason: target === "held" ? (columns.hold_reason ?? null) : null };
+  const keys = writableKeys(fields);
+  const sets = ["status = ?", ...keys.map(k => `${k} = ?`)].join(", ");
+  const moved = db.transaction(() => {
+    const row = db
+      .query<{ id: number }, (string | number | null)[]>(
+        `UPDATE jobs SET ${sets}, updated_at = datetime('now') WHERE id = ? AND status IN (SELECT value FROM json_each(?)) RETURNING id`,
+      )
+      .get(target, ...keys.map(k => fields[k] ?? null), id, JSON.stringify(sources));
+    if (!row) return false;
+    if (!PARKED.includes(target)) closeGates([id]);
+    return true;
+  })();
+  if (moved && !opts.quiet) emit({ type: "job", jobId: id });
+  return moved;
+}
+
+function moveWhere(from: Status, target: Status, sql: string): number {
+  if (!canMove(from, target)) throw new Error(`illegal job transition ${from} → ${target}`);
+  return db.transaction(() => {
+    const ids = db
+      .query<{ id: number }, [string, string]>(sql)
+      .all(target, from)
+      .map(r => r.id);
+    if (!PARKED.includes(target)) closeGates(ids);
+    return ids.length;
+  })();
+}
+
 // A prep worker does not survive a restart: its jobs go back in the queue. Returns how many. (Counted
 // from the rows themselves: `changes` would include what the status-history trigger writes.)
-export const requeueInterruptedPrep = () => db.query("UPDATE jobs SET status = 'triaged' WHERE status = 'prepping' RETURNING id").all().length;
+export const requeueInterruptedPrep = () => moveWhere("prepping", "triaged", "UPDATE jobs SET status = ?, hold_reason = NULL WHERE status = ? RETURNING id");
 
 // Sends held jobs back through triage. Returns how many.
 export const releaseHeldJobs = () =>
-  db.query("UPDATE jobs SET status = 'found', note = NULL, updated_at = datetime('now') WHERE status = 'held' RETURNING id").all().length;
+  moveWhere("held", "found", "UPDATE jobs SET status = ?, note = NULL, hold_reason = NULL, updated_at = datetime('now') WHERE status = ? RETURNING id");
 // Only the jobs held because their employer is a target (prep.ts, rubric.ts) or at triage (scan.ts),
 // not those the owner held by hand.
 export const releaseTargetHolds = () =>
-  db
-    .query(
-      "UPDATE jobs SET status = 'found', note = NULL, updated_at = datetime('now') WHERE status = 'held' AND (note LIKE 'not a practice job:%' OR note LIKE 'held back %') RETURNING id",
-    )
-    .all().length;
+  moveWhere(
+    "held",
+    "found",
+    "UPDATE jobs SET status = ?, note = NULL, hold_reason = NULL, updated_at = datetime('now') WHERE status = ? AND hold_reason IN ('triage', 'target') RETURNING id",
+  );
+
+export const deferredJobs = () => db.query<Job, []>("SELECT * FROM jobs WHERE deferred_at IS NOT NULL").all();
 
 // ---- status history: written by triggers on jobs (schema.ts), only read here
 

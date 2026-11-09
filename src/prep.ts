@@ -2,7 +2,7 @@
 import { existsSync } from "node:fs";
 import { autoApply, autoApproval, employerCapNote } from "./auto";
 import { config, describing, jobDir, readProfile } from "./config";
-import { appliedLocation, employerApplications, getJob, jobSources, kvGet, logEvent, updateJob, type Job } from "./db";
+import { appliedLocation, employerApplications, getJob, jobSources, logEvent, moveJob, updateJob, type Job } from "./db";
 import { deferApproval, forgetDeferredApproval } from "./deferred-approvals";
 import { countOne, uncountOne, usedToday } from "./limits";
 import { arg, S, schema, type RunWorker } from "./worker";
@@ -16,25 +16,25 @@ import { screenPosting } from "./screen";
 import { render } from "./worker-tools";
 
 export async function prep(job: Job, run: RunWorker) {
-  const feedback = kvGet(`feedback.${job.id}`); // set when the user asked for this job explicitly
+  const handPicked = job.hand_picked === 1; // the user asked for this job explicitly
   // The listing that would be applied through, not the other offices the same role is listed for.
   const location = appliedLocation(job);
   // What the text alone rules out, for jobs that skipped triage or whose description came after it.
-  const out = feedback ? null : screenPosting(location, job.description);
+  const out = handPicked ? null : screenPosting(location, job.description);
   if (out) {
     uncountOne("prep");
-    updateJob(job.id, to.skipped(out));
+    moveJob(job.id, "prepping", to.skipped(out));
     return;
   }
   // Auto apply could not take it whatever the assessment said: not worth one.
-  const capped = feedback ? null : employerCapped(job);
+  const capped = handPicked ? null : employerCapped(job);
   if (capped) {
     uncountOne("prep");
-    updateJob(job.id, to.skipped(capped));
+    moveJob(job.id, "prepping", to.skipped(capped));
     return;
   }
   // An employer judged before settles what the full assessment would only judge again.
-  const settled = feedback ? null : settledByEmployer(job);
+  const settled = handPicked ? null : settledByEmployer(job);
   if (settled) {
     // The real rubric decides whether a job held for the real search is worth keeping. Its plain
     // requirements are left to the cheap screen, when it runs; the rest wait until the job is released.
@@ -42,20 +42,24 @@ export async function prep(job: Job, run: RunWorker) {
       const screened = await screen(job, location, run, "frontier");
       if (screened !== "pass") {
         uncountOne("prep");
-        if (screened === "capacity") updateJob(job.id, to.triaged("assessing again: the model provider was at capacity"));
+        if (screened === "capacity") moveJob(job.id, "prepping", to.triaged("assessing again: the model provider was at capacity"));
         return;
       }
     }
     uncountOne("prep");
-    updateJob(job.id, { ...to.held(settled.reason), practice_assessment: settled.practice ? JSON.stringify(settled.practice) : null });
+    moveJob(job.id, "prepping", {
+      ...to.held(settled.reason, "target"),
+      feedback: null,
+      practice_assessment: settled.practice ? JSON.stringify(settled.practice) : null,
+    });
     return;
   }
   // The screen only rules jobs out: the full assessment answers every statement again, its own too.
-  if (!feedback && job.description && config.screen?.readPostings) {
+  if (!handPicked && job.description && config.screen?.readPostings) {
     const screened = await screen(job, location, run);
     if (screened !== "pass") {
       uncountOne("prep");
-      if (screened === "capacity") updateJob(job.id, to.triaged("assessing again: the model provider was at capacity"));
+      if (screened === "capacity") moveJob(job.id, "prepping", to.triaged("assessing again: the model provider was at capacity"));
       return;
     }
   }
@@ -65,7 +69,6 @@ export async function prep(job: Job, run: RunWorker) {
   const dir = jobDir(job.id);
   stageResume(dir);
   const maxPages = stockPages();
-  updateJob(job.id, to.prepping());
   // Both are set from tool callbacks.
   let verdict = null as Verdict | null;
   let reported = false as boolean;
@@ -97,7 +100,7 @@ export async function prep(job: Job, run: RunWorker) {
       main: MAIN,
       pdfName: PDF_NAME,
       description: job.description || "(not captured; read it from the URL)",
-      feedback: feedback ? `\n## Note from the candidate\n\n${feedback}\n` : "",
+      feedback: job.feedback ? `\n## Note from the candidate\n\n${job.feedback}\n` : "",
     }),
     tools: {
       submit_checklist: {
@@ -167,12 +170,13 @@ export async function prep(job: Job, run: RunWorker) {
             practice_assessment: result.practice ? JSON.stringify(result.practice) : null,
           };
           // A job the user asked for by hand is tailored whatever the checklist says.
-          if (result.decision === "apply" || feedback) {
+          if (result.decision === "apply" || handPicked) {
             updateJob(job.id, fields);
             return `Checklist recorded (${result.reason}). CONTINUE: tailor the resume, then call finish_prep.`;
           }
+          const move = result.decision === "hold" ? to.held(result.reason, "target") : to.skipped(result.reason);
+          if (!moveJob(job.id, "prepping", { ...fields, ...move, feedback: null })) return WITHDRAWN;
           reported = true;
-          updateJob(job.id, { ...fields, ...(result.decision === "hold" ? to.held(result.reason) : to.skipped(result.reason)) });
           return `Checklist recorded: ${result.reason}. STOP: do not tailor a resume; you are done.`;
         },
       },
@@ -201,25 +205,27 @@ export async function prep(job: Job, run: RunWorker) {
           const pages = pageCount(pdf);
           if (maxPages && pages && pages > maxPages)
             return `ERROR: the tailored resume is ${pages} pages; the stock resume is ${maxPages}. Trim it, recompile, then call finish_prep again.`;
-          reported = true;
           const auto = autoApproval(verdict, {
             concerns,
-            handPicked: !!feedback,
+            handPicked,
             approvedToday: usedToday("auto"),
             employerApplications: employerApplications(job),
           });
-          if (auto.deferred === "daily_cap") {
-            deferApproval(job.id);
-          } else {
-            forgetDeferredApproval(job.id);
-          }
-          updateJob(job.id, {
+          const moved = moveJob(job.id, "prepping", {
             ...(auto.approve ? to.approved("auto") : { ...to.awaitingApproval(auto.note), approved_by: null }),
             rationale,
             concerns: concerns || null,
             resume_changes: resume_changes || null,
             practice_assessment: verdict.practice ? JSON.stringify(verdict.practice) : null,
+            feedback: null,
           });
+          if (!moved) return WITHDRAWN;
+          reported = true;
+          if (auto.deferred === "daily_cap") {
+            deferApproval(job.id);
+          } else {
+            forgetDeferredApproval(job.id);
+          }
           if (auto.approve) {
             countOne("auto");
             logEvent("auto", `Approved by auto apply: ${verdict.reason}`, job.id, "prep");
@@ -234,8 +240,8 @@ export async function prep(job: Job, run: RunWorker) {
   if (isCapacityError(res.error)) {
     // The provider stopped it, not the job: back in the queue, and the day's count given back.
     uncountOne("prep");
-    updateJob(job.id, to.triaged("assessing again: the model provider was at capacity"));
-  } else updateJob(job.id, to.failed(`prep did not finish: ${res.error ?? "no report"}`));
+    moveJob(job.id, "prepping", to.triaged("assessing again: the model provider was at capacity"));
+  } else moveJob(job.id, "prepping", to.failed(`prep did not finish: ${res.error ?? "no report"}`));
 }
 
 // Why auto apply would never take this job: its employer already has autoApply.perEmployer applications.
@@ -314,7 +320,7 @@ async function screen(
   // Taken out of prep while it ran: whatever the user did with it stands.
   if (getJob(job.id)?.status !== "prepping") return "stop";
   if (out) {
-    updateJob(job.id, to.skipped(out));
+    moveJob(job.id, "prepping", to.skipped(out));
     return "stop";
   }
   return isCapacityError(res.error) ? "capacity" : "pass";

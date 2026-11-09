@@ -1,6 +1,7 @@
 import { Inbox } from "lucide-react";
 import { Fragment, useRef } from "react";
 import type { Summary } from "../../../src/api-types";
+import { SENT } from "../../../src/status";
 import {
   CompanyMark,
   EmptyState,
@@ -43,7 +44,7 @@ const EMPTY: Record<string, readonly [title: string, description: string]> = {
 function Kpis({ counts }: { counts: Summary["counts"] | undefined }) {
   const n = (s: string) => counts?.[s] ?? 0,
     show = (v: number) => (counts ? v.toLocaleString() : "–");
-  const sent = n("submitted") + n("interview") + n("offer") + n("rejected_by_company") + n("withdrawn"),
+  const sent = SENT.reduce((sum, s) => sum + n(s), 0),
     replied = n("interview") + n("offer") + n("rejected_by_company");
   return (
     <WorkspaceStrip

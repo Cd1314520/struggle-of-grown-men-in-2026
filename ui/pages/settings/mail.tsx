@@ -74,6 +74,7 @@ const DIGEST_STATE: Record<string, [Tone, string]> = {
   sent: ["success", "Sent"],
   uncertain: ["warning", "Send uncertain, reconciling with Sent mail"],
   failed: ["danger", "Last send failed"],
+  abandoned: ["danger", "Gave up after repeated failures"],
 };
 
 function nextDigest(d: DigestStatus) {

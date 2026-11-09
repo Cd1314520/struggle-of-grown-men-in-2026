@@ -5,13 +5,20 @@ import { join } from "node:path";
 
 const prelude = `
 import assert from "node:assert/strict";
-import { db, getJob, kvGet, kvSet, updateJob, onChange } from ${JSON.stringify(join(import.meta.dir, "../src/db.ts"))};
-import { authorizeSubmit, queueVerification, isSubmitting, isVerifying, isRecovering, manualLeaseGate } from ${JSON.stringify(join(import.meta.dir, "../src/fill-state.ts"))};
-import { parkGate, getGate, getOpenGate, findStoredAnswer, answerGate, listQuestionGroups, resumeContext, consumeSubmitApproval, returnManualControl, cancelJobGates, manualLeases, reserveManualLease, releaseManualLease, queueRecovery, resolveAmbiguous, resolveAmbiguityWithEvidence, recordCheckpoint, readCheckpoint, queueQuestion, nextQueuedQuestion, clearQueuedQuestions, unfiledAnswers, markFiled } from ${JSON.stringify(join(import.meta.dir, "../src/questions.ts"))};
+import { db, getJob, kvGet, kvSet, updateJob, moveJob, onChange } from ${JSON.stringify(join(import.meta.dir, "../src/db.ts"))};
+import { to } from ${JSON.stringify(join(import.meta.dir, "../src/status.ts"))};
+import { authorizeSubmit, markAmbiguous, beginAttempt, fillPhase, resetFillPhase, queueVerification, isSubmitting, isVerifying, isRecovering, manualLeaseGate } from ${JSON.stringify(join(import.meta.dir, "../src/fill-state.ts"))};
+import { parkGate, getGate, getOpenGate, findStoredAnswer, answerGate, listQuestionGroups, openGateKinds, resumeContext, consumeSubmitApproval, returnManualControl, cancelJobGates, manualLeases, reserveManualLease, releaseManualLease, queueRecovery, resolveAmbiguous, resolveAmbiguityWithEvidence, recordCheckpoint, readCheckpoint, queueQuestion, nextQueuedQuestion, clearQueuedQuestions, unfiledAnswers, markFiled } from ${JSON.stringify(join(import.meta.dir, "../src/questions.ts"))};
 const prompt = { kind: "question", text: "May we contact your current employer?", context: "Employer contact consent; applies to this hiring process", options: ["Yes", "No"] };
 const checkpoint = { version: 1, slot: 2, tabId: "draft-tab", url: "https://ats.example/draft/123", step: "contact consent", notes: "Inspect the existing draft", resumeSha: "frozen-sha", savedAt: "2026-10-10T01:00:00.000Z" };
 function job(id, company = "Acme, Inc.", title = "Engineer") {
   db.query("INSERT INTO jobs (id,url,source,company,title,status,resume_sha,resume_frozen_at) VALUES (?,?,?,?,?,'filling','frozen-sha','2026-10-10T00:00:00Z')").run(id, "https://ats.example/jobs/" + id, "test", company, title);
+}
+const setStatus = (id, status) => db.query("UPDATE jobs SET status = ? WHERE id = ?").run(status, id);
+function refill(id) {
+  const { status } = getJob(id);
+  if (status !== "approved") assert.ok(moveJob(id, status, to.resumeFill("Resumed")));
+  assert.ok(moveJob(id, "approved", to.filling()));
 }
 `;
 function scenario(first: string, restart?: string) {
@@ -36,7 +43,7 @@ describe("parked browser tabs", () => {
   it("keeps only the most recently parked pages, drops finished jobs' pages, and never gives up submission evidence", () => {
     scenario(`
     const { tabPlan } = await import(${JSON.stringify(join(import.meta.dir, "../src/fill.ts"))});
-    const park = (id, status, savedAt, slot = 2) => { job(id); recordCheckpoint(id, { ...checkpoint, slot, tabId: "tab-" + id, savedAt }); updateJob(id, { status }); };
+    const park = (id, status, savedAt, slot = 2) => { job(id); recordCheckpoint(id, { ...checkpoint, slot, tabId: "tab-" + id, savedAt }); setStatus(id, status); };
     park(1, "needs_input", "2026-10-10T01:00:00.000Z");
     park(2, "needs_input", "2026-10-10T03:00:00.000Z");
     park(3, "needs_manual", "2026-10-10T02:00:00.000Z");
@@ -44,7 +51,7 @@ describe("parked browser tabs", () => {
     park(5, "needs_manual", "2026-10-09T00:00:00.000Z"); authorizeSubmit(5);
     park(6, "approved", "2026-10-08T00:00:00.000Z");
     park(7, "needs_input", "2026-10-10T05:00:00.000Z", 3);
-    park(8, "filling", "2026-10-10T06:00:00.000Z"); authorizeSubmit(8); updateJob(8, { status: "submitted" });
+    park(8, "filling", "2026-10-10T06:00:00.000Z"); authorizeSubmit(8); assert.ok(moveJob(8, "filling", to.submitted("Sent")));
     const plan = tabPlan(2, 6, 2);
     assert.deepEqual([...plan.keep].sort(), ["tab-2", "tab-3", "tab-5", "tab-6"]);
     assert.deepEqual([...plan.closing].sort(), [["tab-1", 1], ["tab-4", null], ["tab-8", null]]);
@@ -117,8 +124,9 @@ describe("durable questions", () => {
     answerGate(first.id, "private-code", "application");
     const complete = { ...incomplete, options: [] };
     assert.equal(findStoredAnswer(1, complete), null);
-    updateJob(1, { status: "filling" });
+    refill(1);
     const unknownAgain = parkGate(1, incomplete, checkpoint);
+    refill(1);
     const explicitText = parkGate(1, complete, checkpoint);
     assert.notEqual(explicitText.id, unknownAgain.id);
     assert.notEqual(explicitText.groupKey, unknownAgain.groupKey);
@@ -233,6 +241,7 @@ describe("durable questions", () => {
     scenario(`
     job(1);
     const old = parkGate(1, prompt, checkpoint);
+    refill(1);
     const current = parkGate(1, { ...prompt, context: "New hiring process" }, checkpoint);
     assert.equal(getGate(old.id).state, "closed");
     assert.throws(() => answerGate(old.id, "No", "application"), /stale/);
@@ -279,18 +288,22 @@ describe("durable questions", () => {
     assert.equal(resumeContext(1).approvedSummary, confirmation.text);
     assert.equal(consumeSubmitApproval(1, "Apply  to Acme\\nfor Engineer with the frozen resume"), true);
     assert.equal(consumeSubmitApproval(1, confirmation.text), false);
+    refill(1);
     const mismatch = parkGate(1, confirmation, checkpoint);
     answerGate(mismatch.id, "approve", "application");
     assert.equal(consumeSubmitApproval(1, confirmation.text + " and a different letter"), false);
     assert.equal(consumeSubmitApproval(1, confirmation.text), false);
+    refill(1);
     const renewed = parkGate(1, confirmation, checkpoint);
     answerGate(renewed.id, "approve", "application");
+    refill(1);
     const question = parkGate(1, prompt, checkpoint);
     assert.equal(resumeContext(1).approvedSummary, null);
     answerGate(question.id, "No", "application");
     assert.equal(consumeSubmitApproval(1, confirmation.text), false);
     answerGate(b.id, "Revise the cover letter", "application");
     assert.deepEqual(resumeContext(2).changeRequests, ["Revise the cover letter"]);
+    refill(2);
     const letter = parkGate(2, { kind: "cover_letter", text: "Letter draft", context: "Acme Engineer", options: [] }, null);
     assert.throws(() => answerGate(letter.id, "Revised letter", "bank"), /answer bank/);
     answerGate(letter.id, "Revised letter", "application");
@@ -307,8 +320,10 @@ describe("durable questions", () => {
     job(1);
     const question = parkGate(1, prompt, checkpoint);
     answerGate(question.id, "No", "bank");
+    refill(1);
     const confirmation = parkGate(1, { kind: "confirm_submit", text: "Exact final submission summary" }, checkpoint);
     answerGate(confirmation.id, "approve", "application");
+    refill(1);
     const manual = parkGate(1, { kind: "manual", text: "Inspect the browser before continuing" }, checkpoint);
     assert.deepEqual([...manualLeases()], []);
     assert.equal(resumeContext(1).approvedSummary, "Exact final submission summary");
@@ -340,8 +355,10 @@ describe("durable questions", () => {
     job(1);
     const question = parkGate(1, prompt, checkpoint);
     answerGate(question.id, "No", "application");
+    refill(1);
     const confirmation = parkGate(1, { kind: "confirm_submit", text: "Final review summary" }, checkpoint);
     answerGate(confirmation.id, "Remove the optional cover letter before submission", "application");
+    refill(1);
     const manual = parkGate(1, { kind: "manual", text: "Complete interactive verification" }, checkpoint);
     const before = resumeContext(1);
     assert.equal(returnManualControl(1, manual.id, "   "), true);
@@ -361,7 +378,7 @@ describe("durable questions", () => {
     const stale = parkGate(1, { kind: "manual", text: "Old browser handoff" }, checkpoint);
     const current = parkGate(1, { kind: "manual", text: "Current browser handoff" }, checkpoint);
     const wrongStatus = parkGate(2, { kind: "manual", text: "Browser handoff" }, checkpoint);
-    updateJob(2, { status: "approved" });
+    setStatus(2, "approved");
     const detached = parkGate(3, { kind: "manual", text: "Browser handoff" }, checkpoint);
     updateJob(3, { pending: JSON.stringify({ version: 1, gateId: "another-gate", state: "open" }) });
     const marker = parkGate(4, { kind: "manual", text: "Browser handoff" }, checkpoint);
@@ -402,8 +419,8 @@ describe("durable questions", () => {
     scenario(`
     job(2); job(3);
     authorizeSubmit(2);
-    updateJob(2, { status: "failed", note: "Interrupted after authorization" });
-    updateJob(3, { status: "submitted", submitted_at: "2026-10-10T01:00:00Z" });
+    assert.ok(moveJob(2, "filling", to.failed("Interrupted after authorization")));
+    assert.ok(moveJob(3, "filling", to.submitted("Sent")));
     authorizeSubmit(3);
     const ambiguous = parkGate(2, { kind: "submission_ambiguous", text: "Submission may have occurred. Inspect the existing application before resolving." }, checkpoint);
     assert.equal(getJob(2).status, "needs_manual");
@@ -457,8 +474,8 @@ describe("durable questions", () => {
   it("allows same-slot handoffs until explicitly reserved, then clears reservations on replacement or close", () => {
     scenario(`
     job(1); job(2);
-    const ambiguous = parkGate(1, { kind: "submission_ambiguous", text: "Inspect possible submission" }, checkpoint);
     authorizeSubmit(1);
+    const ambiguous = parkGate(1, { kind: "submission_ambiguous", text: "Inspect possible submission" }, checkpoint);
     const manual = parkGate(2, { kind: "manual", text: "Complete browser verification" }, checkpoint);
     assert.deepEqual([...manualLeases()], []);
     reserveManualLease(1, ambiguous.id);
@@ -516,8 +533,8 @@ describe("durable questions", () => {
     answerGate(final.id, "approve", "application");
     updateJob(1, { pending: null });
     parkGate(4, { kind: "manual", text: "Inspect the existing draft" }, checkpoint);
-    parkGate(5, { kind: "submission_ambiguous", text: "Inspect possible submission" }, checkpoint);
     authorizeSubmit(5);
+    parkGate(5, { kind: "submission_ambiguous", text: "Inspect possible submission" }, checkpoint);
     assert.deepEqual([...manualLeases()], []);
     const reserved = parkGate(6, { kind: "manual", text: "Complete browser verification" }, checkpoint);
     reserveManualLease(6, reserved.id);
@@ -574,8 +591,8 @@ describe("durable questions", () => {
     assert.equal(isRecovering(1), true);
     assert.deepEqual([...manualLeases()], []);
 
-    const aGate = parkGate(2, { kind: "submission_ambiguous", text: "Final submission timed out", context: "Network dropped during submit" }, checkpoint);
     authorizeSubmit(2);
+    const aGate = parkGate(2, { kind: "submission_ambiguous", text: "Final submission timed out", context: "Network dropped during submit" }, checkpoint);
     assert.deepEqual([...manualLeases()], []);
     const aRec = queueRecovery(2, aGate.id);
     assert.equal(aRec.mode, "verify");
@@ -594,8 +611,7 @@ describe("durable questions", () => {
     scenario(`
     job(1);
     recordCheckpoint(1, checkpoint);
-    queueVerification(1);
-    updateJob(1, { status: "filling" });
+    authorizeSubmit(1); markAmbiguous(1); queueVerification(1); beginAttempt(1);
 
     const badEvidence = { notes: "", requisitionId: "", source: "portal", status: "submitted", checkpoint };
     assert.throws(() => resolveAmbiguityWithEvidence(1, "submitted", badEvidence));
@@ -626,8 +642,7 @@ describe("durable questions", () => {
 
     job(2);
     recordCheckpoint(2, checkpoint);
-    queueVerification(2);
-    updateJob(2, { status: "filling" });
+    authorizeSubmit(2); markAmbiguous(2); queueVerification(2); beginAttempt(2);
 
     resolveAmbiguityWithEvidence(2, "submitted", {
       notes: "Confirmed submission on portal",
@@ -673,6 +688,7 @@ describe("durable questions", () => {
 
     const g6 = parkGate(1, { kind: "submission_ambiguous", text: "Final submission timed out", context: "Inspect exact application" }, checkpoint);
     cancelJobGates(1);
+    resetFillPhase(1);
 
     const g7 = parkGate(1, { kind: "manual", text: "Latest status check failed", context: "Check candidate home" }, checkpoint);
 
@@ -687,6 +703,63 @@ describe("durable questions", () => {
     assert.equal(ctx.handoffHistory[4].text, "Final submission timed out");
     assert.equal(ctx.handoffHistory[4].kind, "submission_ambiguous");
     assert.equal(ctx.handoffHistory[5].text, "Latest status check failed");
+  `);
+  });
+
+  it("ignores an open gate whose job has left the gate's parked status", () => {
+    scenario(`
+    job(1); job(2); job(3); job(4);
+    parkGate(1, prompt, checkpoint);
+    const kept = parkGate(2, prompt, checkpoint);
+    parkGate(3, { kind: "confirm_submit", text: "Final summary" }, checkpoint);
+    parkGate(4, { kind: "manual", text: "Inspect the browser" }, checkpoint);
+    assert.deepEqual([...openGateKinds()].sort(), [[1, "question"], [2, "question"], [3, "confirm_submit"], [4, "manual"]]);
+    setStatus(1, "approved");
+    setStatus(3, "needs_input");
+    setStatus(4, "held");
+    assert.deepEqual([...openGateKinds()], [[2, "question"]]);
+    assert.deepEqual(listQuestionGroups().map(g => g.jobs.map(j => j.id)), [[2]]);
+    assert.equal(getOpenGate(1), null);
+    assert.equal(getGate(kept.id).state, "open");
+    setStatus(2, "needs_manual");
+    assert.deepEqual([...openGateKinds()], []);
+    assert.deepEqual(listQuestionGroups(), []);
+  `);
+  });
+
+  it("marks the answered gate and moves the job to approved", () => {
+    scenario(`
+    job(1);
+    const gate = parkGate(1, prompt, checkpoint);
+    assert.equal(getJob(1).status, "needs_input");
+    answerGate(gate.id, "No", "application");
+    const saved = getGate(gate.id);
+    assert.equal(saved.state, "answered");
+    assert.equal(saved.answer, "No");
+    assert.equal(saved.scope, "application");
+    assert.notEqual(saved.answeredAt, null);
+    assert.equal(getJob(1).status, "approved");
+    assert.equal(getOpenGate(1), null);
+    assert.deepEqual([...openGateKinds()], []);
+    assert.deepEqual(listQuestionGroups(), []);
+    assert.throws(() => answerGate(gate.id, "Yes", "application"), /stale|answered/);
+    assert.equal(findStoredAnswer(1, prompt), "No");
+  `);
+  });
+
+  it("refuses to resolve ambiguity unless the job is in the ambiguous phase", () => {
+    scenario(`
+    job(1); job(2);
+    assert.throws(() => resolveAmbiguous(1, "not_submitted"), /No current/);
+    assert.equal(getJob(1).status, "filling");
+    authorizeSubmit(2);
+    const gate = parkGate(2, { kind: "submission_ambiguous", text: "Inspect possible submission" }, checkpoint);
+    assert.equal(fillPhase(2), "ambiguous");
+    resetFillPhase(2);
+    assert.throws(() => resolveAmbiguous(2, "not_submitted"), /No current/);
+    assert.equal(getJob(2).status, "needs_manual");
+    assert.equal(getGate(gate.id).state, "open");
+    assert.equal(fillPhase(2), "idle");
   `);
   });
 });

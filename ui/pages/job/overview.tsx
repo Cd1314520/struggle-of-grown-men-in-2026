@@ -1,5 +1,6 @@
 import { ArrowRight, Check, CircleAlert, ExternalLink, X } from "lucide-react";
 import type { JobDetail, Summary } from "../../../src/api-types";
+import { SENT } from "../../../src/status";
 import { Button, Clamp, Properties, Section, Subhead } from "../../components/ui";
 import { checklistOf, itemLabel, practiceOf, resumeNote, risksOf, verdictOf, type Item, type Phase } from "./model";
 
@@ -34,7 +35,7 @@ export function Overview({ job, phase, targets, openTab }: { job: JobDetail; pha
   const { misses, hits } = verdictOf(items);
   const risks = risksOf(job.concerns).slice(0, 3);
   const practice = practiceOf(job, targets);
-  const sentThere = job.siblings.filter(s => ["submitted", "interview", "offer", "rejected_by_company", "withdrawn"].includes(s.status)).length;
+  const sentThere = job.siblings.filter(s => SENT.includes(s.status)).length;
 
   if (!job.rationale && !items.length && !risks.length && job.score == null)
     return <p className="text-base text-fg-muted">Not assessed yet. The fit, the risks and a tailored resume show here once it is.</p>;

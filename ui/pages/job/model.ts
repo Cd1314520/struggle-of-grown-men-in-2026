@@ -2,7 +2,7 @@ import type { JobDetail, Summary } from "../../../src/api-types";
 import { parsePracticeAssessment, practiceVerdict, rubricOf as rubricOfAssessment } from "../../../src/practice";
 import { setAsideReason, type Reason } from "../../../src/reasons";
 import type { Answer, ChecklistItem } from "../../../src/rubric";
-import type { Status } from "../../../src/status";
+import { SENT, type Status } from "../../../src/status";
 import type { Step } from "../../../src/steps";
 import { ago, brief, cap, DAY, dateTime, parseAt } from "../../lib/format";
 import { GATE, STATUS, type Tone } from "../../lib/labels";
@@ -26,9 +26,9 @@ export const parsePending = (raw: string | null | undefined): { gateId?: string;
 };
 export const gateIdOf = (j: Pick<JobDetail, "gate" | "pending">) => j.gate?.id ?? parsePending(j.pending)?.gateId;
 
-const SENT: readonly Status[] = ["submitted", "interview", "offer", "rejected_by_company", "withdrawn"];
 export const ENDED: readonly Status[] = ["rejected_by_company", "withdrawn"];
-const RUNNING: readonly Status[] = ["approved", "filling", "triaged", "prepping", "locating"];
+export const IN_PROGRESS: readonly Status[] = ["filling", "prepping", "locating"];
+const RUNNING: readonly Status[] = [...IN_PROGRESS, "approved", "triaged"];
 
 export type DecisionKind =
   | "verify"
@@ -44,7 +44,7 @@ export type DecisionKind =
   | "skipped"
   | "running"
   | "process";
-export function decisionOf(j: Pick<JobDetail, "status" | "gate" | "submissionAmbiguous" | "recoveryMode" | "pending" | "note">): DecisionKind | null {
+export function decisionOf(j: Pick<JobDetail, "status" | "gate" | "submissionAmbiguous" | "recoveryMode">): DecisionKind | null {
   const verify = j.recoveryMode ?? (j.submissionAmbiguous && !j.gate && (j.status === "filling" || j.status === "needs_manual") ? "verify" : null);
   if (verify === "verify") return "verify";
   if (j.submissionAmbiguous && !SENT.includes(j.status) && j.status !== "rejected") return "ambiguous";
@@ -65,10 +65,11 @@ export function headerStatus(j: Pick<JobDetail, "status" | "gate" | "submissionA
   if (j.submissionAmbiguous && j.status !== "rejected" && !SENT.includes(j.status)) return { label: "Outcome unknown", tone: "warning", pulse: false };
   const [label, tone] = STATUS[j.status];
   if (j.status === "awaiting_approval") return { label, tone: "neutral", pulse: false };
-  return { label: j.gate ? GATE[j.gate.kind] : label, tone, pulse: j.status === "filling" || j.status === "prepping" };
+  return { label: j.gate ? GATE[j.gate.kind] : label, tone, pulse: IN_PROGRESS.includes(j.status) };
 }
 
-export const setAsideOf = (j: Pick<JobDetail, "note" | "history">): Reason | null => setAsideReason(j.note, j.history.at(-1)?.from_status ?? null);
+export const setAsideOf = (j: Pick<JobDetail, "note" | "history" | "hold_reason">): Reason | null =>
+  setAsideReason(j.note, j.history.at(-1)?.from_status ?? null, j.hold_reason);
 
 const NOISE = /compil|pdfinfo|typst|page count|one page|metadata/i;
 

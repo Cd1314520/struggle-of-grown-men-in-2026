@@ -149,6 +149,10 @@ globalThis.fetch = Object.assign(
   { preconnect: globalThis.fetch.preconnect },
 );
 
+function minutesAfter(minutes: number, seconds = 0) {
+  return new Date(now.getTime() + minutes * 60_000 + seconds * 1_000);
+}
+
 function gate(
   text: string,
   context = "Acme employment eligibility",
@@ -156,7 +160,7 @@ function gate(
   kind: "question" | "confirm_submit" | "cover_letter" = "question",
 ) {
   const id = nextJob++;
-  db.query("INSERT INTO jobs (id, url, source, company, company_key, title) VALUES (?, ?, 'test', 'Acme', ?, 'Engineer')").run(
+  db.query("INSERT INTO jobs (id, url, source, company, company_key, title, status) VALUES (?, ?, 'test', 'Acme', ?, 'Engineer', 'filling')").run(
     id,
     `https://jobs.example.com/${id}`,
     companyKey("Acme"),
@@ -166,8 +170,8 @@ function gate(
 
 function delivery() {
   const row = db
-    .query<{ id: string; state: string; body: string; sent_at: string | null; gmail_id: string | null }, []>(
-      "SELECT id, state, body, sent_at, gmail_id FROM question_digest_deliveries ORDER BY rowid DESC LIMIT 1",
+    .query<{ id: string; state: string; body: string; sent_at: string | null; gmail_id: string | null; attempts: number }, []>(
+      "SELECT id, state, body, sent_at, gmail_id, attempts FROM question_digest_deliveries ORDER BY rowid DESC LIMIT 1",
     )
     .get();
   assert.ok(row);
@@ -308,6 +312,98 @@ switch (process.argv[2]) {
     assert.equal(delivery().gmail_id, must(sent[0], "sent message 0").id);
     assert.equal(attempts.length, 1);
     assert.equal((await sendQuestionDigest({ force: true, now })).reason, "no_new_groups");
+    break;
+  }
+  case "stale-uncertain": {
+    gate("Are you authorized to work?");
+    outcome = "ambiguous";
+    visible = false;
+    await assert.rejects(sendQuestionDigest({ force: true, now }), /outcome is unknown/);
+    assert.equal(delivery().state, "uncertain");
+    const id = delivery().id;
+    outcome = "success";
+    assert.equal((await sendQuestionDigest({ now: minutesAfter(30) })).reason, "delivery_uncertain");
+    assert.equal(delivery().state, "uncertain");
+    assert.equal(attempts.length, 1);
+    const stale = await sendQuestionDigest({ now: minutesAfter(61) });
+    assert.equal(stale.reason, "retry_scheduled");
+    assert.equal(delivery().state, "failed");
+    assert.equal(delivery().attempts, 1);
+    assert.equal(attempts.length, 1);
+    const resent = await sendQuestionDigest({ now: minutesAfter(62) });
+    assert.equal(resent.sent, true);
+    assert.equal(resent.messageId, id);
+    assert.equal(delivery().id, id);
+    assert.equal(delivery().state, "sent");
+    assert.equal(delivery().attempts, 2);
+    assert.equal(attempts.length, 2);
+    assert.equal(attempts[1], id);
+    break;
+  }
+  case "stale-uncertain-matched": {
+    gate("Are you authorized to work?");
+    outcome = "ambiguous";
+    await assert.rejects(sendQuestionDigest({ force: true, now }), /outcome is unknown/);
+    const result = await sendQuestionDigest({ now: minutesAfter(90) });
+    assert.equal(result.reason, "reconciled");
+    assert.equal(delivery().state, "sent");
+    assert.equal(delivery().attempts, 1);
+    assert.equal(attempts.length, 1);
+    break;
+  }
+  case "failed-backoff": {
+    gate("Are you authorized to work?");
+    outcome = "reject";
+    await assert.rejects(sendQuestionDigest({ now }), /403/);
+    assert.equal(delivery().state, "failed");
+    assert.equal(delivery().attempts, 1);
+    let elapsed = 0;
+    for (const [wait, attempt] of [
+      [5, 2],
+      [10, 3],
+      [20, 4],
+    ] as const) {
+      assert.equal((await sendQuestionDigest({ now: minutesAfter(elapsed + wait, -1) })).reason, "retry_later");
+      assert.equal(delivery().attempts, attempt - 1);
+      elapsed += wait;
+      await assert.rejects(sendQuestionDigest({ now: minutesAfter(elapsed) }), /403/);
+      assert.equal(delivery().state, "failed");
+      assert.equal(delivery().attempts, attempt);
+      assert.equal(attempts.length, attempt);
+    }
+    outcome = "success";
+    assert.equal((await sendQuestionDigest({ now: minutesAfter(elapsed + 39, 59) })).reason, "retry_later");
+    const result = await sendQuestionDigest({ now: minutesAfter(elapsed + 40) });
+    assert.equal(result.sent, true);
+    assert.equal(delivery().state, "sent");
+    assert.equal(delivery().attempts, 5);
+    assert.equal(new Set(attempts).size, 1);
+    break;
+  }
+  case "abandon": {
+    gate("Are you authorized to work?");
+    outcome = "reject";
+    await assert.rejects(sendQuestionDigest({ now }), /403/);
+    const firstId = delivery().id;
+    let elapsed = 0;
+    for (const wait of [5, 10, 20, 40]) {
+      elapsed += wait;
+      await assert.rejects(sendQuestionDigest({ now: minutesAfter(elapsed) }), /403/);
+    }
+    assert.equal(delivery().attempts, 5);
+    assert.equal(delivery().state, "failed");
+    assert.equal(attempts.length, 5);
+    outcome = "success";
+    const result = await sendQuestionDigest({ now: minutesAfter(elapsed, 1) });
+    assert.equal(result.sent, true);
+    assert.equal(result.groups, 1);
+    assert.notEqual(result.messageId, firstId);
+    assert.equal(db.query<{ state: string }, [string]>("SELECT state FROM question_digest_deliveries WHERE id = ?").get(firstId)?.state, "abandoned");
+    assert.equal(delivery().id, result.messageId);
+    assert.equal(delivery().state, "sent");
+    assert.equal(delivery().attempts, 1);
+    assert.equal(attempts.length, 6);
+    assert.equal(digestStatus().undeliveredGroups, 0);
     break;
   }
   case "restart-before": {

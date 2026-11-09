@@ -10,10 +10,19 @@ describe("capacity back-off", () => {
     expect(Math.round(((first ?? 0) - Date.now()) / 60_000)).toBe(2);
     expect(backedOff()).toBe(true);
     expect(backOff()).toBeNull();
-    kvSet("backoff.until", "0");
+    kvSet("backoff.until", String(Date.now() - 1));
     expect(Math.round(((backOff() ?? 0) - Date.now()) / 60_000)).toBe(4);
-    kvSet("backoff.until", "0");
     clearBackoff();
+    expect(backedOff()).toBe(false);
+    expect(Math.round(((backOff() ?? 0) - Date.now()) / 60_000)).toBe(2);
+  });
+
+  it("starts over at the shortest pause once refusals have stopped for hours", () => {
+    clearBackoff();
+    backOff();
+    kvSet("backoff.until", String(Date.now() - 1));
+    expect(Math.round(((backOff() ?? 0) - Date.now()) / 60_000)).toBe(4);
+    kvSet("backoff.until", String(Date.now() - 7 * 60 * 60_000));
     expect(Math.round(((backOff() ?? 0) - Date.now()) / 60_000)).toBe(2);
   });
 

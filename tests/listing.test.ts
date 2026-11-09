@@ -3,7 +3,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { employerCapNote } from "../src/auto";
-import { BLOCKER_CAUSES } from "../src/blockers";
 import { homeOf, nearHome } from "../src/home";
 import { practiceRefusal, type PracticeAssessment } from "../src/practice";
 import { setAsideReason } from "../src/reasons";
@@ -23,57 +22,61 @@ const held = (fields: Partial<PracticeAssessment>) => `not a practice job: ${ref
 
 describe("why a job was set aside", () => {
   it("names what tells one held job from another, without the real-search preamble", () => {
-    for (const note of ["held back at triage", "held back during the practice phase"])
-      expect(setAsideReason(note)).toEqual({
+    for (const note of ["held back at triage", null])
+      expect(setAsideReason(note, "found", "triage")).toEqual({
         label: "Held at triage",
         detail: "Held back on the title, company and place alone, before a full assessment",
       });
-    expect(setAsideReason(held({}))).toEqual({ label: "Target employer", detail: "Smarsh sells an established compliance platform (SaaS) to banks." });
+    expect(setAsideReason(held({}), "prepping", "target")).toEqual({
+      label: "Target employer",
+      detail: "Smarsh sells an established compliance platform (SaaS) to banks.",
+    });
     expect(
-      setAsideReason("not a practice job: a target employer, as judged on job #12 (Payments platform); held without a full assessment until it is released"),
+      setAsideReason(
+        "not a practice job: a target employer, as judged on job #12 (Payments platform); held without a full assessment until it is released",
+        "prepping",
+        "target",
+      ),
     ).toEqual({ label: "Target employer", detail: "Payments platform" });
-    expect(setAsideReason("not a practice job: a tech company at scale, kept for the real search (Smarsh SaaS); real score 88 (threshold 65)")).toEqual({
+    expect(
+      setAsideReason("not a practice job: a tech company at scale, kept for the real search (Smarsh SaaS); real score 88 (threshold 65)", "prepping", "target"),
+    ).toEqual({
       label: "Tech company at scale",
       detail: "Smarsh SaaS",
     });
-    expect(setAsideReason(held({ listed: "frontier" }))).toEqual({ label: "Frontier employer", detail: "The employer is on your frontier list" });
-    expect(setAsideReason(`needs your review: auto-approved, but not a practice job: ${refusal({ listed: "frontier" })}`)?.label).toBe("Frontier employer");
-    expect(setAsideReason(`needs your review: ${employerCapNote(1)}`)?.label).toBe("Already applying at this employer");
-    expect(setAsideReason("second parked role at Netic (auto apply allows 1 per employer)")?.label).toBe("Already applying at this employer");
-    expect(setAsideReason("needs your review: posted base ceiling $129,120 is above the $100,000 practice limit")).toEqual({
-      label: "Pay above the practice limit",
-      detail: "Posted base ceiling $129,120 is above the $100,000 practice limit",
+    expect(setAsideReason(held({ listed: "frontier" }), "prepping", "target")).toEqual({
+      label: "Frontier employer",
+      detail: "The employer is on your frontier list",
     });
+    expect(setAsideReason(`needs your review: ${employerCapNote(1)}`, "awaiting_approval", "review")?.label).toStartWith("Already applying to 1 other role");
+    expect(setAsideReason("needs your review: posted base ceiling $129,120 is above the $100,000 practice limit", "awaiting_approval", "review")).toEqual({
+      label: "Posted base ceiling $129,120 is above the $100,000 practice limit",
+      detail: null,
+    });
+  });
+
+  it("names an employer cap on a job that was not held", () => {
+    expect(setAsideReason("second parked role at Netic (auto apply allows 1 per employer)", "awaiting_approval", null)?.label).toBe(
+      "Already applying at this employer",
+    );
+    expect(setAsideReason(employerCapNote(1), "prepping", null)?.label).toBe("Already applying at this employer");
   });
 
   it("reads notes typed by hand the same way", () => {
-    expect(setAsideReason("held for the real search: frontier-ish employer, not to be spent on practice")?.label).toBe("Frontier employer");
-    expect(setAsideReason("tech company at scale (Suno): kept for the real search")).toEqual({
+    expect(setAsideReason("held for the real search: frontier-ish employer, not to be spent on practice", "found", "target")?.label).toBe("Frontier employer");
+    expect(setAsideReason("tech company at scale (Suno): kept for the real search", "found", "target")).toEqual({
       label: "Tech company at scale",
       detail: "Tech company at scale (Suno): kept for the real search",
     });
-    expect(setAsideReason("held by you")).toEqual({ label: "Held by you", detail: null });
-    expect(setAsideReason("hardware/embedded role, not a goal")).toEqual({ label: "Hardware/embedded role, not a goal", detail: null });
-  });
-
-  it("says which gate a cleared application was stuck on, and what stopped it", () => {
-    const stuck = (kind: string) => setAsideReason(`Cleared: stuck on a ${kind} gate for over a day`)?.label;
-    expect(stuck("question")).toBe("Stuck a day on a question");
-    expect(stuck("cover_letter")).toBe("Stuck a day on a cover letter");
-    expect(stuck("confirm_submit")).toBe("Stuck a day on the submit check");
-    expect(stuck("manual")).toBe("Stuck a day on a browser hand-off");
-    expect(stuck("submission_ambiguous")).toBe("Stuck a day on an unclear submission");
-    expect(stuck("teleport")).toBe("Stuck on a teleport gate for over a day");
-    expect(setAsideReason("Cleared: site_down (see Blockers)")).toEqual({ label: "Site was down", detail: null });
-    for (const cause of BLOCKER_CAUSES) expect(setAsideReason(`Cleared: ${cause} (see Blockers)`)?.label).not.toContain("_");
-    expect(setAsideReason("cleared: stuck on email verification; not retrying")?.label).toBe("Stuck on email verification; not retrying");
+    expect(setAsideReason("held by you", "triaged", "user")).toEqual({ label: "Held by you", detail: null });
+    expect(setAsideReason("hardware/embedded role, not a goal", "triaged", "user")).toEqual({ label: "Hardware/embedded role, not a goal", detail: null });
   });
 
   it("explains a rejection without a note by where it was stopped", () => {
-    expect(setAsideReason(null, "awaiting_approval")).toEqual({ label: "Turned down at review", detail: null });
-    expect(setAsideReason(null, "awaiting_submit")?.label).toBe("Stopped before submitting");
-    expect(setAsideReason(null, "held")).toBeNull();
-    expect(setAsideReason("  ")).toBeNull();
+    expect(setAsideReason(null, "awaiting_approval", null)).toEqual({ label: "Turned down at review", detail: null });
+    expect(setAsideReason(null, "awaiting_submit", null)?.label).toBe("Stopped before submitting");
+    expect(setAsideReason(null, "held", null)).toBeNull();
+    expect(setAsideReason("  ", null, null)).toBeNull();
   });
 });
 
@@ -104,7 +107,8 @@ describe("the near filter", () => {
 
 const prelude = `
 import assert from "node:assert/strict";
-import { db, updateJob } from ${JSON.stringify(join(import.meta.dir, "../src/db.ts"))};
+import { db, moveJob } from ${JSON.stringify(join(import.meta.dir, "../src/db.ts"))};
+import { to } from ${JSON.stringify(join(import.meta.dir, "../src/status.ts"))};
 import { config } from ${JSON.stringify(join(import.meta.dir, "../src/config.ts"))};
 import { listJobs } from ${JSON.stringify(join(import.meta.dir, "../src/listing.ts"))};
 let next = 1;
@@ -147,9 +151,9 @@ describe("job lists", () => {
 
   it("give held and rejected jobs their reason, and no other view's", () => {
     scenario(`
-      job({ note: "held back at triage" });
+      job({ note: "held back at triage", hold_reason: "triage" });
       const turned = job({ status: "awaiting_approval" });
-      updateJob(turned, { status: "rejected", note: null });
+      moveJob(turned, "awaiting_approval", to.rejected(null));
       job({ status: "awaiting_approval", note: "needs your review: you asked for this one yourself" });
       assert.equal(listJobs({ view: "held" }).rows[0].reason.label, "Held at triage");
       assert.deepEqual(listJobs({ view: "rejected" }).rows[0].reason, { label: "Turned down at review", detail: null });

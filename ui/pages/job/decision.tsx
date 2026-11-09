@@ -22,6 +22,7 @@ import {
 import { useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { JobDetail } from "../../../src/api-types";
+import { RETRYABLE } from "../../../src/status";
 import {
   Button,
   Clamp,
@@ -51,7 +52,7 @@ import type { Tone } from "../../lib/labels";
 import { href } from "../../lib/router";
 import { whyLabel } from "../../lib/why";
 import { useDraft, type JobActions } from "./actions";
-import { enteredOf, parsePending, setAsideOf, type DecisionKind } from "./model";
+import { enteredOf, IN_PROGRESS, parsePending, setAsideOf, type DecisionKind } from "./model";
 
 interface Act {
   key: string;
@@ -641,7 +642,7 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       menu: [reject()],
     };
   } else if (kind === "rejected" || kind === "skipped") {
-    const blocked = kind === "rejected" && ambiguous;
+    const blocked = !RETRYABLE.includes(job.status) || (kind === "rejected" && ambiguous);
     d = {
       ...base,
       placement: "bar",
@@ -652,7 +653,7 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       secondary: blocked ? [] : [{ key: "retry", label: "Reconsider", icon: <RotateCcw />, run: () => void a.act("retry") }],
     };
   } else if (kind === "running") {
-    const working = job.status === "filling" || job.status === "prepping" || job.status === "locating";
+    const working = IN_PROGRESS.includes(job.status);
     const last = working ? job.events.find(e => e.kind === "step") : undefined;
     const resuming = job.checkpoint && (job.status === "approved" || job.status === "filling");
     d = {

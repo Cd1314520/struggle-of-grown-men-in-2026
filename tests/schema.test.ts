@@ -15,6 +15,7 @@ import {
   schemaVersion,
   type Migration,
 } from "../src/schema";
+import { STATUSES } from "../src/status";
 import { BEFORE_COMPANY_KEYS_SCHEMA, FIRST_VERSION_SCHEMA, createLegacyDatabase } from "./fixtures/legacy-db";
 
 const TABLES = [
@@ -259,7 +260,7 @@ describe("schema migrations", () => {
 
     it("holds the state to its rules and forgets it with the job", () => {
       const db = memory();
-      migrate(db);
+      migrate(db, MIGRATIONS.slice(0, 3));
       db.run("INSERT INTO jobs (id, url, source, company, title) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'One')");
       db.run("INSERT INTO fill_state (job_id, submitting, verifying) VALUES (1, 1, 1)");
       expect(() => db.run("UPDATE fill_state SET submitting = 0 WHERE job_id = 1")).toThrow(/CHECK/);
@@ -351,9 +352,161 @@ describe("schema migrations", () => {
           VALUES ('g1', 1, 'question', 'job:1:m1', 'm1', 'Acme', 'Relocate?', '', '[]', 'open', 'a');
         INSERT INTO queued_questions (job_id, match_key, text, context, options, queued_at) VALUES (1, 'm1', 'Relocate?', '', '[]', 'a');
       `);
-      expect(migrate(db).map(m => m.name)).toEqual(["gate reasons"]);
+      expect(migrate(db, MIGRATIONS.slice(0, 9)).map(m => m.name)).toEqual(["gate reasons"]);
       expect(db.query("SELECT why, missing FROM question_gates").all()).toEqual([{ why: null, missing: null }]);
       expect(db.query("SELECT why, missing FROM queued_questions").all()).toEqual([{ why: null, missing: null }]);
+    });
+  });
+
+  describe("state machines (version 10)", () => {
+    const jobRow = (id: number, status: string, note: string | null = null) =>
+      `(${id}, 'https://a.example/${id}', 'test', 'Acme', 'Job ${id}', '${status}', ${note === null ? "NULL" : `'${note}'`})`;
+    const beforeStateMachines = () => {
+      const db = memory();
+      migrate(db, MIGRATIONS.slice(0, 9));
+      return db;
+    };
+    const upgrade = (db: Database) => {
+      expect(migrate(db).map(m => m.name)).toEqual(["state machines"]);
+    };
+
+    it("maps each combination of the old fill flags to a phase", () => {
+      const db = beforeStateMachines();
+      const combos: [number, number, number, string][] = [
+        [0, 0, 0, "idle"],
+        [1, 0, 0, "ambiguous"],
+        [1, 1, 0, "ambiguous"],
+        [1, 0, 1, "ambiguous"],
+        [1, 1, 1, "verify_queued"],
+        [0, 0, 1, "draft_recovery"],
+      ];
+      combos.forEach(([submitting, verifying, recovering], i) => {
+        const id = i + 1;
+        db.run(`INSERT INTO jobs (id, url, source, company, title, status) VALUES (${id}, 'https://a.example/${id}', 'test', 'Acme', 'J', 'needs_manual')`);
+        db.run("INSERT INTO fill_state (job_id, submitting, verifying, recovering, slot, manual_gate) VALUES (?, ?, ?, ?, ?, ?)", [
+          id,
+          submitting,
+          verifying,
+          recovering,
+          id,
+          `gate-${id}`,
+        ]);
+      });
+      upgrade(db);
+      expect(db.query("SELECT job_id, phase, slot, manual_gate FROM fill_state ORDER BY job_id").all()).toEqual(
+        combos.map(([, , , phase], i) => ({ job_id: i + 1, phase, slot: i + 1, manual_gate: `gate-${i + 1}` })),
+      );
+    });
+
+    it("holds the fill state to its rules and forgets it with the job", () => {
+      const db = memory();
+      migrate(db);
+      db.run("INSERT INTO jobs (id, url, source, company, title) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'One')");
+      db.run("INSERT INTO fill_state (job_id) VALUES (1)");
+      expect(db.query("SELECT phase FROM fill_state WHERE job_id = 1").all()).toEqual([{ phase: "idle" }]);
+      expect(() => db.run("UPDATE fill_state SET phase = 'bogus' WHERE job_id = 1")).toThrow(/CHECK/);
+      expect(() => db.run("UPDATE fill_state SET slot = -1 WHERE job_id = 1")).toThrow(/CHECK/);
+      expect(() => db.run("INSERT INTO fill_state (job_id) VALUES (1)")).toThrow(/UNIQUE/);
+      db.run("UPDATE fill_state SET phase = 'verifying' WHERE job_id = 1");
+      db.run("DELETE FROM jobs WHERE id = 1");
+      expect(db.query("SELECT * FROM fill_state").all()).toEqual([]);
+    });
+
+    it("derives the hold reason of held jobs from their note", () => {
+      const db = beforeStateMachines();
+      db.run(`INSERT INTO jobs (id, url, source, company, title, status, note) VALUES
+        ${jobRow(1, "held", "held back because it looked senior")},
+        ${jobRow(2, "held", "not a practice job: sells insurance")},
+        ${jobRow(3, "held", "needs your review: odd posting")},
+        ${jobRow(4, "held", "parked by hand")},
+        ${jobRow(5, "held")},
+        ${jobRow(6, "skipped", "held back because it looked senior")}`);
+      upgrade(db);
+      expect(db.query("SELECT id, hold_reason FROM jobs ORDER BY id").all()).toEqual([
+        { id: 1, hold_reason: "triage" },
+        { id: 2, hold_reason: "target" },
+        { id: 3, hold_reason: "review" },
+        { id: 4, hold_reason: "user" },
+        { id: 5, hold_reason: "user" },
+        { id: 6, hold_reason: null },
+      ]);
+      expect(() => db.run("UPDATE jobs SET hold_reason = 'whim' WHERE id = 1")).toThrow(/CHECK/);
+    });
+
+    it("moves feedback, locate tries and deferral out of kv into the job, and deletes the keys", () => {
+      const db = beforeStateMachines();
+      db.run(`INSERT INTO jobs (id, url, source, company, title, status, note) VALUES
+        ${jobRow(1, "triaged")}, ${jobRow(2, "approved")}, ${jobRow(3, "found")}, ${jobRow(4, "found")}`);
+      db.run(`INSERT INTO kv (key, value) VALUES
+        ('feedback.1', 'prefer remote'), ('feedback.2', 'stale words'),
+        ('locate.tries.3', '2'), ('auto.deferred.3', '2026-10-01T00:00:00Z'),
+        ('auto.deferred.4', '2026-10-02T00:00:00Z'),
+        ('feedback.99', 'for nobody'),
+        ('fill.nextAt', '1'), ('count.fill.2026-10-12', '7')`);
+      upgrade(db);
+      expect(db.query("SELECT id, feedback, hand_picked, locate_tries, deferred_at FROM jobs ORDER BY id").all()).toEqual([
+        { id: 1, feedback: "prefer remote", hand_picked: 1, locate_tries: 0, deferred_at: null },
+        { id: 2, feedback: null, hand_picked: 1, locate_tries: 0, deferred_at: null },
+        { id: 3, feedback: null, hand_picked: 0, locate_tries: 2, deferred_at: "2026-10-01T00:00:00Z" },
+        { id: 4, feedback: null, hand_picked: 0, locate_tries: 0, deferred_at: "2026-10-02T00:00:00Z" },
+      ]);
+      expect(db.query("SELECT key FROM kv ORDER BY key").all()).toEqual([{ key: "count.fill.2026-10-12" }, { key: "fill.nextAt" }]);
+    });
+
+    it("links each blocker to the gate raised at the same moment, and to none when there was none", () => {
+      const db = beforeStateMachines();
+      db.run(
+        `INSERT INTO jobs (id, url, source, company, title, status) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'One', 'needs_input'), (2, 'https://a.example/2', 'test', 'Acme', 'Two', 'needs_input')`,
+      );
+      db.run(`INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, created_at) VALUES
+        ('far', 1, 'question', 'job:1:a', 'a', 'Acme', 't', '', '[]', 'closed', '2026-10-01 09:00:00'),
+        ('near', 1, 'question', 'job:1:b', 'b', 'Acme', 't', '', '[]', 'closed', '2026-10-01 10:00:20'),
+        ('other', 2, 'question', 'job:2:a', 'a', 'Acme', 't', '', '[]', 'open', '2026-10-01 10:00:00')`);
+      db.run(`INSERT INTO blockers (id, job_id, cause, detail, at) VALUES
+        (1, 1, 'captcha', 'x', '2026-10-01 10:00:00'),
+        (2, 1, 'login', 'y', '2026-10-01 11:30:00'),
+        (3, 2, 'login', 'z', '2026-10-01 10:00:30')`);
+      upgrade(db);
+      expect(db.query("SELECT id, gate_id FROM blockers ORDER BY id").all()).toEqual([
+        { id: 1, gate_id: "near" },
+        { id: 2, gate_id: null },
+        { id: 3, gate_id: "other" },
+      ]);
+    });
+
+    it("keeps digest deliveries as they were, counting each as one attempt, and allows abandoning", () => {
+      const db = beforeStateMachines();
+      const insert = (id: string, state: string) =>
+        db.run(
+          "INSERT INTO question_digest_deliveries (id, recipient, fingerprints, group_count, subject, body, state, created_at, attempt_at, sent_at, gmail_id, error) VALUES (?, 'me@example.com', '[\"f\"]', 1, 's', 'b', ?, 'c', 'a', NULL, NULL, 'oops')",
+          [id, state],
+        );
+      insert("old-sent", "sent");
+      insert("old-failed", "failed");
+      upgrade(db);
+      expect(db.query("SELECT id, state, attempts, error, recipient, attempt_at FROM question_digest_deliveries ORDER BY id").all()).toEqual([
+        { id: "old-failed", state: "failed", attempts: 1, error: "oops", recipient: "me@example.com", attempt_at: "a" },
+        { id: "old-sent", state: "sent", attempts: 1, error: "oops", recipient: "me@example.com", attempt_at: "a" },
+      ]);
+      db.run("UPDATE question_digest_deliveries SET state = 'abandoned' WHERE id = 'old-failed'");
+      insert("next", "sending");
+      expect(() => insert("another", "uncertain")).toThrow(/UNIQUE/);
+      expect(() => db.run("UPDATE question_digest_deliveries SET state = 'lost' WHERE id = 'next'")).toThrow(/CHECK/);
+    });
+
+    it("accepts exactly the statuses the app knows on insert and update", () => {
+      const db = memory();
+      migrate(db);
+      const insert = (id: number, status: string) =>
+        db.run("INSERT INTO jobs (id, url, source, company, title, status) VALUES (?, ?, 'test', 'Acme', 'T', ?)", [id, `https://a.example/${id}`, status]);
+      STATUSES.forEach((status, i) => insert(i + 1, status));
+      expect(db.query<{ n: number }, []>("SELECT count(*) AS n FROM jobs").get()?.n).toBe(STATUSES.length);
+      for (const status of STATUSES) db.run("UPDATE jobs SET status = ? WHERE id = 1", [status]);
+      expect(() => insert(1000, "bogus")).toThrow(/invalid job status/);
+      expect(() => insert(1001, "")).toThrow(/invalid job status/);
+      expect(() => db.run("UPDATE jobs SET status = 'bogus' WHERE id = 1")).toThrow(/invalid job status/);
+      expect(() => db.run("UPDATE jobs SET status = NULL WHERE id = 1")).toThrow();
+      expect(db.query<{ n: number }, []>("SELECT count(*) AS n FROM jobs").get()?.n).toBe(STATUSES.length);
     });
   });
 
@@ -371,7 +524,7 @@ describe("schema migrations", () => {
       expect(schemaVersion(copy)).toBe(1);
       expect(tableNames(copy)).not.toContain("fill_state");
       expect(copy.query("SELECT key, value FROM kv").all()).toEqual([{ key: "fill.submitting.7", value: "1" }]);
-      expect(old.query("SELECT submitting FROM fill_state WHERE job_id = 7").all()).toEqual([{ submitting: 1 }]);
+      expect(old.query("SELECT phase FROM fill_state WHERE job_id = 7").all()).toEqual([{ phase: "ambiguous" }]);
       for (let version = 2; version < SCHEMA_VERSION; version++) expect(existsSync(backupPath(path, version))).toBe(false);
     });
 

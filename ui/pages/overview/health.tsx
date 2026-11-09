@@ -21,6 +21,7 @@ const DIGEST: Record<string, readonly [string, Tone]> = {
   sent: ["Sent", "success"],
   uncertain: ["Checking", "warning"],
   failed: ["Failed", "danger"],
+  abandoned: ["Gave up", "danger"],
 };
 
 function nextDigest(d: DigestStatus) {

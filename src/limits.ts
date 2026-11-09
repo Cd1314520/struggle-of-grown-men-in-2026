@@ -15,6 +15,7 @@ export const countOne = (what: Counted) => kvSet(`count.${what}.${today()}`, Str
 // worker that completes ends it. When every model and account a stage could move to is out
 // (src/providers.ts), the pause lasts until the first of them comes back instead.
 const BACKOFF_MAX_MINUTES = 60;
+const BACKOFF_FORGET_MS = 6 * 60 * 60_000;
 export const backoffUntil = () => Number(kvGet("backoff.until") ?? 0);
 export const backedOff = () => Date.now() < backoffUntil();
 // Returns when the pause ends, or null when one was already running. `until`: when the first provider
@@ -26,7 +27,8 @@ export function backOff(until?: number): number | null {
     kvSet("backoff.until", String(until));
     return until;
   }
-  const level = Number(kvGet("backoff.level") ?? 0) + 1;
+  const quiet = Date.now() - backoffUntil() > BACKOFF_FORGET_MS;
+  const level = (quiet ? 0 : Number(kvGet("backoff.level") ?? 0)) + 1;
   const end = Date.now() + Math.min(2 ** level, BACKOFF_MAX_MINUTES) * 60_000;
   kvSet("backoff.level", String(level));
   kvSet("backoff.until", String(end));
@@ -34,6 +36,7 @@ export function backOff(until?: number): number | null {
 }
 export function clearBackoff() {
   if (kvGet("backoff.level") !== null) kvDelete("backoff.level");
+  if (kvGet("backoff.until") !== null) kvDelete("backoff.until");
 }
 
 // Gives back a count for work the provider refused before doing it.

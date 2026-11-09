@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 const scenario = process.argv[2];
 const { config, PROFILE } = await import("../../src/config");
-const { db, getJob, statusHistory, updateJob } = await import("../../src/db");
+const { db, getJob, statusHistory } = await import("../../src/db");
 const { createHandler } = await import("../../src/server");
 const { Scheduler, reviewStandingApprovals } = await import("../../src/scheduler");
 
@@ -99,6 +99,24 @@ if (scenario === "action-guards") {
   const skipped = job("skipped");
   assert.equal((await act(skipped, "retry")).status, 200);
   assert.equal(statusOf(skipped), "triaged");
+  assert.equal(getJob(skipped)?.hand_picked, 0, "retrying a skipped job does not hand-pick it");
+
+  const chosen = job("held");
+  db.run("UPDATE jobs SET locate_tries = 3, hold_reason = 'target' WHERE id = ?", [chosen]);
+  assert.equal((await act(chosen, "retry")).status, 200);
+  assert.equal(statusOf(chosen), "triaged");
+  assert.equal(getJob(chosen)?.hand_picked, 1);
+  assert.match(getJob(chosen)?.feedback ?? "", /chose to apply/);
+  assert.equal(getJob(chosen)?.locate_tries, 0);
+  assert.equal(getJob(chosen)?.hold_reason, null);
+
+  const redone = job("awaiting_approval");
+  assert.equal((await act(redone, "redo", "lead with the data work")).status, 200);
+  assert.equal(getJob(redone)?.feedback, "lead with the data work");
+
+  const kept = job("awaiting_approval");
+  assert.equal((await act(kept, "hold", "later")).status, 200);
+  assert.equal(getJob(kept)?.hold_reason, "user");
 } else if (scenario === "other-sites") {
   const refusedUnchanged = async (headers: Record<string, string>, base = BASE) => {
     const id = job("awaiting_approval");
@@ -119,7 +137,7 @@ if (scenario === "action-guards") {
     const id = job("awaiting_approval");
     assert.equal((await act(id, "approve", "", headers, base)).status, 200, JSON.stringify({ headers, base }));
     assert.equal(statusOf(id), "approved");
-    updateJob(id, { status: "rejected" });
+    db.run("UPDATE jobs SET status = 'rejected' WHERE id = ?", [id]);
   };
   await allowed({ origin: BASE, "sec-fetch-site": "same-origin" });
   await allowed({ origin: "http://localhost:9999", "sec-fetch-site": "same-origin" }, "http://localhost:9999");

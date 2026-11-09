@@ -1,6 +1,7 @@
 import type { Status } from "../../../src/status";
 import { cn } from "../../lib/cn";
 import { STATUS, type Tone } from "../../lib/labels";
+import { IN_PROGRESS } from "../../pages/job/model";
 
 const DOT: Record<Tone, string> = {
   neutral: "bg-fg-subtle",
@@ -31,5 +32,5 @@ export function StatusLabel({ tone, label, pulse, className }: { tone: Tone; lab
 
 export function JobStatus({ status, label, className }: { status: Status; label?: string | undefined; className?: string }) {
   const [text, tone] = STATUS[status];
-  return <StatusLabel tone={tone} label={label ?? text} pulse={status === "filling" || status === "prepping"} className={className} />;
+  return <StatusLabel tone={tone} label={label ?? text} pulse={IN_PROGRESS.includes(status)} className={className} />;
 }

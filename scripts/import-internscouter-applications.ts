@@ -9,7 +9,7 @@
 //   bun scripts/import-internscouter-applications.ts E:\Job_Search [--apply]
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { insertJob, logEvent, updateJob } from "../src/db";
+import { insertJob, logEvent, moveJob } from "../src/db";
 import { to } from "../src/status";
 
 interface Row {
@@ -55,12 +55,12 @@ for (const [key, st] of Object.entries(statuses)) {
     continue;
   }
   const note = `Imported from Internscouter (${key}): ${st.Status}${st["Applied On"] ? ` on ${st["Applied On"]}` : ""}${st.Notes ? `; ${st.Notes}` : ""}`;
-  if (kind === "skipped") updateJob(id, to.skipped(note));
+  if (kind === "skipped") moveJob(id, "found", to.skipped(note));
   else {
     // Sent on the day Internscouter recorded, not today.
     const sentAt = st["Applied On"] ? new Date(`${st["Applied On"]}T12:00:00Z`).toISOString() : new Date().toISOString();
-    updateJob(id, { ...to.submitted(note), submitted_at: sentAt });
-    if (kind === "rejected") updateJob(id, to.outcome("rejected_by_company", note));
+    moveJob(id, "found", { ...to.submitted(note), submitted_at: sentAt });
+    if (kind === "rejected") moveJob(id, "submitted", to.outcome("rejected_by_company", note));
   }
   logEvent("system", note, id, "import");
   count(kind);

@@ -88,7 +88,13 @@ export async function checkpointFrom(rt: FillRuntime, session: FillSession, args
   return checkpoint;
 }
 
-export async function parkFill(rt: FillRuntime, session: FillSession, input: GateInput, checkpoint = session.checkpoint): Promise<string> {
+export async function parkFill(
+  rt: FillRuntime,
+  session: FillSession,
+  input: GateInput,
+  checkpoint = session.checkpoint,
+  blocker: { cause: BlockerCause; detail: string } | null = null,
+): Promise<string> {
   if (!ownsFill(rt, session)) throw new Error("stale fill worker");
   const shot = checkpoint.tabId ? await rt.browser.screenshot(session.slot, checkpoint.tabId).catch(() => null) : null;
   if (!ownsFill(rt, session)) throw new Error("stale fill worker");
@@ -104,7 +110,8 @@ export async function parkFill(rt: FillRuntime, session: FillSession, input: Gat
       context: input.context || input.text,
     };
   }
-  parkGate(session.jobId, { ...input, shot: shot ? Date.now() : null }, checkpoint);
+  const gate = parkGate(session.jobId, { ...input, shot: shot ? Date.now() : null }, checkpoint);
+  if (blocker) recordBlocker(session.jobId, blocker.cause, blocker.detail, gate.id);
   endSession(session, `parked on ${input.kind} gate`);
   logEvent("gate", `${input.kind}: ${input.text}`, session.jobId, "fill");
   await session.handle?.done;
@@ -115,15 +122,14 @@ export async function confirmSubmission(rt: FillRuntime, session: FillSession, s
   const jobId = session.jobId;
   const job = getJob(jobId);
   if (!job || !ownsFill(rt, session)) return "ERROR: no current fill worker.";
-  if (isSubmitting(jobId))
-    return parkFill(rt, session, { kind: "submission_ambiguous", text: "Submission already authorized; inspect before any further submit attempt." });
   try {
     if (!job.resume_sha || frozenResume(jobId, job.resume_sha).sha !== session.checkpoint.resumeSha) throw new Error("frozen resume identity changed");
   } catch (err) {
     return parkFill(rt, session, { kind: "manual", text: `Frozen resume verification failed; do not submit. ${errorMessage(err)}` });
   }
   if (!confirmsSubmit(job) || consumeSubmitApproval(jobId, summary)) {
-    authorizeSubmit(jobId);
+    if (!authorizeSubmit(jobId))
+      return parkFill(rt, session, { kind: "submission_ambiguous", text: "Submission already authorized; inspect before any further submit attempt." });
     logEvent("auto", `Final submission authorized after re-observation: ${summary}`, jobId, "fill");
     return "APPROVED. Click the final submit button now and see the application through to the site's confirmation. Submit again when the site says it is not submitted yet; do not when you cannot tell.";
   }
@@ -132,9 +138,8 @@ export async function confirmSubmission(rt: FillRuntime, session: FillSession, s
 
 export function stopFailedFill(rt: FillRuntime, session: FillSession, message: string, cause: BlockerCause = "unknown") {
   if (!ownsFill(rt, session)) return;
-  recordBlocker(session.jobId, cause, message);
   const ambiguous = isSubmitting(session.jobId);
-  parkGate(
+  const gate = parkGate(
     session.jobId,
     {
       kind: ambiguous ? "submission_ambiguous" : "manual",
@@ -144,5 +149,6 @@ export function stopFailedFill(rt: FillRuntime, session: FillSession, message: s
     },
     session.checkpoint,
   );
+  recordBlocker(session.jobId, cause, message, gate.id);
   endSession(session, "fill stopped; parked for manual recovery");
 }

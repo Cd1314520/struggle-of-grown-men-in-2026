@@ -15,7 +15,7 @@ import {
   jobEvents,
   jobSources,
   kvGet,
-  kvSet,
+  moveJob,
   logEvent,
   onChange,
   openedAt,
@@ -25,7 +25,6 @@ import {
   siblingJobs,
   statusCounts,
   statusHistory,
-  updateJob,
   UNTITLED,
   type Job,
 } from "./db";
@@ -46,8 +45,8 @@ import { answerGate, getOpenGate, listQuestionGroups, readCheckpoint, resolveAmb
 import { Scheduler } from "./scheduler";
 import { digestStatus, sendQuestionDigest } from "./digest";
 import { errorMessage } from "./errors";
-import { isSubmitting, recoveryMode } from "./fill-state";
-import { RETRYABLE, to, wasSent } from "./status";
+import { isAmbiguous, recoveryMode } from "./fill-state";
+import { RETRYABLE, to, wasSent, type Status } from "./status";
 import { interviewPrep } from "./interview";
 import { addStep, changeStep, jobSteps, nextStepOf, nextSteps, recordOutcome, removeStep, STEP_KINDS, stepOf } from "./steps";
 import { serveUi } from "./ui";
@@ -194,7 +193,7 @@ function jobDetail(scheduler: Scheduler, job: Job): JobDetail {
     checkpoint: readCheckpoint(job.id),
     browserReserved: slot !== null,
     manualBrowserReserved: scheduler.manualBrowserReserved(job.id),
-    submissionAmbiguous: gate?.kind === "submission_ambiguous" || (job.status !== "filling" && isSubmitting(job.id)),
+    submissionAmbiguous: isAmbiguous(job.id),
     recoveryMode: recoveryMode(job.id),
     interviewPrep: interviewPrep(job, steps),
     vncUrl: config.chrome.vncPort && slot !== null ? vncUrl(slot) : null,
@@ -205,47 +204,78 @@ function jobDetail(scheduler: Scheduler, job: Job): JobDetail {
   };
 }
 
+const CHANGED = "the job changed; reload and try again";
+const UNSENT_TO_REJECTED: readonly Status[] = [
+  "found",
+  "locating",
+  "triaged",
+  "prepping",
+  "awaiting_approval",
+  "approved",
+  "filling",
+  "needs_input",
+  "awaiting_submit",
+  "needs_manual",
+  "held",
+  "skipped",
+  "failed",
+];
+const UNSENT_TO_HELD: readonly Status[] = [
+  "found",
+  "locating",
+  "triaged",
+  "prepping",
+  "awaiting_approval",
+  "approved",
+  "filling",
+  "needs_input",
+  "awaiting_submit",
+  "needs_manual",
+  "skipped",
+  "failed",
+];
+const UNSENT_TO_SUBMITTED: readonly Status[] = [...UNSENT_TO_REJECTED, "rejected"];
+
 function jobAction(scheduler: Scheduler, job: Job, action: string, text: string) {
-  const gate = getOpenGate(job.id);
-  const ambiguous = gate?.kind === "submission_ambiguous" || isSubmitting(job.id);
+  const ambiguous = isAmbiguous(job.id);
   if (ambiguous && !["reject", "mark_submitted", "confirmed_not_submitted"].includes(action))
     return "submission may already have occurred; inspect it, then mark submitted, confirm not submitted, or reject";
   switch (action) {
     case "approve":
       if (job.status !== "awaiting_approval") return "not awaiting approval";
-      updateJob(job.id, to.approved("user"));
+      if (!moveJob(job.id, "awaiting_approval", to.approved("user"))) return CHANGED;
       break;
     case "reject":
       if (job.status === "rejected") return "already rejected";
       if (wasSent(job)) return "this application was already sent; it cannot be rejected here";
       scheduler.abortFill(job.id, "application rejected by you");
-      updateJob(job.id, to.rejected(text || null));
+      if (!moveJob(job.id, UNSENT_TO_REJECTED, to.rejected(text || null))) return CHANGED;
       break;
     case "hold":
       if (job.status === "held") return "already held";
       if (job.status === "rejected") return "rejected; reconsider it first";
       if (wasSent(job)) return "this application was already sent; it cannot be held";
       scheduler.abortFill(job.id, "application held by you");
-      updateJob(job.id, to.held(text || "held by you"));
+      if (!moveJob(job.id, UNSENT_TO_HELD, to.held(text || "held by you", "user"))) return CHANGED;
       break;
     case "redo":
       if (job.status !== "awaiting_approval") return "the resume can only be changed while the job is awaiting approval";
       if (job.resume_sha) return "this application has already started with its frozen resume; the resume can no longer be changed";
       if (!text) return "feedback text required";
       scheduler.abortFill(job.id, "resume redo requested by you");
-      kvSet(`feedback.${job.id}`, text);
-      updateJob(job.id, to.triaged("redo requested"));
+      if (!moveJob(job.id, "awaiting_approval", { ...to.triaged("redo requested"), feedback: text, hand_picked: 1 })) return CHANGED;
       break;
-    case "retry":
+    case "retry": {
       if (!RETRYABLE.includes(job.status)) return "nothing to retry";
-      if (job.status === "held") kvSet(`feedback.${job.id}`, "The candidate chose to apply to this job now. Do not hold it back.");
-      kvSet(`locate.tries.${job.id}`, "0");
-      updateJob(job.id, existsSync(workingPdf(job.id)) ? to.awaitingApproval(null) : isBoardUrl(job.url) ? to.locating() : to.triaged());
+      const next = existsSync(workingPdf(job.id)) ? to.awaitingApproval(null) : isBoardUrl(job.url) ? to.locating() : to.triaged();
+      const chosen = job.status === "held" ? { hand_picked: 1 as const, feedback: "The candidate chose to apply to this job now. Do not hold it back." } : {};
+      if (!moveJob(job.id, job.status === "held" ? "held" : RETRYABLE, { ...next, ...chosen, locate_tries: 0 })) return CHANGED;
       break;
+    }
     case "mark_submitted":
       if (wasSent(job)) return "already recorded as submitted";
       scheduler.abortFill(job.id, "application marked submitted by you");
-      updateJob(job.id, to.submitted(text || "submitted manually"));
+      if (!moveJob(job.id, UNSENT_TO_SUBMITTED, to.submitted(text || "submitted manually"))) return CHANGED;
       break;
     case "mark_offer":
     case "mark_declined":
@@ -253,12 +283,12 @@ function jobAction(scheduler: Scheduler, job: Job, action: string, text: string)
       if (!wasSent(job) || job.status === "rejected") return "only an application that was sent can have an outcome";
       const outcome = action === "mark_offer" ? "offer" : action === "mark_declined" ? "rejected_by_company" : "withdrawn";
       if (job.status === outcome) return "already recorded";
-      recordOutcome(job.id, outcome, text || (outcome === "withdrawn" ? "withdrawn by you" : "marked by you"));
+      if (!recordOutcome(job.id, outcome, text || (outcome === "withdrawn" ? "withdrawn by you" : "marked by you"))) return CHANGED;
       break;
     }
     case "reopen_application":
       if (!["offer", "rejected_by_company", "withdrawn"].includes(job.status)) return "this application has no outcome to undo";
-      recordOutcome(job.id, "reopen", text || "reopened by you");
+      if (!recordOutcome(job.id, "reopen", text || "reopened by you")) return CHANGED;
       break;
     case "confirmed_not_submitted":
       if (!ambiguous) return "submission is not ambiguous";
@@ -735,6 +765,7 @@ export function main() {
   });
   for (const sig of ["SIGINT", "SIGTERM"] as const)
     process.on(sig, () => {
+      scheduler.stop();
       killAllWorkers();
       process.exit(0);
     });

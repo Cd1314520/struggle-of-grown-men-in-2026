@@ -143,9 +143,18 @@ describe("why a job was set aside", () => {
     at: "2026-10-24 10:00:00",
   });
   it("names it as the Archive does, not by the raw note", () => {
-    expect(setAsideOf({ note: "Cleared: site_down (see Blockers)", history: [] })?.label).toBe("Site was down");
+    expect(
+      setAsideOf({
+        note: "not a practice job: the employer is on your frontier list; held without a full assessment until it is released",
+        history: [],
+        hold_reason: "target",
+      })?.label,
+    ).toBe("Frontier employer");
+  });
+  it("names a triage hold by its hold reason, whatever the note says", () => {
+    expect(setAsideOf({ note: "held back at triage", history: [], hold_reason: "triage" })?.label).toBe("Held at triage");
   });
   it("falls back to where the owner stopped it when there is no note", () => {
-    expect(setAsideOf({ note: null, history: [change("awaiting_approval")] })?.label).toBe("Turned down at review");
+    expect(setAsideOf({ note: null, history: [change("awaiting_approval")], hold_reason: null })?.label).toBe("Turned down at review");
   });
 });

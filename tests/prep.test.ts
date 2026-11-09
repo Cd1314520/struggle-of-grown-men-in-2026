@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { config } from "../src/config";
-import { getJob, insertJob, kvSet, updateJob } from "../src/db";
+import { db, getJob, insertJob, moveJob, updateJob } from "../src/db";
 import { countOne, usedToday } from "../src/limits";
 import type { RunWorker, ToolArgs, WorkerOptions } from "../src/worker";
 import { prep } from "../src/prep";
@@ -71,7 +71,7 @@ function preppingJob(company: string, description: string | null = "A posting lo
   const id = insertJob({ url: `https://example.com/jobs/${++n}`, source: "greenhouse", company, title: `Engineer ${n}`, location: "Austin, TX", description });
   if (!id) throw new Error("job not inserted");
   countOne("prep");
-  updateJob(id, to.prepping());
+  db.run("UPDATE jobs SET status = 'prepping' WHERE id = ?", [id]);
   const job = getJob(id);
   if (!job) throw new Error("job not found");
   return job;
@@ -82,7 +82,7 @@ describe("prep before the full assessment", () => {
     config.approval = "auto";
     config.autoApply = { ...config.autoApply, perEmployer: 1 };
     const sent = preppingJob("Used Up Co");
-    updateJob(sent.id, { status: "submitted" });
+    db.run("UPDATE jobs SET status = 'submitted' WHERE id = ?", [sent.id]);
     const job = preppingJob("Used Up Co");
     const before = usedToday("prep");
     const { run, started } = fakeRun();
@@ -158,13 +158,27 @@ describe("prep before the full assessment", () => {
     expect(started).toEqual(["screen"]);
     expect(getJob(job.id)?.status).toBe("triaged");
   });
+
+  it("drops its outcome when the job was taken out of prep while the worker ran", async () => {
+    screenOn();
+    config.targets.holdBack = true;
+    const job = preppingJob("Withdrawn Co");
+    const { run, started } = fakeRun(report => {
+      moveJob(job.id, "prepping", { status: "triaged", note: "released by hand" });
+      report({ answers: screenAnswers({ "practice.not_senior": "no", "real.not_senior": "no" }) });
+    });
+    await prep(job, run);
+    expect(started).toEqual(["screen"]);
+    expect(getJob(job.id)).toMatchObject({ status: "triaged", note: "released by hand" });
+  });
 });
 
 // A job at `company` that a full assessment judged to be `employerType`.
 function assessedJob(company: string, employerType: string) {
   const job = preppingJob(company);
   const practice = { version: 3, employerType, employerEvidence: `${company} evidence`, agentNative: "unclear", agentNativeEvidence: "", listed: null };
-  updateJob(job.id, { ...to.held("assessed"), checklist: "[]", practice_assessment: JSON.stringify(practice) });
+  if (!moveJob(job.id, "prepping", { ...to.held("assessed", "target"), checklist: "[]", practice_assessment: JSON.stringify(practice) }))
+    throw new Error("job not held");
   return job;
 }
 
@@ -175,6 +189,7 @@ describe("prep for an employer judged before", () => {
     const earlier = assessedJob("Scaled Co", "tech_scaled");
     assessedJob("Scaled Co", "startup");
     const job = preppingJob("Scaled Co");
+    updateJob(job.id, { feedback: "worth a look" });
     const before = usedToday("prep");
     const { run, started, prompts } = fakeRun(report => report({ answers: screenAnswers({}, screenChecklistText("frontier")) }));
     await prep(job, run);
@@ -185,6 +200,7 @@ describe("prep for an employer judged before", () => {
     // Judged before targets were described in words: the default description is that judgment.
     expect(held?.note).toContain(`a target employer, as judged on job #${earlier.id} (tech company at scale: Scaled Co evidence)`);
     expect(JSON.parse(held?.practice_assessment ?? "null")).toMatchObject({ target: "yes" });
+    expect(held).toMatchObject({ hold_reason: "target", feedback: null });
     expect(usedToday("prep")).toBe(before - 1);
   });
 
@@ -212,9 +228,9 @@ describe("prep for an employer judged before", () => {
     config.targets.holdBack = true;
     assessedJob("Asked For Co", "tech_scaled");
     const job = preppingJob("Asked For Co");
-    kvSet(`feedback.${job.id}`, "apply to this one");
+    updateJob(job.id, { feedback: "apply to this one", hand_picked: 1 });
     const { run, started } = fakeRun();
-    await prep(job, run);
+    await prep(getJob(job.id) ?? job, run);
     expect(started).toEqual(["prep"]);
   });
 

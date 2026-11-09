@@ -2,7 +2,7 @@
 import { boardHost, feedNames, fetchCompany, fetchDescription, fetchFeed, loadCompanies, watchBoardOf, type Company } from "./ats";
 import { boardMinutes, boardNames, fetchBoard, isBoardUrl } from "./boards";
 import { config, readProfile } from "./config";
-import { appliedLocation, insertJob, jobsByStatus, kvGet, kvSet, logEvent, updateJob, type Job } from "./db";
+import { appliedLocation, insertJob, jobsByStatus, kvSet, logEvent, moveJob, type Job } from "./db";
 import { employersText } from "./employers";
 import { errorMessage } from "./errors";
 import { due } from "./limits";
@@ -90,11 +90,9 @@ function screen(batch: Job[]): Job[] {
   const left: Job[] = [];
   let dropped = 0;
   for (const job of batch) {
-    const reason = kvGet(`feedback.${job.id}`) ? null : screenOut(job.title, appliedLocation(job), job.url, job.description);
-    if (reason) {
-      updateJob(job.id, to.skipped(reason));
-      dropped++;
-    } else left.push(job);
+    const reason = job.hand_picked === 1 ? null : screenOut(job.title, appliedLocation(job), job.url, job.description);
+    if (!reason) left.push(job);
+    else if (moveJob(job.id, "found", to.skipped(reason))) dropped++;
   }
   if (dropped)
     logEvent(
@@ -109,7 +107,7 @@ const hoursSince = (at: string) => (Date.now() - Date.parse(`${at.replace(" ", "
 
 // Whether the postings left after the screen are worth a call now: a full batch, one that has waited
 // long enough, or one with a job picked by hand in it.
-export function triageDue(waiting: Job[], hasFeedback = (job: Job) => !!kvGet(`feedback.${job.id}`)) {
+export function triageDue(waiting: Job[], hasFeedback = (job: Job) => job.hand_picked === 1) {
   if (!waiting.length) return false;
   if (waiting.length >= triageBatch()) return true;
   return waiting.some(j => hoursSince(j.found_at) >= triageWaitHours() || hasFeedback(j));
@@ -163,13 +161,13 @@ async function triage(run: RunWorker) {
     const keep = new Set<number>(config.targets.holdBack ? kept : [...kept, ...held]);
     const hold = new Set<number>(config.targets.holdBack ? held : []);
     for (const j of batch) {
-      if (keep.has(j.id) && isBoardUrl(j.url)) updateJob(j.id, to.locating());
+      if (keep.has(j.id) && isBoardUrl(j.url)) moveJob(j.id, "found", to.locating());
       else if (keep.has(j.id)) {
         // Boards that list titles only: get the body now that the posting is worth reading.
         const description = j.description ? undefined : await fetchDescription(j.url);
-        updateJob(j.id, { ...to.triaged(), ...(description ? { description } : {}) });
-      } else if (hold.has(j.id)) updateJob(j.id, to.held("held back at triage"));
-      else updateJob(j.id, to.skipped("dropped at triage"));
+        moveJob(j.id, "found", { ...to.triaged(), ...(description ? { description } : {}) });
+      } else if (hold.has(j.id)) moveJob(j.id, "found", to.held("held back at triage", "triage"));
+      else moveJob(j.id, "found", to.skipped("dropped at triage"));
     }
     logEvent("system", `Triage: kept ${keep.size}, held ${hold.size} of ${batch.length}`);
   }

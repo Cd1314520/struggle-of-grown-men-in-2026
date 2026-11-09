@@ -170,7 +170,7 @@ describe("job queries", () => {
     for (let next; (next = nextToPrep());) {
       order.push(next.id);
       assert.equal(next.title, store.getJob(next.id).title, "the whole job");
-      store.updateJob(next.id, { status: "skipped" });
+      store.moveJob(next.id, "triaged", { status: "rejected" });
     }
     assert.deepEqual(order, ${JSON.stringify(expected)});`;
     scenario(body([1, 4, 2, 3]));
@@ -254,9 +254,9 @@ describe("job queries", () => {
 describe("job writes", () => {
   it("writeJob stamps updated_at and stays silent; updateJob also notifies", () => {
     scenario(`
-    job(1, { updated_at: "2020-01-01 00:00:00", note: "old", pending: "{}" });
+    job(1, { status: "approved", updated_at: "2020-01-01 00:00:00", note: "old", pending: "{}" });
 
-    store.writeJob(1, { status: "approved", note: null, pending: undefined, score: 70 });
+    store.writeJob(1, { note: null, pending: undefined, score: 70 });
     let row = store.getJob(1);
     assert.deepEqual([row.status, row.note, row.pending, row.score], ["approved", null, null, 70]);
     assert.notEqual(row.updated_at, "2020-01-01 00:00:00");
@@ -269,17 +269,30 @@ describe("job writes", () => {
     assert.equal(store.getJob(1).updated_at, "2020-01-01 00:00:00");
     assert.deepEqual(changes, []);
 
-    store.updateJob(1, { status: "filling" });
-    assert.equal(store.getJob(1).status, "filling");
+    store.updateJob(1, { score: 71 });
+    assert.equal(store.getJob(1).score, 71);
     assert.notEqual(store.getJob(1).updated_at, "2020-01-01 00:00:00");
     assert.deepEqual(changes, [{ type: "job", jobId: 1 }]);
+  `);
+  });
+
+  it("never changes a status, through either write", () => {
+    scenario(`
+    job(1, { status: "triaged", note: "kept" });
+    for (const write of [store.writeJob, store.updateJob]) {
+      assert.throws(() => write(1, { status: "prepping" }), /jobs.status can only change through moveJob/);
+      assert.throws(() => write(1, { status: "prepping", note: "changed" }), /jobs.status can only change through moveJob/);
+    }
+    assert.deepEqual([store.getJob(1).status, store.getJob(1).note], ["triaged", "kept"]);
+    assert.deepEqual(store.statusHistory(1), []);
+    assert.deepEqual(changes, []);
   `);
   });
 
   it("only ever writes known columns", () => {
     scenario(`
     job(1, { note: "kept" }); job(2, { note: "kept" });
-    for (const fields of [{ id: 5 }, { updated_at: "x" }, { nope: 1 }, { "note = 'pwned' --": "x" }, { status: "approved", "note = 'pwned' WHERE 1 = 1 --": "x" }, { toString: "x" }]) {
+    for (const fields of [{ id: 5 }, { updated_at: "x" }, { nope: 1 }, { "note = 'pwned' --": "x" }, { score: 1, "note = 'pwned' WHERE 1 = 1 --": "x" }, { toString: "x" }]) {
       assert.throws(() => store.writeJob(1, fields), /Not a writable jobs column/);
       assert.throws(() => store.updateJob(1, fields), /Not a writable jobs column/);
     }
@@ -287,30 +300,144 @@ describe("job writes", () => {
     assert.deepEqual(changes, []);
 
     // Every column of the table except the two the writer owns is writable, and nothing else is.
-    const columns = db.query("SELECT name FROM pragma_table_info('jobs')").all().map(c => c.name).filter(name => name !== "id" && name !== "updated_at");
-    for (const column of columns) store.writeJob(2, { [column]: column === "score" ? 1 : column === "status" ? "held" : column + "-value" });
+    const fixed = { score: 1, hold_reason: "user", hand_picked: 1, locate_tries: 2 };
+    const value = column => column in fixed ? fixed[column] : column + "-value";
+    const columns = db.query("SELECT name FROM pragma_table_info('jobs')").all().map(c => c.name).filter(name => !["id", "updated_at", "status"].includes(name));
+    for (const column of columns) store.writeJob(2, { [column]: value(column) });
     const written = store.getJob(2);
-    for (const column of columns) assert.equal(written[column], column === "score" ? 1 : column === "status" ? "held" : column + "-value", column);
+    for (const column of columns) assert.equal(written[column], value(column), column);
+    assert.equal(written.status, "found");
   `);
   });
 
   it("requeues interrupted prep and releases held jobs in bulk", () => {
     scenario(`
     job(1, { status: "prepping", updated_at: "2020-01-01 00:00:00" }); job(2, { status: "prepping" }); job(3, { status: "triaged" });
-    job(4, { status: "held", note: "set aside", updated_at: "2020-01-01 00:00:00" }); job(5, { status: "held" }); job(6, { status: "skipped", note: "no" });
+    job(4, { status: "held", hold_reason: "user", note: "set aside", updated_at: "2020-01-01 00:00:00" }); job(5, { status: "held", hold_reason: "review" }); job(6, { status: "skipped", note: "no" });
 
     assert.equal(store.requeueInterruptedPrep(), 2);
     assert.equal(store.requeueInterruptedPrep(), 0);
     assert.deepEqual(ids(store.jobsByStatus("triaged")), [1, 2, 3]);
     assert.equal(store.getJob(1).updated_at, "2020-01-01 00:00:00");
+    assert.deepEqual(changes, []);
 
     assert.equal(store.releaseHeldJobs(), 2);
     assert.equal(store.releaseHeldJobs(), 0);
     assert.deepEqual(ids(store.jobsByStatus("found")), [4, 5]);
-    assert.equal(store.getJob(4).note, null);
+    assert.deepEqual([store.getJob(4).note, store.getJob(4).hold_reason, store.getJob(5).hold_reason], [null, null, null]);
     assert.notEqual(store.getJob(4).updated_at, "2020-01-01 00:00:00");
     assert.deepEqual([store.getJob(6).status, store.getJob(6).note], ["skipped", "no"]);
     assert.deepEqual(changes, []);
+  `);
+  });
+
+  it("releases only the holds that assessment placed", () => {
+    scenario(`
+    job(1, { status: "held", hold_reason: "triage", note: "held back for now" }); job(2, { status: "held", hold_reason: "target", note: "not a practice job: x" });
+    job(3, { status: "held", hold_reason: "review", note: "needs your review: x" }); job(4, { status: "held", hold_reason: "user", note: "mine" });
+
+    assert.equal(store.releaseTargetHolds(), 2);
+    assert.equal(store.releaseTargetHolds(), 0);
+    assert.deepEqual(db.query("SELECT id, status, hold_reason, note FROM jobs ORDER BY id").all(), [
+      { id: 1, status: "found", hold_reason: null, note: null },
+      { id: 2, status: "found", hold_reason: null, note: null },
+      { id: 3, status: "held", hold_reason: "review", note: "needs your review: x" },
+      { id: 4, status: "held", hold_reason: "user", note: "mine" },
+    ]);
+    assert.deepEqual(changes, []);
+  `);
+  });
+});
+
+describe("moving a job", () => {
+  it("moves only a job that is in one of the given statuses, and otherwise changes nothing", () => {
+    scenario(`
+    job(1, { status: "triaged", note: "kept", updated_at: "2020-01-01 00:00:00" });
+
+    assert.equal(store.moveJob(1, ["found", "locating"], { status: "triaged", note: "changed" }), false);
+    assert.equal(store.moveJob(99, "triaged", { status: "prepping", note: null }), false);
+    assert.deepEqual(db.query("SELECT status, note, updated_at FROM jobs WHERE id = 1").get(), { status: "triaged", note: "kept", updated_at: "2020-01-01 00:00:00" });
+    assert.deepEqual(store.statusHistory(1), []);
+    assert.deepEqual(changes, []);
+
+    assert.equal(store.moveJob(1, ["found", "triaged"], { status: "held", note: "set aside", hold_reason: "user" }), true);
+    assert.deepEqual([store.getJob(1).status, store.getJob(1).note], ["held", "set aside"]);
+    assert.notEqual(store.getJob(1).updated_at, "2020-01-01 00:00:00");
+    assert.deepEqual(changes, [{ type: "job", jobId: 1 }]);
+
+    assert.equal(store.moveJob(1, "held", { status: "found", note: null }, { quiet: true }), true);
+    assert.equal(store.getJob(1).status, "found");
+    assert.deepEqual(changes, [{ type: "job", jobId: 1 }]);
+    assert.equal(store.moveJob(1, "held", { status: "triaged", note: null }), false);
+    assert.equal(store.getJob(1).status, "found");
+    assert.deepEqual(store.statusHistory(1).map(c => [c.from_status, c.to_status]), [["triaged", "held"], ["held", "found"]]);
+  `);
+  });
+
+  it("refuses a transition the state machine does not allow, even from a status the job is not in", () => {
+    scenario(`
+    job(1, { status: "submitted" }); job(2, { status: "triaged" });
+
+    assert.throws(() => store.moveJob(1, "submitted", { status: "found", note: null }), /illegal job transition submitted → found/);
+    assert.throws(() => store.moveJob(2, ["triaged", "submitted"], { status: "prepping", note: null }), /illegal job transition submitted → prepping/);
+    assert.throws(() => store.moveJob(2, "triaged", { status: "triaged", note: null }), /illegal job transition triaged → triaged/);
+    assert.deepEqual([store.getJob(1).status, store.getJob(2).status], ["submitted", "triaged"]);
+    assert.deepEqual([store.statusHistory(1), store.statusHistory(2)], [[], []]);
+    assert.deepEqual(changes, []);
+  `);
+  });
+
+  it("holds a job only with a reason, and forgets the reason once it leaves", () => {
+    scenario(`
+    job(1, { status: "found" });
+
+    assert.throws(() => store.moveJob(1, "found", { status: "held", note: "set aside" }), /hold_reason/);
+    assert.deepEqual([store.getJob(1).status, store.getJob(1).hold_reason], ["found", null]);
+
+    assert.equal(store.moveJob(1, "found", { status: "held", note: "held back for now", hold_reason: "triage" }), true);
+    assert.deepEqual([store.getJob(1).status, store.getJob(1).hold_reason], ["held", "triage"]);
+
+    assert.equal(store.moveJob(1, "held", { status: "triaged", note: null, hold_reason: "user" }), true);
+    assert.deepEqual([store.getJob(1).status, store.getJob(1).hold_reason], ["triaged", null]);
+  `);
+  });
+
+  it("closes the open gate and frees the manual browser once a job leaves the parked statuses", () => {
+    scenario(`
+    const questions = await import(${JSON.stringify(join(import.meta.dir, "../src/questions.ts"))});
+    const fill = await import(${JSON.stringify(join(import.meta.dir, "../src/fill-state.ts"))});
+    const gateState = id => db.query("SELECT state FROM question_gates WHERE id = ?").get(id).state;
+    job(1, { status: "filling" }); job(2, { status: "filling" });
+    const gate = questions.parkGate(1, { kind: "question", text: "Desired salary?" }, null);
+    const other = questions.parkGate(2, { kind: "question", text: "Desired salary?" }, null);
+    fill.setManualLease(1, gate.id); fill.setManualLease(2, other.id);
+
+    assert.equal(store.moveJob(1, "needs_input", { status: "needs_manual" }), true);
+    assert.equal(gateState(gate.id), "open");
+    assert.equal(fill.manualLeaseGate(1), gate.id);
+
+    assert.equal(store.moveJob(1, "needs_manual", { status: "approved", pending: null, note: "back to the form" }), true);
+    assert.equal(gateState(gate.id), "closed");
+    assert.equal(fill.manualLeaseGate(1), null);
+    assert.equal(gateState(other.id), "open");
+    assert.equal(fill.manualLeaseGate(2), other.id);
+  `);
+  });
+
+  it("rejects a status outside the known set, however it is written", () => {
+    scenario(`
+    const { STATUSES } = await import(${JSON.stringify(join(import.meta.dir, "../src/status.ts"))});
+    job(1);
+
+    assert.throws(() => db.run("UPDATE jobs SET status = 'archived' WHERE id = 1"), /invalid job status/);
+    assert.throws(() => db.run("UPDATE jobs SET status = NULL WHERE id = 1"), /invalid job status|NOT NULL/);
+    assert.throws(() => job(2, { status: "archived" }), /invalid job status/);
+    assert.equal(store.getJob(1).status, "found");
+    assert.equal(store.getJob(2), null);
+    assert.deepEqual(store.statusHistory(1), []);
+
+    for (const status of STATUSES) db.query("UPDATE jobs SET status = ? WHERE id = 1").run(status);
+    assert.equal(store.getJob(1).status, STATUSES.at(-1));
   `);
   });
 });
@@ -341,14 +468,14 @@ describe("status history", () => {
     job(1, { note: "seen" }); job(2);
     assert.deepEqual(store.statusHistory(1), [], "history starts with the first change");
 
-    store.updateJob(1, { status: "triaged", note: null });
-    store.updateJob(1, { status: "prepping" });                       // leaves the note alone
-    store.updateJob(1, { status: "awaiting_approval", note: "needs your review: score 55" });
-    store.updateJob(1, { score: 55, note: "edited" });                // not a status change
-    store.updateJob(1, { status: "awaiting_approval", note: "same status again" });
-    store.writeJob(1, { status: "approved", approved_by: "auto", note: null });
-    store.writeJob(1, { status: "filling", pending: null });
-    store.writeJob(1, { status: "submitted", note: "confirmation page seen", submitted_at: "2026-10-01T00:00:00.000Z" });
+    store.moveJob(1, "found", { status: "triaged", note: null });
+    store.moveJob(1, "triaged", { status: "prepping", note: null });
+    store.moveJob(1, "prepping", { status: "awaiting_approval", note: "needs your review: score 55" });
+    store.updateJob(1, { score: 55, note: "edited" });
+    db.run("UPDATE jobs SET status = 'awaiting_approval', note = 'same status again' WHERE id = 1");
+    store.moveJob(1, "awaiting_approval", { status: "approved", approved_by: "auto", note: null });
+    store.moveJob(1, "approved", { status: "filling", pending: null });
+    store.moveJob(1, "filling", { status: "submitted", note: "confirmation page seen", submitted_at: "2026-10-01T00:00:00.000Z" });
 
     const history = store.statusHistory(1);
     assert.deepEqual(history.map(({ at, ...change }) => change), [
@@ -366,7 +493,7 @@ describe("status history", () => {
 
   it("sees moves made in bulk or straight in SQL, and rolls back with them", () => {
     scenario(`
-    job(1, { status: "prepping" }); job(2, { status: "held", note: "set aside" }); job(3, { status: "found" });
+    job(1, { status: "prepping" }); job(2, { status: "held", hold_reason: "user", note: "set aside" }); job(3, { status: "found" });
     store.requeueInterruptedPrep();
     store.releaseHeldJobs();
     db.run("UPDATE jobs SET status = 'skipped' WHERE id = 3");
@@ -375,7 +502,7 @@ describe("status history", () => {
     assert.deepEqual(store.statusHistory(3).map(c => [c.from_status, c.to_status]), [["found", "skipped"]]);
 
     assert.throws(() => db.transaction(() => {
-      store.writeJob(3, { status: "triaged" });
+      store.moveJob(3, "skipped", { status: "triaged", note: null });
       throw new Error("undo");
     })(), /undo/);
     assert.equal(store.getJob(3).status, "skipped");
@@ -387,8 +514,8 @@ describe("status history", () => {
     scenario(`
     const board = store.insertJob({ url: "https://www.linkedin.com/jobs/view/1", source: "linkedin", company: "Acme", title: "Data Engineer", location: null, description: null });
     const own = store.insertJob({ url: "https://boards.greenhouse.io/acme/jobs/7", source: "greenhouse", company: "Acme", title: "Platform Analyst", location: null, description: null });
-    store.updateJob(board, { status: "locating" });
-    store.updateJob(own, { status: "triaged" });
+    store.moveJob(board, "found", { status: "locating", note: null });
+    store.moveJob(own, "found", { status: "triaged", note: null });
     assert.equal(store.relocateJob(store.getJob(board), "https://boards.greenhouse.io/acme/jobs/7", null), "merged");
     assert.equal(store.getJob(board), null);
     assert.equal(db.query("SELECT count(*) AS n FROM status_changes WHERE job_id = ?").get(board).n, 0);
@@ -475,17 +602,38 @@ describe("postings, duplicates and sources", () => {
     const { preferUsListings } = await import(${JSON.stringify(join(import.meta.dir, "../src/listings.ts"))});
     const abroad = (id, fields) => { job(id, { url: "https://jobs.example/" + id + "/london", location: "London, United Kingdom | New York, NY", ...fields });
       db.query("INSERT INTO job_sources (job_id, url, source, location) VALUES (?, ?, 'test', 'New York, NY')").run(id, "https://jobs.example/" + id + "/nyc"); };
-    abroad(1, { status: "held", resume_sha: "sha", resume_frozen_at: "2026-10-10T00:00:00Z", score: 70 });
+    abroad(1, { status: "held", hold_reason: "review", note: "needs your review: x", score: 70 });
     abroad(2, { status: "submitted", submitted_at: "2026-10-10T00:00:00Z" });
     abroad(3, { status: "needs_input" });
     job(4, { status: "awaiting_approval", location: "London, United Kingdom" });
     job(5, { status: "awaiting_approval", location: "Remote" });
     db.query("INSERT INTO job_sources (job_id, url, source, location) VALUES (5, 'https://jobs.example/5/austin', 'test', 'Austin, TX')").run();
+    abroad(6, { status: "held", hold_reason: "user", resume_sha: "sha" });
+    abroad(7, { status: "awaiting_approval", resume_frozen_at: "2026-10-10T00:00:00Z" });
+    abroad(8, { status: "held", hold_reason: "user", fill_checkpoint: "{}" });
+    abroad(9, { status: "skipped" });
     assert.equal(preferUsListings(), 1);
     const moved = store.getJob(1);
-    assert.deepEqual([moved.url, moved.status, moved.resume_sha, store.appliedLocation(moved)], ["https://jobs.example/1/nyc", "found", null, "New York, NY"]);
-    for (const id of [2, 3, 4, 5]) assert.equal(store.getJob(id).url, id < 4 ? "https://jobs.example/" + id + "/london" : "https://ats.example/jobs/" + id);
+    assert.deepEqual([moved.url, moved.status, moved.hold_reason, moved.score, store.appliedLocation(moved)], ["https://jobs.example/1/nyc", "found", null, 70, "New York, NY"]);
+    for (const id of [2, 3, 6, 7, 8, 9]) assert.equal(store.getJob(id).url, "https://jobs.example/" + id + "/london", String(id));
+    for (const id of [4, 5]) assert.equal(store.getJob(id).url, "https://ats.example/jobs/" + id, String(id));
+    assert.deepEqual([6, 7, 8].map(id => store.getJob(id).status), ["held", "awaiting_approval", "held"]);
     assert.equal(preferUsListings(), 0);
+  `);
+  });
+
+  it("keeps applying through the listing an application already started on", () => {
+    scenario(`
+    const started = [{ resume_sha: "sha" }, { resume_frozen_at: "2026-10-10T00:00:00Z" }, { fill_checkpoint: "{}" }, { submitted_at: "2026-10-10T00:00:00Z" }];
+    started.forEach((marker, index) => {
+      const role = { source: "lever", company: "Acme " + index, title: "Data Engineer", description: null };
+      const id = store.insertJob({ ...role, url: "https://jobs.example/" + index + "/london", location: "London, United Kingdom" }, "awaiting_approval");
+      store.writeJob(id, marker);
+      assert.equal(store.insertJob({ ...role, url: "https://jobs.example/" + index + "/nyc", location: "New York, NY" }), null);
+      const row = store.getJob(id);
+      assert.deepEqual([row.url, row.status, row.location], ["https://jobs.example/" + index + "/london", "awaiting_approval", "London, United Kingdom"]);
+      assert.deepEqual(store.jobSources(id), [{ url: "https://jobs.example/" + index + "/nyc", source: "lever", location: "New York, NY" }]);
+    });
   `);
   });
 
@@ -507,7 +655,7 @@ describe("postings, duplicates and sources", () => {
     db.query("INSERT INTO job_sources (job_id, url, source, location) VALUES (2, 'https://www.indeed.com/viewjob?jk=2', 'indeed', NULL)").run();
     db.query("INSERT INTO job_sources (job_id, url, source, location) VALUES (1, 'https://boards.example/acme/alias', 'greenhouse', NULL)").run();
     store.logEvent("step", "locating", 2, "locate"); store.logEvent("step", "kept", 1, "prep");
-    store.kvSet("feedback.2", "x"); store.kvSet("locate.tries.2", "3"); store.kvSet("auto.deferred.2", "1"); store.kvSet("feedback.1", "keep");
+    store.writeJob(1, { feedback: "keep", locate_tries: 1 }); store.writeJob(2, { feedback: "x", locate_tries: 3, deferred_at: "2026-10-01T00:00:00Z" });
     changes.length = 0;
 
     // Found through one of the other job's extra listings, not its main URL.
@@ -518,7 +666,7 @@ describe("postings, duplicates and sources", () => {
     assert.deepEqual(store.jobSources(2), []);
     assert.deepEqual(store.jobEvents(2), []);
     assert.deepEqual(store.jobEvents(1).map(e => e.message), ["kept"]);
-    assert.deepEqual(["feedback.2", "locate.tries.2", "auto.deferred.2", "feedback.1"].map(store.kvGet), [null, null, null, "keep"]);
+    assert.deepEqual([store.getJob(1).feedback, store.getJob(1).locate_tries, store.getJob(1).deferred_at], ["keep", 1, null]);
     assert.deepEqual(changes, [{ type: "job", jobId: 1 }]);
   `);
   });
@@ -546,7 +694,7 @@ describe("postings, duplicates and sources", () => {
     job(6, { company: "Beta LLC", title: "Analyst", status: "skipped", location: "Austin" });
     job(7, { company: "Beta", title: "Analyst", status: "triaged", location: "Houston" });
     store.logEvent("step", "old", 1);
-    store.kvSet("feedback.1", "x");
+    store.writeJob(1, { feedback: "x" });
 
     store.dedupeExisting();
 
@@ -563,7 +711,7 @@ describe("postings, duplicates and sources", () => {
     assert.equal(store.getJob(7).location, "Houston | Austin");
     assert.equal(store.getJob(3).location, null);
     assert.deepEqual(store.jobEvents(1), []);
-    assert.equal(store.kvGet("feedback.1"), null);
+    assert.equal(db.query("SELECT count(*) AS n FROM jobs WHERE feedback IS NOT NULL").get().n, 0);
     assert.equal(store.kvGet("dedupe.version"), "3");
     assert.equal(store.recentEvents()[0].message, "Folded 3 duplicate postings into existing jobs");
 

@@ -6,6 +6,9 @@ import { listQuestionGroups } from "./questions";
 import type { QuestionGroup } from "./questions";
 import { dueSoon, type DueStep } from "./steps";
 
+type DeliveryState = "sending" | "uncertain" | "failed" | "sent" | "abandoned";
+export type DigestDeliveryState = "disabled" | "not_connected" | "ready" | "idle" | DeliveryState;
+
 export interface DigestStatus {
   enabled: boolean;
   time: string;
@@ -13,7 +16,7 @@ export interface DigestStatus {
   recipient: string | null;
   lastSentAt: string | null;
   lastError: string | null;
-  deliveryState: string;
+  deliveryState: DigestDeliveryState;
   undeliveredGroups: number;
 }
 
@@ -30,7 +33,8 @@ interface Delivery {
   group_count: number;
   subject: string;
   body: string;
-  state: "sending" | "uncertain" | "failed" | "sent";
+  state: DeliveryState;
+  attempts: number;
   created_at: string;
   attempt_at: string;
   sent_at: string | null;
@@ -40,11 +44,24 @@ interface Delivery {
 
 const lastSent = () =>
   db.query<{ sent_at: string }, []>("SELECT sent_at FROM question_digest_deliveries WHERE state = 'sent' ORDER BY sent_at DESC LIMIT 1").get();
+const beginResend = (delivery: Delivery, timestamp: string) => {
+  const footer = `Auto-Apply delivery reference: ${digestDeliveryReference(delivery.id)}`;
+  if (!delivery.body.endsWith(footer)) delivery.body += `\n${footer}`;
+  db.query(
+    "UPDATE question_digest_deliveries SET body = ?, state = 'sending', attempts = attempts + 1, attempt_at = ? WHERE id = ? AND state NOT IN ('sent', 'abandoned')",
+  ).run(delivery.body, timestamp, delivery.id);
+  delivery.attempts += 1;
+};
 const markUnsent = (id: string, state: "uncertain" | "failed", error: string) =>
-  db.query("UPDATE question_digest_deliveries SET state = ?, error = ? WHERE id = ? AND state != 'sent'").run(state, error, id);
+  db.query("UPDATE question_digest_deliveries SET state = ?, error = ? WHERE id = ? AND state NOT IN ('sent', 'abandoned')").run(state, error, id);
 
 const RETRY_INTERVAL_MS = 5 * 60_000;
+const MAX_RETRY_DELAY_MS = 6 * 60 * 60_000;
+const UNCERTAIN_TIMEOUT_MS = 60 * 60_000;
+const MAX_ATTEMPTS = 5;
+const retryDelay = (attempts: number) => Math.min(RETRY_INTERVAL_MS * 2 ** (attempts - 1), MAX_RETRY_DELAY_MS);
 let inFlight = false;
+let lastReconcile: { id: string; at: number } | null = null;
 
 function settings() {
   return config.questionDigest ?? { enabled: true, time: "09:00", timeZone: "America/Chicago" };
@@ -178,19 +195,24 @@ async function deliver(options: { force?: boolean; now?: Date }): Promise<Result
 
   const claimed = db
     .transaction((): { delivery: Delivery; reconcile: boolean } | Result => {
-      const active = db.query<Delivery, []>("SELECT * FROM question_digest_deliveries WHERE state != 'sent' LIMIT 1").get();
+      let active = db.query<Delivery, []>("SELECT * FROM question_digest_deliveries WHERE state NOT IN ('sent', 'abandoned') LIMIT 1").get();
+      if (active?.state === "failed" && active.attempts >= MAX_ATTEMPTS) {
+        db.query("UPDATE question_digest_deliveries SET state = 'abandoned' WHERE id = ? AND state = 'failed'").run(active.id);
+        active = null;
+      }
       if (active) {
-        if (!options.force && now.getTime() - Date.parse(active.attempt_at) < RETRY_INTERVAL_MS)
-          return { sent: false, groups: active.group_count, messageId: active.id, reason: "retry_later" };
         const reconcile = active.state === "sending" || active.state === "uncertain";
-        if (active.state === "failed") {
-          const footer = `Auto-Apply delivery reference: ${digestDeliveryReference(active.id)}`;
-          if (!active.body.endsWith(footer)) {
-            active.body += `\n${footer}`;
-            db.query("UPDATE question_digest_deliveries SET body = ? WHERE id = ?").run(active.body, active.id);
-          }
+        if (!options.force) {
+          const age = now.getTime() - Date.parse(active.attempt_at);
+          const idle = reconcile && lastReconcile?.id === active.id ? Math.min(age, now.getTime() - lastReconcile.at) : age;
+          if (idle < (reconcile ? RETRY_INTERVAL_MS : retryDelay(active.attempts)))
+            return { sent: false, groups: active.group_count, messageId: active.id, reason: "retry_later" };
         }
-        db.query("UPDATE question_digest_deliveries SET state = ?, attempt_at = ? WHERE id = ?").run(reconcile ? "uncertain" : "sending", timestamp, active.id);
+        if (reconcile) {
+          db.query("UPDATE question_digest_deliveries SET state = 'uncertain' WHERE id = ?").run(active.id);
+          return { delivery: active, reconcile };
+        }
+        beginResend(active, timestamp);
         return { delivery: active, reconcile };
       }
       if (!options.force) {
@@ -215,6 +237,7 @@ async function deliver(options: { force?: boolean; now?: Date }): Promise<Result
           id,
         ),
         state: "sending",
+        attempts: 1,
         created_at: timestamp,
         attempt_at: timestamp,
         sent_at: null,
@@ -241,17 +264,26 @@ async function deliver(options: { force?: boolean; now?: Date }): Promise<Result
     .immediate();
   if (!("delivery" in claimed)) return claimed;
   const { delivery, reconcile } = claimed;
+  const resending = !reconcile;
   try {
     if (reconcile) {
+      lastReconcile = { id: delivery.id, at: now.getTime() };
       const match = await findSentSelfMessage(delivery.id, delivery.recipient);
-      if (!match) {
-        const error = "Send outcome is unknown; no matching self-message in Sent yet. Automatic resend is blocked to avoid duplicates.";
+      if (match) {
+        completeDelivery(delivery, match.id, match.sentAt);
+        return { sent: true, groups: delivery.group_count, messageId: delivery.id, reason: "reconciled" };
+      }
+      const stale = now.getTime() - Date.parse(delivery.attempt_at) > UNCERTAIN_TIMEOUT_MS;
+      if (!stale) {
+        const error = "Send outcome is unknown; no matching self-message in Sent yet. It will be re-sent if it has not appeared within an hour.";
         markUnsent(delivery.id, "uncertain", error);
         kvSet("questionDigest.error", error);
         return { sent: false, groups: delivery.group_count, messageId: delivery.id, reason: "delivery_uncertain" };
       }
-      completeDelivery(delivery, match.id, match.sentAt);
-      return { sent: true, groups: delivery.group_count, messageId: delivery.id, reason: "reconciled" };
+      const error = "No matching self-message appeared in Sent within an hour; the digest will be re-sent.";
+      markUnsent(delivery.id, "failed", error);
+      kvSet("questionDigest.error", error);
+      return { sent: false, groups: delivery.group_count, messageId: delivery.id, reason: "retry_scheduled" };
     }
     const gmailId = await sendSelfMessage({
       messageId: delivery.id,
@@ -264,7 +296,7 @@ async function deliver(options: { force?: boolean; now?: Date }): Promise<Result
     return { sent: true, groups: delivery.group_count, messageId: delivery.id };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Digest delivery failed";
-    const state = reconcile || !(error instanceof GmailSendError) || error.ambiguous ? "uncertain" : "failed";
+    const state = resending && error instanceof GmailSendError && !error.ambiguous ? "failed" : "uncertain";
     markUnsent(delivery.id, state, message);
     kvSet("questionDigest.error", message);
     throw error;

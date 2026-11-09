@@ -419,6 +419,96 @@ function gateReasons(db: Database) {
   ]);
 }
 
+function stateMachines(db: Database) {
+  runEach(db, [
+    "DROP TRIGGER jobs_fill_state_forgotten",
+    `CREATE TABLE fill_state_new (
+      job_id INTEGER PRIMARY KEY,
+      phase TEXT NOT NULL DEFAULT 'idle' CHECK (phase IN ('idle', 'draft_recovery', 'submitting', 'ambiguous', 'verify_queued', 'verifying')),
+      slot INTEGER CHECK (slot >= 0),
+      manual_gate TEXT
+    )`,
+    `INSERT INTO fill_state_new (job_id, phase, slot, manual_gate)
+    SELECT job_id,
+      CASE
+        WHEN submitting = 1 AND verifying = 1 AND recovering = 1 THEN 'verify_queued'
+        WHEN submitting = 1 THEN 'ambiguous'
+        WHEN recovering = 1 THEN 'draft_recovery'
+        ELSE 'idle'
+      END,
+      slot, manual_gate
+    FROM fill_state`,
+    "DROP TABLE fill_state",
+    "ALTER TABLE fill_state_new RENAME TO fill_state",
+    `CREATE TRIGGER jobs_fill_state_forgotten AFTER DELETE ON jobs
+    BEGIN
+      DELETE FROM fill_state WHERE job_id = OLD.id;
+    END`,
+    "ALTER TABLE jobs ADD COLUMN hold_reason TEXT CHECK (hold_reason IN ('triage', 'target', 'review', 'user'))",
+    "ALTER TABLE jobs ADD COLUMN feedback TEXT",
+    "ALTER TABLE jobs ADD COLUMN hand_picked INTEGER NOT NULL DEFAULT 0 CHECK (hand_picked IN (0, 1))",
+    "ALTER TABLE jobs ADD COLUMN locate_tries INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE jobs ADD COLUMN deferred_at TEXT",
+    `UPDATE jobs SET hold_reason = CASE
+        WHEN note LIKE 'held back %' THEN 'triage'
+        WHEN note LIKE 'not a practice job:%' THEN 'target'
+        WHEN note LIKE 'needs your review:%' THEN 'review'
+        ELSE 'user'
+      END
+    WHERE status = 'held'`,
+    `UPDATE jobs SET
+      hand_picked = 1,
+      feedback = CASE WHEN status IN ('found', 'locating', 'triaged', 'prepping')
+        THEN (SELECT value FROM kv WHERE key GLOB 'feedback.*' AND CAST(substr(key, 10) AS INTEGER) = jobs.id LIMIT 1)
+        ELSE feedback END
+    WHERE id IN (SELECT CAST(substr(key, 10) AS INTEGER) FROM kv WHERE key GLOB 'feedback.*')`,
+    `UPDATE jobs SET locate_tries = (SELECT CAST(value AS INTEGER) FROM kv WHERE key GLOB 'locate.tries.*' AND CAST(substr(key, 14) AS INTEGER) = jobs.id LIMIT 1)
+    WHERE id IN (SELECT CAST(substr(key, 14) AS INTEGER) FROM kv WHERE key GLOB 'locate.tries.*')`,
+    `UPDATE jobs SET deferred_at = (SELECT value FROM kv WHERE key GLOB 'auto.deferred.*' AND CAST(substr(key, 15) AS INTEGER) = jobs.id LIMIT 1)
+    WHERE id IN (SELECT CAST(substr(key, 15) AS INTEGER) FROM kv WHERE key GLOB 'auto.deferred.*')`,
+    "DELETE FROM kv WHERE key GLOB 'feedback.*' OR key GLOB 'locate.tries.*' OR key GLOB 'auto.deferred.*'",
+    "ALTER TABLE blockers ADD COLUMN gate_id TEXT",
+    `UPDATE blockers SET gate_id = (
+      SELECT g.id FROM question_gates g
+      WHERE g.job_id = blockers.job_id
+        AND abs(julianday(g.created_at) - julianday(blockers.at)) * 86400 <= 60
+      ORDER BY abs(julianday(g.created_at) - julianday(blockers.at))
+      LIMIT 1
+    )`,
+    `CREATE TABLE question_digest_deliveries_new (
+      id TEXT PRIMARY KEY,
+      recipient TEXT NOT NULL,
+      fingerprints TEXT NOT NULL,
+      group_count INTEGER NOT NULL,
+      subject TEXT NOT NULL,
+      body TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('sending', 'uncertain', 'failed', 'sent', 'abandoned')),
+      attempts INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      attempt_at TEXT NOT NULL,
+      sent_at TEXT,
+      gmail_id TEXT,
+      error TEXT
+    )`,
+    `INSERT INTO question_digest_deliveries_new (id, recipient, fingerprints, group_count, subject, body, state, created_at, attempt_at, sent_at, gmail_id, error)
+    SELECT id, recipient, fingerprints, group_count, subject, body, state, created_at, attempt_at, sent_at, gmail_id, error
+    FROM question_digest_deliveries`,
+    "DROP TABLE question_digest_deliveries",
+    "ALTER TABLE question_digest_deliveries_new RENAME TO question_digest_deliveries",
+    "CREATE UNIQUE INDEX question_digest_one_pending ON question_digest_deliveries ((1)) WHERE state NOT IN ('sent', 'abandoned')",
+    `CREATE TRIGGER jobs_status_valid_insert BEFORE INSERT ON jobs
+    WHEN NEW.status NOT IN ('found','locating','triaged','prepping','awaiting_approval','approved','filling','needs_input','awaiting_submit','needs_manual','submitted','interview','offer','rejected_by_company','withdrawn','held','skipped','rejected','failed')
+    BEGIN
+      SELECT RAISE(ABORT, 'invalid job status');
+    END`,
+    `CREATE TRIGGER jobs_status_valid_update BEFORE UPDATE OF status ON jobs
+    WHEN NEW.status NOT IN ('found','locating','triaged','prepping','awaiting_approval','approved','filling','needs_input','awaiting_submit','needs_manual','submitted','interview','offer','rejected_by_company','withdrawn','held','skipped','rejected','failed')
+    BEGIN
+      SELECT RAISE(ABORT, 'invalid job status');
+    END`,
+  ]);
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: "baseline", up: baseline },
   { version: 2, name: "status history", up: statusHistory },
@@ -429,6 +519,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 7, name: "answer bank", up: answerBank },
   { version: 8, name: "referrals", up: referrals },
   { version: 9, name: "gate reasons", up: gateReasons },
+  { version: 10, name: "state machines", up: stateMachines },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

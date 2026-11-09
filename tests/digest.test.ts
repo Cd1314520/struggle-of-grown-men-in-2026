@@ -47,6 +47,18 @@ describe("question digest delivery", () => {
   it("reconciles an accepted message with a lost acknowledgement and rewritten RFC-ID without another send", async () => {
     await scenario("lost-ack");
   });
+  it("fails an uncertain delivery with no Sent match after an hour and re-sends it with the same Message-ID", async () => {
+    await scenario("stale-uncertain");
+  });
+  it("reconciles a stale uncertain delivery when the message did reach Sent", async () => {
+    await scenario("stale-uncertain-matched");
+  });
+  it("waits out the doubling backoff between failed attempts and counts each attempt", async () => {
+    await scenario("failed-backoff");
+  });
+  it("abandons a delivery after five attempts and creates the next digest with the same groups", async () => {
+    await scenario("abandon");
+  });
   it("recovers after process death using the persisted body reference despite a rewritten RFC-ID", async () => {
     await scenario("restart", ["restart-before", "restart-after"]);
   });
