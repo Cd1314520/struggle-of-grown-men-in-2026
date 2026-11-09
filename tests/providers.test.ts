@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { config } from "../src/config";
-import { kvDelete } from "../src/db";
+import { kvDelete, kvSet } from "../src/db";
 import { isCapacityError } from "../src/errors";
 import { fillChoice } from "../src/fill";
 import { chainFor, choose, fallbacksFor, hitLimit, limitedUntil, nextChoice, providerOf, stageModels, withFallback } from "../src/providers";
@@ -13,7 +13,16 @@ const signedIn = mkdtempSync(join(tmpdir(), "claude-account-"));
 writeFileSync(join(signedIn, ".credentials.json"), "{}");
 const signedOut = mkdtempSync(join(tmpdir(), "claude-account-"));
 mkdirSync(signedOut, { recursive: true });
-const PROVIDERS = ["codex", "claude:default", `claude:${signedIn}`, `claude:${signedOut}`, "omp"];
+const PROVIDERS = [
+  "codex",
+  "claude:default",
+  `claude:${signedIn}`,
+  `claude:${signedOut}`,
+  "omp",
+  "antigravity",
+  "antigravity:gemini",
+  "antigravity:claude-gpt",
+];
 
 const saved = { prep: config.models.prep, fill: config.models.fill, recheck: config.models.recheck };
 afterEach(() => {
@@ -46,6 +55,14 @@ describe("capacity refusals", () => {
     expect(isCapacityError("codex is not installed")).toBe(true);
     expect(isCapacityError("Chrome is not installed")).toBe(false);
   });
+
+  it("count a model agy does not know, so the next model takes the work", () => {
+    expect(
+      isCapacityError(
+        'invalid model selection (--model "claude-sonnet-4-6" --effort ""): model claude-sonnet-4-6 is not recognized as a known model or custom model in settings',
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("which model and account a worker runs on", () => {
@@ -62,6 +79,24 @@ describe("which model and account a worker runs on", () => {
     expect(providerOf("claude-code/opus")).toBe("claude:default");
     expect(providerOf("claude-code/opus", { CLAUDE_CONFIG_DIR: signedIn, DISPLAY: ":99" })).toBe(`claude:${signedIn}`);
     expect(providerOf(null)).toBe("omp");
+  });
+
+  it("keeps agy's Gemini quota apart from its Claude and GPT quota", () => {
+    expect(providerOf("antigravity/gemini-3.8-flash-low")).toBe("antigravity:gemini");
+    expect(providerOf("antigravity/claude-sonnet-4-6")).toBe("antigravity:claude-gpt");
+    expect(providerOf("antigravity/gpt-oss-120b-medium")).toBe("antigravity:claude-gpt");
+    config.models.fill = "antigravity/gemini-3.8-flash-low";
+    config.fallback = ["antigravity/claude-sonnet-4-6", "codex/gpt-6.1-terra@low"];
+    hitLimit("fill", null, "antigravity:gemini", Date.now() + 3_600_000);
+    expect(choose("fill")).toEqual({ model: "antigravity/claude-sonnet-4-6", provider: "antigravity:claude-gpt", env: {} });
+    hitLimit("fill", null, "antigravity:claude-gpt", Date.now() + 3_600_000);
+    expect(choose("fill").provider).toBe("codex");
+  });
+
+  it("reads a Gemini limit kept before the two agy quotas were told apart", () => {
+    kvSet("limit.antigravity", String(Date.now() + 3_600_000));
+    expect(limitedUntil("antigravity:gemini")).toBeGreaterThan(Date.now());
+    expect(limitedUntil("antigravity:claude-gpt")).toBe(0);
   });
 
   it("takes the global fallback list, unless the stage has its own, which replaces it", () => {

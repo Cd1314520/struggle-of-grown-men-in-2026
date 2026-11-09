@@ -23,7 +23,7 @@ agy takes MCP servers only from files, so each worker writes the host server (an
 
 ## Usage limits and fallbacks
 
-When a provider refuses work for capacity, the work moves to the next model or account that can take it, and the app pauses only when none can (`src/providers.ts`, `watchCapacity` in `src/scheduler.ts`).
+When a provider refuses work for capacity, the work moves to the next model or account that can take it, and the app pauses only when none can (`src/providers.ts`, `watchCapacity` in `src/scheduler.ts`). agy counts as two providers, since it keeps two quotas: `antigravity:gemini` for the Gemini models and `antigravity:claude-gpt` for the Claude and GPT models. With Gemini out, `antigravity/claude-sonnet-4-6` can still take the work.
 
 ```yaml
 fallback: [codex/gpt-6-sol]          # every stage's fallbacks, in order

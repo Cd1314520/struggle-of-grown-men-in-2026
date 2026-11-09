@@ -16,10 +16,12 @@ export function settled(write: () => unknown): void {
 // work can run again once it has capacity. A harness that is not installed or not signed in counts
 // too, so the work moves to the next model in the stage's chain instead of failing every job, and so
 // does agy failing its sign-in check (it says this when the network is down, as just after the
-// computer wakes from sleep).
+// computer wakes from sleep), and agy not knowing the model: it says that when it could not fetch its
+// model list (a network outage), and for a model the plan no longer offers (Claude 4.6 goes on
+// 2026-11-18).
 export const isCapacityError = (message: string | null | undefined): boolean =>
   !!message &&
-  /at capacity|rate[ _-]?limit|too many requests|\b429\b|overloaded|usage limit|hit your (?:\w+ )?limit|quota (?:exceeded|exhausted|reached)|exceeded (?:your |the )?(?:\w+ )?quota|resource[ _-]?exhausted|\b(?:agy|codex|claude|omp) is not (?:installed|signed in)|authentication failed or timed out/i.test(
+  /at capacity|rate[ _-]?limit|too many requests|\b429\b|overloaded|usage limit|hit your (?:\w+ )?limit|quota (?:exceeded|exhausted|reached)|exceeded (?:your |the )?(?:\w+ )?quota|resource[ _-]?exhausted|\b(?:agy|codex|claude|omp) is not (?:installed|signed in)|authentication failed or timed out|is not recognized as a known model/i.test(
     message,
   );
 

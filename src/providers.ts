@@ -1,8 +1,8 @@
 // Which model and account a worker runs on. A stage's own model comes first, then its fallbacks:
 // `models.fallback.<stage>` when set (it replaces the global list), else the global `fallback`. A
 // Claude Code model is tried on each signed-in account in `claudeAccounts` in turn. When a provider
-// (Codex, one Claude account, omp) refuses work for capacity it is marked out: until the reset it names,
-// or for 5 minutes when it names none. Later work runs on the first choice in the chain that is not
+// (Codex, one Claude account, one of agy's quota groups, omp) refuses work for capacity it is marked out:
+// until the reset it names, or for 5 minutes when it names none. Later work runs on the first choice in the chain that is not
 // out, and the app pauses only when every one of them is.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -13,7 +13,7 @@ import { harnessOf, stageOf, type RunWorker, type ToolArgs, type WorkerOptions }
 
 export interface Choice {
   model: string | null;
-  provider: string; // "codex", "claude:default", "claude:<config dir>" or "omp"
+  provider: string; // "codex", "claude:default", "claude:<config dir>", "antigravity:gemini", "antigravity:claude-gpt" or "omp"
   env: Record<string, string>;
 }
 
@@ -22,9 +22,14 @@ const UNTIMED_LIMIT_MS = 5 * 60_000;
 // Work resumes just after the reset, not on the second, when the provider may not have caught up.
 const AFTER_RESET_MS = 30_000;
 
+// agy keeps two quotas, each with its own five-hour and weekly limit: one for the Gemini models and one
+// for the Claude and GPT models (antigravity.google/docs/models). Running out of one leaves the other.
+const agyGroup = (model: string | null | undefined) => (/^antigravity\/gemini/i.test(model ?? "") ? "antigravity:gemini" : "antigravity:claude-gpt");
+
 // Who serves a worker with this model and environment, as the limits are kept.
 export function providerOf(model: string | null | undefined, env: Record<string, string> | undefined = {}): string {
   const harness = harnessOf(model);
+  if (harness === "antigravity") return agyGroup(model);
   if (harness !== "claude-code") return harness;
   return `claude:${env["CLAUDE_CONFIG_DIR"] ?? "default"}`;
 }
@@ -35,7 +40,7 @@ const claudeAccounts = () => [null, ...(config.claudeAccounts ?? []).filter(dir 
 
 function choicesFor(model: string | null): Choice[] {
   const harness = harnessOf(model);
-  if (harness !== "claude-code") return [{ model, provider: harness, env: {} }];
+  if (harness !== "claude-code") return [{ model, provider: providerOf(model), env: {} }];
   return claudeAccounts().map(dir => ({ model, provider: `claude:${dir ?? "default"}`, env: dir ? { CLAUDE_CONFIG_DIR: dir } : {} }));
 }
 
@@ -55,7 +60,9 @@ export const stageModels = (stage: ModelStage): (string | null)[] => [...new Set
 export const chainFor = (stage: ModelStage | null, model: string | null | undefined): Choice[] =>
   (stage ? stageModels(stage) : [model ?? null]).flatMap(choicesFor);
 
-export const limitedUntil = (provider: string) => Number(kvGet(`limit.${provider}`) ?? 0);
+// Before the two agy quotas were told apart, a Gemini refusal was kept under `limit.antigravity`.
+export const limitedUntil = (provider: string) =>
+  Math.max(Number(kvGet(`limit.${provider}`) ?? 0), provider === "antigravity:gemini" ? Number(kvGet("limit.antigravity") ?? 0) : 0);
 const open = (c: Choice) => Date.now() >= limitedUntil(c.provider);
 
 let lastProvider: string | null = null;
