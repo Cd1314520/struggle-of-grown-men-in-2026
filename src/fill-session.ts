@@ -28,10 +28,10 @@ export interface FillRuntime {
   browser: Browser;
 }
 
-export function endSession(session: FillSession) {
+export function endSession(session: FillSession, reason: string) {
   session.active = false;
   session.browser?.revoke();
-  session.handle?.abort();
+  session.handle?.abort(reason);
 }
 
 export function ownsFill(rt: FillRuntime, session: FillSession) {
@@ -105,7 +105,7 @@ export async function parkFill(rt: FillRuntime, session: FillSession, input: Gat
     };
   }
   parkGate(session.jobId, { ...input, shot: shot ? Date.now() : null }, checkpoint);
-  endSession(session);
+  endSession(session, `parked on ${input.kind} gate`);
   logEvent("gate", `${input.kind}: ${input.text}`, session.jobId, "fill");
   await session.handle?.done;
   return "PARKED. This worker has exited.";
@@ -144,5 +144,5 @@ export function stopFailedFill(rt: FillRuntime, session: FillSession, message: s
     },
     session.checkpoint,
   );
-  endSession(session);
+  endSession(session, "fill stopped; parked for manual recovery");
 }

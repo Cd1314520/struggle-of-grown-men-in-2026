@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowUpRight, ChevronDown, ChevronUp, Clock, CornerDownRight } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, ChevronDown, ChevronUp, Clock, CornerDownRight, Info } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AnswerScope, QuestionGroup } from "../../../src/questions";
 import { Button, Checkbox, CompanyMark, Disclosure, Kbd, Linkified, Select, Separator, Spinner, Subhead, Textarea, Time, Tooltip } from "../../components/ui";
@@ -7,6 +7,7 @@ import { plural } from "../../lib/format";
 import { combo, typing, useHotkeys } from "../../lib/hotkeys";
 import { WIDE } from "../../lib/media";
 import { href } from "../../lib/router";
+import { whyLabel } from "../../lib/why";
 import { choices, contextText, drafts, MAX_KEYED, questionText } from "./model";
 
 export interface Answer {
@@ -148,6 +149,7 @@ export function FocusPane({
     job = group.jobs.find(j => j.gateId === gateId) ?? group.jobs[0],
     many = group.jobs.length > 1,
     context = contextText(group),
+    why = whyLabel(group.why),
     after = Math.max(0, ...group.jobs.map(j => j.queuedAfter)),
     busy = sending !== null;
 
@@ -267,6 +269,12 @@ export function FocusPane({
                 <Clock className="size-3.5" />
                 <Time at={group.createdAt} prefix="Asked " />
               </span>
+              {why && (
+                <span className="inline-flex items-center gap-1.5">
+                  <Info className="size-3.5" />
+                  {why}
+                </span>
+              )}
               {after > 0 && (
                 <span className="inline-flex items-center gap-1.5">
                   <CornerDownRight className="size-3.5" />
@@ -274,6 +282,7 @@ export function FocusPane({
                 </span>
               )}
             </div>
+            {group.missing && <p className="text-sm break-words text-fg-muted">Missing: {group.missing}</p>}
           </div>
 
           {context && <FormContext text={context} />}

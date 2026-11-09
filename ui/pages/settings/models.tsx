@@ -27,7 +27,7 @@ export const STAGES: readonly { stage: ModelStage; label: string; description: s
   {
     stage: "recheck",
     label: "Recheck questions",
-    description: "Adds the answers you keep to your answers, and answers parked questions once the profile settles them.",
+    description: "Adds the answers you keep to your answers, and answers parked questions the profile or resume settles, as they arrive.",
     core: false,
   },
   { stage: "import", label: "Resume import", description: "Turns uploaded files into your Typst resume.", core: false },

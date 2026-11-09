@@ -352,7 +352,7 @@ export class Scheduler {
   cancelImport(): boolean {
     if (!this.importRun?.handle) return false;
     this.importRun.cancelled = true;
-    this.importRun.handle.abort();
+    this.importRun.handle.abort("import cancelled");
     return true;
   }
 
@@ -364,9 +364,9 @@ export class Scheduler {
 
   // ---- fill sessions and the browsers they hold
 
-  abortFill(jobId: number) {
+  abortFill(jobId: number, reason: string) {
     const session = this.rt.sessions.get(jobId);
-    if (session) endSession(session);
+    if (session) endSession(session, reason);
     cancelJobGates(jobId);
   }
 
@@ -518,7 +518,7 @@ export class Scheduler {
         stopFailedFill(this.rt, session, `fill: ${errorMessage(err)}`);
         // A thrown callback cannot free a still-running worker's slot.
         if (session.handle) {
-          session.handle.abort();
+          session.handle.abort("fill crashed; parked for manual recovery");
           await session.handle.done;
         }
       })

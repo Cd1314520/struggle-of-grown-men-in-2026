@@ -16,12 +16,16 @@ import { isSettled, to, type ParkedStatus } from "./status";
 export type GateKind = "question" | "cover_letter" | "confirm_submit" | "manual" | "submission_ambiguous";
 // "bank": the candidate also keeps the answer for the answer bank, profile/answers.md (see answer-bank.ts).
 export type AnswerScope = "application" | "bank";
+export const QUESTION_REASONS = ["agreement", "fact_missing", "skill_not_on_resume", "free_text", "sensitive_id", "history_detail", "other"] as const;
+export type QuestionReason = (typeof QUESTION_REASONS)[number];
 export interface GateInput {
   kind: GateKind;
   text: string;
   context?: string;
   options?: string[];
   shot?: number | null;
+  why?: QuestionReason | null;
+  missing?: string | null;
 }
 export interface FillCheckpoint {
   version: 1;
@@ -47,6 +51,8 @@ export interface Gate {
   createdAt: string;
   answeredAt: string | null;
   shot: number | null;
+  why: QuestionReason | null;
+  missing: string | null;
 }
 export interface QuestionGroup {
   key: string;
@@ -54,6 +60,8 @@ export interface QuestionGroup {
   text: string;
   context: string;
   options: string[];
+  why: QuestionReason | null;
+  missing: string | null;
   // askedAt: when this application asked. queuedAfter: questions it found on the same page that are still
   // unanswered, so answering this one opens the next instead of resuming the application.
   jobs: { id: number; company: string; title: string; gateId: string; askedAt: string; queuedAfter: number }[];
@@ -91,6 +99,8 @@ interface GateRow {
   created_at: string;
   answered_at: string | null;
   shot: number | null;
+  why: QuestionReason | null;
+  missing: string | null;
 }
 // ---- statements used in more than one place. Nothing outside this module touches these tables.
 const gateRow = (gateId: string) => db.query<GateRow, [string]>("SELECT * FROM question_gates WHERE id = ?").get(gateId);
@@ -160,6 +170,8 @@ function gate(row: GateRow): Gate {
     createdAt: row.created_at,
     answeredAt: row.answered_at,
     shot: row.shot,
+    why: row.why,
+    missing: row.missing,
   };
 }
 function isCurrent(row: GateRow, job: Job): boolean {
@@ -258,11 +270,13 @@ function park(jobId: number, input: GateInput, checkpoint: FillCheckpoint | null
     createdAt: now(),
     answeredAt: null,
     shot: input.shot ?? null,
+    why: input.why ?? null,
+    missing: input.missing ?? null,
   };
   db.query(
     `
-      INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, shot, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
+      INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, shot, why, missing, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)`,
   ).run(
     value.id,
     jobId,
@@ -274,6 +288,8 @@ function park(jobId: number, input: GateInput, checkpoint: FillCheckpoint | null
     key.context,
     JSON.stringify(key.options),
     value.shot,
+    value.why,
+    value.missing,
     value.createdAt,
   );
   writeJob(jobId, to.parked(parkedStatus[input.kind], payload(value)));
@@ -303,12 +319,14 @@ export const approvedCoverLetter = (jobId: number) =>
 // on the first still unanswered; answering that one opens the next instead of starting a worker for it.
 export function queueQuestion(jobId: number, input: GateInput) {
   const key = identity(requireJob(jobId), input);
-  db.query("INSERT OR IGNORE INTO queued_questions (job_id, match_key, text, context, options, queued_at) VALUES (?, ?, ?, ?, ?, ?)").run(
+  db.query("INSERT OR IGNORE INTO queued_questions (job_id, match_key, text, context, options, why, missing, queued_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
     jobId,
     key.matchKey,
     input.text,
     key.context,
     JSON.stringify(key.options),
+    input.why ?? null,
+    input.missing ?? null,
     now(),
   );
 }
@@ -316,11 +334,16 @@ export function queueQuestion(jobId: number, input: GateInput) {
 // Answered here is enough: a question without context has no stored answer findStoredAnswer would reuse.
 export function nextQueuedQuestion(jobId: number): GateInput | null {
   const row = db
-    .query<{ text: string; context: string; options: string }, [number]>(
-      "SELECT text, context, options FROM queued_questions q WHERE job_id = ? AND NOT EXISTS (SELECT 1 FROM application_answers a WHERE a.job_id = q.job_id AND a.match_key = q.match_key) ORDER BY queued_at, rowid",
+    .query<{ text: string; context: string; options: string; why: QuestionReason | null; missing: string | null }, [number]>(
+      `
+        SELECT text, context, options, why, missing FROM queued_questions q
+        WHERE job_id = ? AND NOT EXISTS (SELECT 1 FROM application_answers a WHERE a.job_id = q.job_id AND a.match_key = q.match_key)
+        ORDER BY queued_at, rowid`,
     )
     .get(jobId);
-  return row ? { kind: "question", text: row.text, context: row.context, options: JSON.parse(row.options) as string[] } : null;
+  return row
+    ? { kind: "question", text: row.text, context: row.context, options: JSON.parse(row.options) as string[], why: row.why, missing: row.missing }
+    : null;
 }
 // A worker starting on the application re-observes the form and asks again whatever it still needs.
 export function clearQueuedQuestions(jobId: number) {
@@ -332,7 +355,10 @@ function queuedAfter(row: GateRow): number {
   return (
     db
       .query<{ n: number }, [number, string]>(
-        "SELECT count(*) n FROM queued_questions q WHERE job_id = ? AND match_key != ? AND NOT EXISTS (SELECT 1 FROM application_answers a WHERE a.job_id = q.job_id AND a.match_key = q.match_key)",
+        `
+          SELECT COUNT(*) AS n FROM queued_questions q
+          WHERE job_id = ? AND match_key != ?
+            AND NOT EXISTS (SELECT 1 FROM application_answers a WHERE a.job_id = q.job_id AND a.match_key = q.match_key)`,
       )
       .get(row.job_id, row.match_key)?.n ?? 0
   );
@@ -360,6 +386,8 @@ export function listQuestionGroups(): QuestionGroup[] {
         kind: row.kind,
         text: row.text,
         context: row.context,
+        why: row.why,
+        missing: row.missing,
         options: JSON.parse(row.options) as string[],
         jobs: [],
         createdAt: row.created_at,
@@ -381,6 +409,7 @@ function saveAnswer(row: GateRow, answer: string, scope: AnswerScope, at: string
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(job_id, match_key) DO UPDATE SET answer = excluded.answer, answered_at = excluded.answered_at`,
     ).run(row.job_id, row.match_key, row.kind, row.text, row.context, row.options, answer, at);
+    db.query("DELETE FROM queued_questions WHERE job_id = ? AND match_key = ?").run(row.job_id, row.match_key);
   } else {
     invalidateApproval(row.job_id);
     if (answer === "approve")

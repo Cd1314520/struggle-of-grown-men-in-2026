@@ -27,6 +27,7 @@ import {
   findStoredAnswer,
   nextQueuedQuestion,
   queueQuestion,
+  QUESTION_REASONS,
   resolveAmbiguityWithEvidence,
   type AmbiguityEvidence,
   approvedCoverLetter,
@@ -87,7 +88,7 @@ async function verifyStatus(rt: FillRuntime, ctx: FillContext, args: ToolArgs): 
       ...(messageId ? { messageId } : {}),
       checkpoint: cp,
     });
-    endSession(session);
+    endSession(session, "verified as submitted");
     await session.handle?.done;
     return "Recorded: Application verified as submitted. Worker exiting.";
   }
@@ -99,7 +100,7 @@ async function verifyStatus(rt: FillRuntime, ctx: FillContext, args: ToolArgs): 
     status,
     checkpoint: cp,
   });
-  endSession(session);
+  endSession(session, "verified as not submitted; draft requeued");
   await session.handle?.done;
   return "Recorded: Ambiguity resolved. Verified draft queued for normal fill with fresh confirm_submit required.";
 }
@@ -117,6 +118,28 @@ export function coverLetterProblem(draft: string): string | null {
 }
 // What stopped the application, so stops can be counted and looked at again by cause.
 const causeParam = { type: "string", enum: WORKER_CAUSES, description: CAUSE_GUIDE };
+
+const WHY_GUIDE =
+  "Why you cannot answer this yourself. " +
+  "agreement: an agreement or acknowledgement out of the ordinary, outside the terms rule. " +
+  "fact_missing: a fact about the candidate that is in neither the candidate details nor the answer bank. " +
+  "skill_not_on_resume: a skill, tool or experience question you cannot settle from the resume; rare, since these are answered from the resume. " +
+  "free_text: a free-text question you cannot answer with a grounded, honest answer from the resume, the job description and the candidate details. " +
+  "sensitive_id: a Social Security number, date of birth or other ID number. " +
+  "history_detail: employment or education detail the resume does not give, such as supervisors, an employer's phone number or exact dates. " +
+  "other: none of these.";
+
+const askUserFields = {
+  question: S.str("The form question verbatim, not including options"),
+  context: S.str(
+    "Verbatim answer-relevant surrounding form/legal text and constraints. Put job IDs, navigation and fill progress in checkpoint fields, not here, unless materially required by this question. Never omit answer-relevant wording.",
+  ),
+  options: { type: "array", items: { type: "string" }, description: "All current choices verbatim and in order, or [] for free text" },
+  why: { type: "string", enum: QUESTION_REASONS, description: WHY_GUIDE },
+  missing: S.str("Optional: the candidate detail or answer bank entry that would settle this question, so the candidate can add it once"),
+  more: { type: "boolean", description: "true when other unknown questions on this page are still to be asked: record this one and keep going" },
+  ...navigationFields,
+};
 
 export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, HostTool> {
   const { job, session, mailbox, isVerification, jobBrowser } = ctx;
@@ -158,20 +181,17 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
     ask_user: {
       description:
         "Consult profile first; then get an exact scoped answer, or record the question. Every unknown question on the page goes in one batch: `more: true` records it and returns, the last one without `more` durably parks on all of them and terminates this worker.",
-      parameters: schema({
-        question: S.str("The form question verbatim, not including options"),
-        context: S.str(
-          "Verbatim answer-relevant surrounding form/legal text and constraints. Put job IDs, navigation and fill progress in checkpoint fields, not here, unless materially required by this question. Never omit answer-relevant wording.",
-        ),
-        options: { type: "array", items: { type: "string" }, description: "All current choices verbatim and in order, or [] for free text" },
-        more: { type: "boolean", description: "true when other unknown questions on this page are still to be asked: record this one and keep going" },
-        ...navigationFields,
-      }),
+      parameters: schema(
+        askUserFields,
+        Object.keys(askUserFields).filter(key => key !== "missing"),
+      ),
       handler: async args => {
         const options: unknown = args["options"];
         if (!Array.isArray(options) || !options.every((option): option is string => typeof option === "string"))
           return "ERROR: options must contain every current choice verbatim.";
-        const input: GateInput = { kind: "question", text: arg.str(args, "question"), context: arg.str(args, "context"), options };
+        const why = arg.oneOf(args, "why", QUESTION_REASONS);
+        const missing = arg.optStr(args, "missing")?.trim() || null;
+        const input: GateInput = { kind: "question", text: arg.str(args, "question"), context: arg.str(args, "context"), options, why, missing };
         const answer = findStoredAnswer(job.id, input);
         if (answer !== null) return `Exact scoped candidate answer: ${answer}`;
         if (!ownsFill(rt, session)) throw new Error("stale fill worker");
@@ -198,7 +218,7 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
           writeJob(job.id, to.skipped(`requires ${SKIPPED_FOR[requires]}: ${arg.str(args, "note")}`));
         })();
         notifyJobChange(job.id);
-        endSession(session);
+        endSession(session, "application skipped by the worker");
         return "Recorded: application skipped. Stop now.";
       },
     },
@@ -293,7 +313,7 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
           }
         })();
         notifyJobChange(job.id);
-        endSession(session);
+        endSession(session, `result reported: ${outcome}`);
         return "Recorded.";
       },
     },

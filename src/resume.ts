@@ -44,6 +44,8 @@ export function compileWorking(dir: string): string | null {
   return res.exitCode === 0 ? null : res.stderr.toString().slice(0, 1500) || `typst exited with ${res.exitCode}`;
 }
 
+export const stockResumeSource = () => (existsSync(STOCK_MAIN) ? readFileSync(STOCK_MAIN, "utf8") : "");
+
 // The stock resume as the Resume page shows it, compiled once per change to the project's files.
 export interface StockResume {
   exists: boolean;

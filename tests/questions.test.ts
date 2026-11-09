@@ -154,7 +154,7 @@ describe("durable questions", () => {
     const second = { ...prompt, text: "Have you ever used a different name?", options: [] };
     const third = { ...prompt, text: "Are you able to work from our office three days a week?", options: ["Yes", "No"] };
     queueQuestion(1, prompt); queueQuestion(1, second); queueQuestion(1, third);
-    assert.deepEqual(nextQueuedQuestion(1), prompt);
+    assert.deepEqual(nextQueuedQuestion(1), { ...prompt, why: null, missing: null });
     const first = parkGate(1, nextQueuedQuestion(1), checkpoint);
     const asking = () => listQuestionGroups().flatMap(g => g.jobs).find(j => j.id === 1);
     assert.equal(asking().queuedAfter, 2);
@@ -186,6 +186,46 @@ describe("durable questions", () => {
     answerGate(asked.id, "No", "application");
     assert.equal(getJob(3).status, "approved");
     assert.equal(getOpenGate(3), null);
+  `);
+  });
+
+  it("keeps why the agent asked and what would settle it from the queue to the parked gate and the Questions list", () => {
+    scenario(`
+    job(1); job(2);
+    const second = { ...prompt, text: "Employer phone number?", options: [], why: "history_detail", missing: "Phone numbers of past employers" };
+    queueQuestion(1, { ...prompt, why: "fact_missing", missing: "Relocation preference" }); queueQuestion(1, second);
+    const first = parkGate(1, nextQueuedQuestion(1), checkpoint);
+    assert.equal(first.why, "fact_missing");
+    assert.equal(first.missing, "Relocation preference");
+    const group = listQuestionGroups().find(g => g.key === first.groupKey);
+    assert.equal(group.why, "fact_missing");
+    assert.equal(group.missing, "Relocation preference");
+    answerGate(first.id, "No", "application");
+    assert.equal(getOpenGate(1).why, "history_detail");
+    assert.equal(getOpenGate(1).missing, "Phone numbers of past employers");
+    const old = parkGate(2, prompt, checkpoint);
+    assert.equal(old.why, null);
+    assert.equal(old.missing, null);
+  `);
+  });
+
+  it("never asks a question again once it is answered, even without context", () => {
+    scenario(`
+    job(1);
+    const bare = { kind: "question", text: "Do you require sponsorship?", context: "", options: [] };
+    const second = { ...prompt, text: "Have you ever used a different name?", options: [] };
+    queueQuestion(1, bare); queueQuestion(1, second);
+    const first = parkGate(1, nextQueuedQuestion(1), checkpoint);
+    assert.equal(first.text, bare.text);
+    answerGate(first.id, "No", "application");
+    assert.equal(getJob(1).status, "needs_input");
+    assert.equal(getOpenGate(1).text, second.text);
+    assert.equal(nextQueuedQuestion(1).text, second.text);
+    answerGate(getOpenGate(1).id, "No", "application");
+    assert.equal(getJob(1).status, "approved");
+    assert.equal(getOpenGate(1), null);
+    assert.equal(nextQueuedQuestion(1), null);
+    assert.deepEqual(resumeContext(1).answers.map(a => a.answer), ["No", "No"]);
   `);
   });
 

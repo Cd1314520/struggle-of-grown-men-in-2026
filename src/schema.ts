@@ -410,6 +410,15 @@ function referrals(db: Database) {
   ]);
 }
 
+function gateReasons(db: Database) {
+  runEach(db, [
+    "ALTER TABLE queued_questions ADD COLUMN why TEXT",
+    "ALTER TABLE queued_questions ADD COLUMN missing TEXT",
+    "ALTER TABLE question_gates ADD COLUMN why TEXT",
+    "ALTER TABLE question_gates ADD COLUMN missing TEXT",
+  ]);
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: "baseline", up: baseline },
   { version: 2, name: "status history", up: statusHistory },
@@ -419,6 +428,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 6, name: "blockers", up: blockers },
   { version: 7, name: "answer bank", up: answerBank },
   { version: 8, name: "referrals", up: referrals },
+  { version: 9, name: "gate reasons", up: gateReasons },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

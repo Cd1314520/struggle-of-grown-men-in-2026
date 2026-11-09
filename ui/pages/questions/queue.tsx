@@ -4,11 +4,13 @@ import { CompanyMark, ListGroup, ListRow, Time } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { plural } from "../../lib/format";
 import { href } from "../../lib/router";
+import { whyLabel } from "../../lib/why";
 import { questionText, sections } from "./model";
 
 function QueueRow({ group, selected, desktopOnly }: { group: QuestionGroup; selected: boolean; desktopOnly: boolean }) {
   const company = group.jobs[0]?.company ?? "";
   const many = group.jobs.length;
+  const gist = [whyLabel(group.why), many > 1 ? plural(many, "application") : null].filter(Boolean).join(" · ");
   return (
     <ListRow
       href={href("questions", group.key)}
@@ -21,8 +23,9 @@ function QueueRow({ group, selected, desktopOnly }: { group: QuestionGroup; sele
       title={questionText(group.text)}
       titleLines={3}
       secondary={company}
-      gist={many > 1 && <span className="tabular">{plural(many, "application")}</span>}
+      gist={gist || null}
       fact={<Time at={group.createdAt} short />}
+      snippet={group.missing ? `Missing: ${group.missing}` : null}
     />
   );
 }

@@ -71,8 +71,11 @@ export function yearsAsked(description: string | null | undefined): number | nul
 }
 
 // Application portals no application from here has got through, by host. Paycom refuses to create
-// the candidate's account after its hCaptcha, every time.
-const DEAD_ENDS: [RegExp, string][] = [[/(^|\.)paycomonline\.(net|com)$/, "Paycom's applicant portal refuses to create the candidate's account"]];
+// the candidate's account after its hCaptcha, every time, and Lever's hCaptcha rejects every submit.
+const DEAD_ENDS: [RegExp, string][] = [
+  [/(^|\.)paycomonline\.(net|com)$/, "Paycom's applicant portal refuses to create the candidate's account"],
+  [/(^|\.)lever\.co$/, "Lever's hCaptcha rejects this machine's submissions"],
+];
 
 // Why an application at `url` cannot get through, or null.
 export function deadEnd(url: string): string | null {

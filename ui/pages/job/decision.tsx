@@ -49,6 +49,7 @@ import { ago, cap, plain } from "../../lib/format";
 import { combo, useHotkeys } from "../../lib/hotkeys";
 import type { Tone } from "../../lib/labels";
 import { href } from "../../lib/router";
+import { whyLabel } from "../../lib/why";
 import { useDraft, type JobActions } from "./actions";
 import { enteredOf, parsePending, setAsideOf, type DecisionKind } from "./model";
 
@@ -113,6 +114,18 @@ function Asked({ text, context }: { text: string; context?: string | undefined }
         </Clamp>
       )}
     </div>
+  );
+}
+
+function WhyAsked({ gate }: { gate: NonNullable<JobDetail["gate"]> }) {
+  const label = whyLabel(gate.why);
+  if (!label && !gate.missing) return null;
+  return (
+    <p className="text-sm break-words text-fg-muted">
+      {label && <span className="font-medium text-fg">{label}</span>}
+      {label && gate.missing && " · "}
+      {gate.missing && `Missing: ${gate.missing}`}
+    </p>
   );
 }
 
@@ -471,6 +484,7 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       body: (
         <div className="flex flex-col gap-4">
           <Asked text={gate.text} context={gate.context} />
+          {!letter && <WhyAsked gate={gate} />}
           {!letter && <Options options={gate.options} value={answer} onPick={setAnswer} />}
           <AnswerBox
             label={letter ? "Cover letter" : "Your answer"}

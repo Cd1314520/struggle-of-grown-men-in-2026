@@ -1,7 +1,7 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
 exports[`schema migrations produces exactly the recorded schema 1`] = `
-"version 8
+"version 9
 
 CREATE TRIGGER jobs_blockers_forgotten AFTER DELETE ON jobs
 BEGIN
@@ -191,7 +191,7 @@ scope TEXT CHECK(scope IN ('application','bank')),
 shot INTEGER,
 created_at TEXT NOT NULL,
 answered_at TEXT
-);
+, why TEXT, missing TEXT);
 
 CREATE TABLE queued_questions (
 job_id INTEGER NOT NULL,
@@ -199,7 +199,7 @@ match_key TEXT NOT NULL,
 text TEXT NOT NULL,
 context TEXT NOT NULL,
 options TEXT NOT NULL,
-queued_at TEXT NOT NULL,
+queued_at TEXT NOT NULL, why TEXT, missing TEXT,
 PRIMARY KEY (job_id, match_key)
 );
 
