@@ -114,6 +114,7 @@ const SKIPPED_FOR = {
   own_work: "work the candidate must produce",
   phone_code: "a code sent to the candidate's phone",
   personal_login: "a personal account the candidate must sign in to",
+  hcaptcha: "an hCaptcha this machine cannot pass",
   coursework: "completed coursework the candidate does not have",
 };
 const SKIP_GUIDE =
@@ -122,8 +123,9 @@ const SKIP_GUIDE =
   "own_work: a portfolio file, work sample or take-home the candidate has not supplied, or an answer the employer says must be written without AI. " +
   "phone_code: a code texted or phoned to the candidate, or an authenticator app, with no email alternative. " +
   "personal_login: signing in to a personal account you have no credentials for (Google, LinkedIn, Microsoft, Apple). " +
+  "hcaptcha: an hCaptcha that rejected every honest attempt allowed, or a form on jobs.lever.co. " +
   "coursework: completed coursework the form makes a condition of applying and the answer bank says the candidate lacks.";
-const SKIPPED_AFTER_SUBMIT = ["own_work", "phone_code"];
+const SKIPPED_AFTER_SUBMIT = ["own_work", "phone_code", "hcaptcha"];
 
 // Why a cover letter draft cannot go to the candidate as it is, or null.
 export function coverLetterProblem(draft: string): string | null {

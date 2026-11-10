@@ -515,10 +515,10 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(authorizeSubmit(1), true);
   assert.match(await call(first, "skip_application", { requires: "references", note: "References*" }), /cannot be skipped/);
   assert.equal(jobRow(1).status, "filling");
-  assert.match(await call(first, "skip_application", { requires: "phone_code", note: "A text-message code is the only way to continue" }), /skipped/);
+  assert.match(await call(first, "skip_application", { requires: "hcaptcha", note: "Three drag puzzles rejected; form came back" }), /skipped/);
   first.exit();
   assert.equal(jobRow(1).status, "skipped");
-  assert.match(jobRow(1).note ?? "", /^requires a code sent to the candidate's phone: A text-message/);
+  assert.match(jobRow(1).note ?? "", /^requires an hCaptcha this machine cannot pass: Three drag/);
   assert.equal(isSubmitting(1), false);
   assert.equal(core.getOpenGate(1), null);
   await until(() => !scheduler.activeFillSession(1));
