@@ -26,6 +26,7 @@ export const recoveryMode = (jobId: number): "verify" | "fill" | null =>
   isVerifying(jobId) ? "verify" : fillPhase(jobId) === "draft_recovery" ? "fill" : null;
 
 export const authorizeSubmit = (jobId: number) => cas(jobId, "submitting", ["idle"]);
+export const refuseSubmit = (jobId: number) => cas(jobId, "idle", ["submitting"]);
 export const beginAttempt = (jobId: number): FillPhase => {
   cas(jobId, "idle", ["draft_recovery"]);
   cas(jobId, "verifying", ["verify_queued"]);

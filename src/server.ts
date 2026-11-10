@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { scoreJob } from "./ats-job";
 import type { ActivityResult, AppState, Attention, BlockersResult, JobDetail, ModelsResult, ResumeState, SettingsResult, Summary } from "./api-types";
 import { feedNames, loadCompanies } from "./ats";
 import { jobBlockers, listBlockers } from "./blockers";
@@ -491,6 +492,14 @@ export function createHandler(scheduler: Scheduler) {
         clearBrief(step.id);
         void scheduler.interviewPrep();
         return json({ ok: true });
+      }
+      if (sub === "/ats") {
+        try {
+          const report = scoreJob(job);
+          return report ? json(report) : fail("no resume yet", 404);
+        } catch (e) {
+          return fail(errorMessage(e), 500);
+        }
       }
       if (sub === "/resume.pdf") {
         const file = Bun.file(resumeFiles(job.id, job.resume_sha).pdf);

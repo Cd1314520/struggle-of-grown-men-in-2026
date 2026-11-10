@@ -93,7 +93,29 @@ function normalizeTenantDomain(urlOrDomain: string): string {
   return `${hostname}${portSuffix}`;
 }
 
-export function resolveAccount(domain: string, mailbox: string, allowCreate: boolean): string {
+export interface PasswordRule {
+  min?: number;
+  max?: number;
+}
+
+const DEFAULT_LENGTH = 16;
+const SUFFIX = "aA1!";
+
+function passwordLength(rule: PasswordRule): number {
+  const min = Math.max(SUFFIX.length + 4, Math.floor(rule.min ?? 0));
+  const max = Math.max(min, Math.floor(rule.max ?? 64));
+  return Math.min(Math.max(DEFAULT_LENGTH, min), max);
+}
+
+function newPassword(rule: PasswordRule): string {
+  const length = passwordLength(rule) - SUFFIX.length;
+  return randomBytes(length).toString("base64url").replace(/[-_]/g, "x").slice(0, length) + SUFFIX;
+}
+
+const breaksRule = (password: string, rule: PasswordRule) =>
+  (rule.min !== undefined && password.length < rule.min) || (rule.max !== undefined && password.length > rule.max);
+
+export function resolveAccount(domain: string, mailbox: string, allowCreate: boolean, rule: PasswordRule = {}): string {
   let key: string;
   try {
     key = normalizeTenantDomain(domain);
@@ -107,6 +129,17 @@ export function resolveAccount(domain: string, mailbox: string, allowCreate: boo
   }
 
   const existingRow = db.query<{ email: string; password: string }, [string]>("SELECT email, password FROM accounts WHERE domain = ?").get(key);
+
+  if (existingRow && allowCreate && breaksRule(existingRow.password, rule)) {
+    const password = newPassword(rule);
+    db.query("UPDATE accounts SET password = ? WHERE domain = ?").run(password, key);
+    return JSON.stringify({
+      email: existingRow.email,
+      password,
+      existing: false,
+      replaced: "The stored password could not have been registered here: it breaks the length rule you gave. Register with this one.",
+    });
+  }
 
   if (existingRow) {
     return JSON.stringify({
@@ -133,7 +166,7 @@ export function resolveAccount(domain: string, mailbox: string, allowCreate: boo
     });
   }
 
-  const password = `${randomBytes(7).toString("base64url")}aA1!`;
+  const password = newPassword(rule);
   db.query("INSERT INTO accounts (domain, email, password) VALUES (?, ?, ?)").run(key, cleanMailbox, password);
   return JSON.stringify({ email: cleanMailbox, password, existing: false });
 }

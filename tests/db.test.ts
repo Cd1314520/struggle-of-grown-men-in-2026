@@ -210,6 +210,31 @@ describe("job queries", () => {
   `);
   });
 
+  it("counts open applications per employer and remembers rejections after an interview", () => {
+    scenario(`
+    job(1, { status: "triaged", company_key: "acme" });
+    job(2, { status: "submitted", company_key: "acme" });
+    job(3, { status: "rejected_by_company", company_key: "acme", submitted_at: "2026-01-01 00:00:00", updated_at: "2026-01-02 00:00:00" });
+    job(4, { status: "withdrawn", company_key: "acme", submitted_at: "2026-01-01 00:00:00" });
+    job(5, { status: "held", company_key: "acme", submitted_at: "2026-01-01 00:00:00" });
+    assert.equal(store.employerApplications(store.getJob(1)), 2, "closed applications free their place");
+    assert.equal(store.employerRejectionAfterInterview(store.getJob(1), 180), null, "a rejection without an interview starts no wait");
+
+    job(6, { status: "rejected_by_company", company_key: "beta" });
+    db.run("INSERT INTO application_steps (job_id, kind, title, source) VALUES (6, 'interview', 'Onsite', 'user')");
+    job(7, { status: "triaged", company_key: "beta" });
+    assert.match(store.employerRejectionAfterInterview(store.getJob(7), 180) ?? "", /^\\d{4}-\\d{2}-\\d{2}/);
+    assert.equal(store.employerRejectionAfterInterview(store.getJob(7), 0), null, "0 days turns the wait off");
+    assert.equal(store.employerRejectionAfterInterview(store.getJob(6), 180), null, "a job does not wait on itself");
+
+    job(8, { status: "rejected_by_company", company_key: "gamma", updated_at: "2020-01-01 00:00:00" });
+    db.run("INSERT INTO status_changes (job_id, from_status, to_status, at) VALUES (8, 'submitted', 'interview', '2019-12-01 00:00:00'), (8, 'interview', 'rejected_by_company', '2020-01-01 00:00:00')");
+    job(9, { status: "triaged", company_key: "gamma" });
+    assert.equal(store.employerRejectionAfterInterview(store.getJob(9), 180), null, "an old rejection has served its wait");
+    assert.equal(store.employerRejectionAfterInterview(store.getJob(9), 365 * 10), "2020-01-01 00:00:00");
+  `);
+  });
+
   it("reads events newest first, with and without worker chatter", () => {
     scenario(`
     job(1);
@@ -721,20 +746,38 @@ describe("postings, duplicates and sources", () => {
     store.dedupeExisting();
     assert.deepEqual([store.getJob(3).company_key, store.getJob(5).company_key, store.getJob(5).dedupe_key], ["stale", "new", "new|analyst"]);
 
-    // Postings are folded as they are inserted, so with the rules version recorded only the companies
-    // of rows keyed just now are searched for duplicates: searching all of them takes minutes.
+    // With the rules version recorded, only employers with a new, changed or newly keyed job since the
+    // last sweep are searched for duplicates (the next test): searching all of them takes minutes.
     job(8, { company: "Other Co", title: "Software Engineer", company_key: "other", dedupe_key: "other|engineer software" });
     job(9, { company: "Other Co", title: "Software Engineer" });
-    job(10, { company: "Gamma", title: "Analyst", company_key: "gamma", dedupe_key: "gamma|analyst" });
-    job(11, { company: "Gamma", title: "Analyst", company_key: "gamma", dedupe_key: "gamma|analyst" });
     store.dedupeExisting();
-    assert.deepEqual([4, 8, 9, 10, 11].map(id => store.getJob(id) !== null), [true, false, false, true, true]);
+    assert.deepEqual([4, 8, 9].map(id => store.getJob(id) !== null), [true, false, false]);
 
     // A new rules version re-keys everything and searches every company again.
     store.kvSet("dedupe.version", "1");
     store.dedupeExisting();
     assert.equal(store.getJob(3).company_key, "acme");
-    assert.equal(store.getJob(11), null);
+  `);
+  });
+
+  it("after a full pass, rechecks only employers with a new or changed job", () => {
+    scenario(`
+    job(1, { company: "Acme", title: "Analyst", status: "skipped" });
+    job(2, { company: "Beta", title: "Analyst", status: "skipped" });
+    store.dedupeExisting();
+    db.run("UPDATE jobs SET updated_at = datetime('now', '-1 day')");
+    store.kvSet("dedupe.swept", JSON.stringify({ id: 2, at: db.query("SELECT datetime('now', '-1 hour') AS at").get().at }));
+
+    job(3, { company: "Acme", title: "Analyst", status: "skipped" });
+    db.run("UPDATE jobs SET updated_at = datetime('now', '-1 day') WHERE id = 3");
+    db.run("INSERT INTO jobs (id, url, source, company, title, status, company_key, updated_at) VALUES (4, 'https://ats.example/jobs/4', 'test', 'Beta', 'Analyst', 'skipped', 'beta', datetime('now', '-1 day'))");
+    db.run("UPDATE kv SET value = json_set(value, '$.id', 4) WHERE key = 'dedupe.swept'");
+    store.dedupeExisting();
+    assert.deepEqual(ids(db.query("SELECT id FROM jobs ORDER BY id").all()), [1, 2, 4]);
+
+    store.writeJob(4, { title: "Analyst" });
+    store.dedupeExisting();
+    assert.deepEqual(ids(db.query("SELECT id FROM jobs ORDER BY id").all()), [1, 2]);
   `);
   });
 

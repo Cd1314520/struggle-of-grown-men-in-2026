@@ -2,10 +2,11 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { employerCapNote } from "../src/auto";
 import { homeOf, nearHome } from "../src/home";
 import { practiceRefusal, type PracticeAssessment } from "../src/practice";
 import { setAsideReason } from "../src/reasons";
+
+const capNote = "already applying to 1 other role at this employer (auto apply allows 1)";
 
 const judged = (fields: Partial<PracticeAssessment>): PracticeAssessment => ({
   version: 4,
@@ -48,7 +49,7 @@ describe("why a job was set aside", () => {
       label: "Frontier employer",
       detail: "The employer is on your frontier list",
     });
-    expect(setAsideReason(`needs your review: ${employerCapNote(1)}`, "awaiting_approval", "review")?.label).toStartWith("Already applying to 1 other role");
+    expect(setAsideReason(`needs your review: ${capNote}`, "awaiting_approval", "review")?.label).toStartWith("Already applying to 1 other role");
     expect(setAsideReason("needs your review: posted base ceiling $129,120 is above the $100,000 practice limit", "awaiting_approval", "review")).toEqual({
       label: "Posted base ceiling $129,120 is above the $100,000 practice limit",
       detail: null,
@@ -59,7 +60,10 @@ describe("why a job was set aside", () => {
     expect(setAsideReason("second parked role at Netic (auto apply allows 1 per employer)", "awaiting_approval", null)?.label).toBe(
       "Already applying at this employer",
     );
-    expect(setAsideReason(employerCapNote(1), "prepping", null)?.label).toBe("Already applying at this employer");
+    expect(setAsideReason(capNote, "prepping", null)?.label).toBe("Already applying at this employer");
+    expect(setAsideReason("this employer turned you down after interviewing on 2026-10-01 (auto apply waits 180 days)", "prepping", null)?.label).toBe(
+      "Turned down after an interview here",
+    );
   });
 
   it("reads notes typed by hand the same way", () => {

@@ -4,6 +4,7 @@ import type { JobDetail } from "../../../src/api-types";
 import { Button, Disclosure, Section, Skeleton, Time } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { resumeChangesOf } from "./model";
+import { AtsPanel } from "./ats";
 
 function Diff({ diff }: { diff: string }) {
   return (
@@ -77,6 +78,7 @@ export function Resume({ job }: { job: JobDetail }) {
             )}
           </p>
         )}
+        {job.hasPdf && !job.resumeFrozen && <AtsPanel jobId={job.id} version={job.resume_sha ?? job.updated_at} frozen={false} />}
         <Section title="What changed">
           {changes.length ? (
             <ul className="flex list-disc flex-col gap-2 pl-5 text-base text-fg marker:text-fg-subtle">
@@ -89,6 +91,7 @@ export function Resume({ job }: { job: JobDetail }) {
           )}
           {!job.hasPdf && <p className="mt-4 text-sm text-fg-muted">{job.resumeFrozen ? "No PDF on file." : "No PDF yet."}</p>}
         </Section>
+        {job.hasPdf && job.resumeFrozen && <AtsPanel jobId={job.id} version={job.resume_sha ?? job.updated_at} frozen />}
       </div>
       {job.hasPdf && (
         <div className="flex flex-col gap-3 @3xl:mt-1">

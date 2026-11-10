@@ -3,7 +3,11 @@ import { config } from "../src/config";
 import { db, getJob, insertJob, moveJob, updateJob } from "../src/db";
 import { countOne, usedToday } from "../src/limits";
 import type { RunWorker, ToolArgs, WorkerOptions } from "../src/worker";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { deferApproval, reconsiderDeferred } from "../src/deferred-approvals";
 import { prep } from "../src/prep";
+import { workingPdf } from "../src/resume";
 import { checklistText, screenChecklistText, screenVerdict } from "../src/rubric";
 import { to } from "../src/status";
 
@@ -90,6 +94,48 @@ describe("prep before the full assessment", () => {
     expect(started).toEqual([]);
     expect(getJob(job.id)).toMatchObject({ status: "skipped", note: "already applying to 1 other role at this employer (auto apply allows 1)" });
     expect(usedToday("prep")).toBe(before - 1);
+  });
+
+  it("lets a further role through once the employer's application closes, unless it closed after an interview", async () => {
+    config.approval = "auto";
+    config.autoApply = { ...config.autoApply, perEmployer: 1, cooldownDays: 180 };
+    const declined = preppingJob("Declined Co");
+    db.run("UPDATE jobs SET status = 'rejected_by_company', submitted_at = datetime('now') WHERE id = ?", [declined.id]);
+    const next = preppingJob("Declined Co");
+    const { run, started } = fakeRun();
+    await prep(next, run);
+    expect(started).not.toEqual([]);
+
+    const interviewed = preppingJob("Interviewed Co");
+    db.run("UPDATE jobs SET status = 'rejected_by_company', submitted_at = datetime('now') WHERE id = ?", [interviewed.id]);
+    db.run("INSERT INTO application_steps (job_id, kind, title, source) VALUES (?, 'interview', 'Onsite', 'user')", [interviewed.id]);
+    const after = preppingJob("Interviewed Co");
+    await prep(after, fakeRun().run);
+    expect(getJob(after.id)?.status).toBe("skipped");
+    expect(getJob(after.id)?.note).toMatch(/turned you down after interviewing on \d{4}-\d{2}-\d{2} \(auto apply waits 180 days\)$/);
+  });
+
+  it("keeps a job waiting on its employer for reconsideration, with its note current", () => {
+    config.approval = "auto";
+    config.autoApply = { ...config.autoApply, perEmployer: 1, perDay: 1000 };
+    const sent = preppingJob("Crowded Co");
+    db.run("UPDATE jobs SET status = 'submitted' WHERE id = ?", [sent.id]);
+    const waiting = preppingJob("Crowded Co");
+    db.run("UPDATE jobs SET status = 'awaiting_approval', note = 'needs your review: stale' WHERE id = ?", [waiting.id]);
+    mkdirSync(dirname(workingPdf(waiting.id)), { recursive: true });
+    writeFileSync(workingPdf(waiting.id), "PDF");
+    deferApproval(waiting.id);
+    reconsiderDeferred();
+    expect(getJob(waiting.id)).toMatchObject({
+      status: "awaiting_approval",
+      note: "needs your review: already applying to 1 other role at this employer (auto apply allows 1)",
+    });
+    expect(getJob(waiting.id)?.deferred_at).not.toBeNull();
+
+    config.autoApply = { ...config.autoApply, perEmployer: 2 };
+    reconsiderDeferred();
+    expect(getJob(waiting.id)?.deferred_at).toBeNull();
+    expect(getJob(waiting.id)?.note).toMatch(/^needs your review: (?!already applying)/);
   });
 
   it("skips a job the screen rules out, and gives back the day's count", async () => {

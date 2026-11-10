@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { autoApply, reconsiderAutoApproval } from "./auto";
-import { db, deferredJobs, employerApplications, logEvent, moveJob, notifyJobChange, openedAt, updateJob } from "./db";
+import { autoApply, employerHold, reconsiderAutoApproval } from "./auto";
+import { db, deferredJobs, logEvent, moveJob, notifyJobChange, openedAt, updateJob } from "./db";
 import { countOne, usedToday } from "./limits";
 import { profileProblems } from "./profile";
 import { workingPdf } from "./resume";
@@ -14,7 +14,10 @@ export const forgetDeferredApproval = (jobId: number) => {
 };
 
 export function pumpDeferredApprovals() {
-  if (profileProblems().length > 0) return;
+  if (profileProblems().length === 0) reconsiderDeferred();
+}
+
+export function reconsiderDeferred() {
   const rules = autoApply();
   if (!rules.enabled) return;
 
@@ -33,11 +36,18 @@ export function pumpDeferredApprovals() {
       continue;
     }
 
+    const hold = employerHold(job);
+    if (hold) {
+      const note = `needs your review: ${hold}`;
+      if (job.note !== note) updateJob(job.id, { note });
+      continue;
+    }
+
     const result = reconsiderAutoApproval(job, {
       concerns: job.concerns,
       handPicked: false,
       approvedToday: usedToday("auto"),
-      employerApplications: employerApplications(job),
+      employerHold: null,
     });
 
     if (result.approved && result.verdict) {

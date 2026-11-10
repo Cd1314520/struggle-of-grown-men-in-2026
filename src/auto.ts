@@ -1,5 +1,5 @@
 import { config, describing } from "./config";
-import type { Job } from "./db";
+import { employerApplications, employerRejectionAfterInterview, type Job } from "./db";
 import { employerListing } from "./employers";
 import { needsJudgment, parsePracticeAssessment, practiceReason, practiceRefusal } from "./practice";
 import { evaluate, type Verdict } from "./rubric";
@@ -9,6 +9,7 @@ export const autoApply = () => ({
   allowConcerns: false,
   perDay: 5,
   perEmployer: Infinity,
+  cooldownDays: 180,
   ...config.autoApply,
   enabled: config.approval === "auto",
 });
@@ -30,12 +31,12 @@ function storedAssessment(job: { company?: string; practice_assessment?: string 
 export interface AutoApprovalResult {
   approve: boolean;
   note: string | null;
-  deferred?: "daily_cap";
+  deferred?: "daily_cap" | "employer";
 }
 
 export function autoApproval(
   verdict: Verdict,
-  facts: { concerns: string | null; handPicked: boolean; approvedToday: number; employerApplications?: number },
+  facts: { concerns: string | null; handPicked: boolean; approvedToday: number; employerHold?: string | null },
 ): AutoApprovalResult {
   const rules = autoApply();
   if (!rules.enabled) return { approve: false, note: null };
@@ -47,11 +48,10 @@ export function autoApproval(
   if (refusal) return review(refusal);
 
   if (verdict.score < rules.minScore) return review(`score ${verdict.score} is below the auto-apply bar of ${rules.minScore}`);
-  const unclear = verdict.items.filter(i => i.phase === verdict.rubric && i.required && i.answer === "unclear");
+  const unclear = verdict.items.filter(i => i.phase === verdict.rubric && i.required && !i.unclearOk && i.answer === "unclear");
   if (unclear.length) return review(`the posting does not settle: ${unclear.map(i => i.label).join(", ")}`);
   if (!rules.allowConcerns && facts.concerns?.trim()) return review("the assessment raised concerns");
-  const others = facts.employerApplications ?? 0;
-  if (others >= rules.perEmployer) return review(employerCapNote(others));
+  if (facts.employerHold) return { ...review(facts.employerHold), deferred: "employer" };
   if (facts.approvedToday >= rules.perDay) {
     return {
       approve: false,
@@ -62,8 +62,15 @@ export function autoApproval(
   return { approve: true, note: null };
 }
 
-export const employerCapNote = (others: number) =>
-  `already applying to ${others} other role${others === 1 ? "" : "s"} at this employer (auto apply allows ${autoApply().perEmployer})`;
+export function employerHold(job: Pick<Job, "id" | "company_key">): string | null {
+  const rules = autoApply();
+  const others = employerApplications(job);
+  if (others >= rules.perEmployer)
+    return `already applying to ${others} other role${others === 1 ? "" : "s"} at this employer (auto apply allows ${rules.perEmployer})`;
+  const rejected = employerRejectionAfterInterview(job, rules.cooldownDays);
+  if (rejected) return `this employer turned you down after interviewing on ${rejected.slice(0, 10)} (auto apply waits ${rules.cooldownDays} days)`;
+  return null;
+}
 
 export type ReconsiderJob = Pick<
   Job,
@@ -73,7 +80,7 @@ export type ReconsiderJob = Pick<
 export interface ReconsiderFacts {
   handPicked: boolean;
   approvedToday: number;
-  employerApplications?: number;
+  employerHold?: string | null;
   concerns?: string | null;
 }
 
@@ -151,7 +158,7 @@ export function reconsiderAutoApproval(job: ReconsiderJob, facts: ReconsiderFact
     concerns: facts.concerns ?? job.concerns ?? null,
     handPicked: false,
     approvedToday: facts.approvedToday,
-    ...(facts.employerApplications === undefined ? {} : { employerApplications: facts.employerApplications }),
+    ...(facts.employerHold === undefined ? {} : { employerHold: facts.employerHold }),
   });
 
   return {

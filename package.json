@@ -7,6 +7,7 @@
     "dev": "NODE_ENV=development bun --watch src/server.ts",
     "migrate": "bun scripts/migrate.ts",
     "codex:login": "bun scripts/codex-login.ts",
+    "ats": "bun scripts/ats-score.ts",
     "reassess-backlog": "bun scripts/reassess-backlog.ts",
     "watch-known-boards": "bun scripts/watch-known-boards.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p ui",

@@ -326,12 +326,11 @@ describe("autoApproval and submission safety", () => {
     expect(capBlockedRes.approve).toBe(false);
     expect(capBlockedRes.deferred).toBe("daily_cap");
 
-    config.autoApply = { ...config.autoApply, perEmployer: 1 };
-    expect(autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 0, employerApplications: 0 }).approve).toBe(true);
-    const employerRes = autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 0, employerApplications: 1 });
+    expect(autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 0, employerHold: null }).approve).toBe(true);
+    const employerRes = autoApproval(validVerdict, { concerns: null, handPicked: false, approvedToday: 0, employerHold: "already applying to 1 other role" });
     expect(employerRes.approve).toBe(false);
-    expect(employerRes.deferred).toBeUndefined();
-    expect(employerRes.note).toMatch(/already applying to 1 other role at this employer/);
+    expect(employerRes.deferred).toBe("employer");
+    expect(employerRes.note).toBe("needs your review: already applying to 1 other role");
   });
 
   it("confirmsSubmit fails closed for auto jobs that no longer prove practice while targets are held back", () => {
@@ -472,6 +471,9 @@ describe("autoApproval deferred 'daily_cap' contract", () => {
     const unclearRes = autoApproval(unclearVerdict, { concerns: null, handPicked: false, approvedToday: 5 });
     expect(unclearRes.approve).toBe(false);
     expect(unclearRes.deferred).toBeUndefined();
+
+    const settledByForm: Verdict = { ...unclearVerdict, items: unclearVerdict.items.map(i => ({ ...i, unclearOk: true })) };
+    expect(autoApproval(settledByForm, { concerns: null, handPicked: false, approvedToday: 0 }).approve).toBe(true);
 
     const concernsRes = autoApproval(validVerdict, { concerns: "relocation required", handPicked: false, approvedToday: 5 });
     expect(concernsRes.approve).toBe(false);

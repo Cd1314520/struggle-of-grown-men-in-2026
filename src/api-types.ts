@@ -40,6 +40,7 @@ export interface AppState {
     allowConcerns: boolean;
     perDay: number;
     perEmployer: number | null;
+    cooldownDays: number;
     approvedToday: number;
   };
   applyPerDay: number;
@@ -192,3 +193,4 @@ export interface ReferralImportResult {
   connections: number | null; // null: the upload had no Connections.csv
   updates: number;
 }
+export type { AtsReport, Dimension, Keyword } from "./ats-score";

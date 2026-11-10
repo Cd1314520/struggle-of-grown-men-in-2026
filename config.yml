@@ -76,7 +76,8 @@ autoApply:
   minScore: 60 # align with the practice interview-fit threshold; score alone never makes a job practice
   allowConcerns: true # expected dealbreakers are the point; hard requirements and evidence gates still apply
   perDay: 100 # auto-approvals a day; limits.applyPerDay still caps new applications
-  perEmployer: 1 # applications per employer, ever (sent or under way); further passing roles there wait for your review
+  perEmployer: 2 # open applications per employer (under way, sent, interviewing); further passing roles there wait for your review
+  cooldownDays: 180 # after an employer turns you down post-interview, its roles wait for your review this long (0: never)
 
 # Minutes between automatic runs. 0 disables that run (use the UI buttons).
 #   scan      re-reads every watched company board and the feeds below; only new postings cost anything

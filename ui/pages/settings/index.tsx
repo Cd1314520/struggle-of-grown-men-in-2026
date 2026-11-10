@@ -251,8 +251,14 @@ function AutoApply({ s }: { s: Summary }) {
       <ConfigRow
         path="autoApply.perEmployer"
         label="Applications per employer"
-        description="Ever, sent or under way. Further passing roles there wait for your review."
+        description="Open at once: under way, sent or interviewing. Rejections and withdrawals free a place. Further passing roles there wait for your review."
         field={{ kind: "number" }}
+      />
+      <ConfigRow
+        path="autoApply.cooldownDays"
+        label="Wait after an interview rejection"
+        description="Roles at an employer that turned you down after interviewing wait for your review this long. 0 turns it off."
+        field={{ kind: "number", unit: "days" }}
       />
     </SettingsPanel>
   );

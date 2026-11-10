@@ -106,7 +106,7 @@ const CONFIG = shape(
     vncUrl: orNull(url),
     mailbox: orNull(matching(/^\S+@\S+$/, "an email address")),
     coverLetters: oneOf("skip", "draft"),
-    autoApply: shape({}, { minScore: amount(), allowConcerns: bool, perDay: count(), perEmployer: count() }),
+    autoApply: shape({}, { minScore: amount(), allowConcerns: bool, perDay: count(), perEmployer: count(), cooldownDays: count() }),
     questionDigest: shape({}, { enabled: bool, time: matching(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:mm in 24-hour local time"), timeZone: text }),
     screen: shape(
       {},

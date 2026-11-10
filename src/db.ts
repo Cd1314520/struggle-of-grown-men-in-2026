@@ -100,6 +100,8 @@ export const jobsInStatuses = (statuses: readonly Status[]) =>
 // Jobs with a saved browser checkpoint, whatever their status.
 export const jobsWithCheckpoint = () => db.query<Job, []>("SELECT * FROM jobs WHERE fill_checkpoint IS NOT NULL").all();
 
+export const jobsWithResume = () => db.query<Job, []>("SELECT * FROM jobs WHERE resume_sha IS NOT NULL ORDER BY id").all();
+
 // Applications still waiting for an outcome, most recently submitted first.
 export const applicationsAwaitingOutcome = (limit = 300) =>
   db
@@ -172,28 +174,38 @@ export const statusCounts = (): Record<string, number> =>
       .map(r => [r.status, r.n]),
   );
 
-// Statuses that count as an application to the employer: sent, or approved and on its way.
-const APPLICATIONS: readonly Status[] = [
-  "approved",
-  "filling",
-  "needs_input",
-  "awaiting_submit",
-  "needs_manual",
-  "submitted",
-  "interview",
-  "offer",
-  "rejected_by_company",
-  "withdrawn",
-];
-// How many applications the job's employer has besides this job, ever.
+// Statuses that count as an application to the employer: open ones are sent, or approved and on their way.
+const OPEN_APPLICATIONS: readonly Status[] = ["approved", "filling", "needs_input", "awaiting_submit", "needs_manual", "submitted", "interview", "offer"];
+const CLOSED_APPLICATIONS: readonly Status[] = ["rejected_by_company", "withdrawn"];
 export const employerApplications = (job: Pick<Job, "id" | "company_key">) =>
   job.company_key
     ? (db
-        .query<{ n: number }, [number, string, string]>(
-          "SELECT count(*) AS n FROM jobs WHERE id != ? AND company_key = ? AND (status IN (SELECT value FROM json_each(?)) OR submitted_at IS NOT NULL)",
+        .query<{ n: number }, [number, string, string, string]>(
+          `SELECT count(*) AS n FROM jobs WHERE id != ? AND company_key = ?
+          AND (status IN (SELECT value FROM json_each(?)) OR (submitted_at IS NOT NULL AND status NOT IN (SELECT value FROM json_each(?))))`,
         )
-        .get(job.id, job.company_key, JSON.stringify(APPLICATIONS))?.n ?? 0)
+        .get(job.id, job.company_key, JSON.stringify(OPEN_APPLICATIONS), JSON.stringify(CLOSED_APPLICATIONS))?.n ?? 0)
     : 0;
+
+export const employerRejectionAfterInterview = (job: Pick<Job, "id" | "company_key">, days: number): string | null =>
+  job.company_key && days > 0
+    ? (db
+        .query<{ at: string | null }, [number, string, number]>(
+          `SELECT max(closed) AS at FROM (
+            SELECT j.id, COALESCE(
+              (SELECT max(c.at) FROM status_changes c WHERE c.job_id = j.id AND c.to_status = 'rejected_by_company'),
+              j.updated_at
+            ) AS closed
+            FROM jobs j
+            WHERE j.id != ? AND j.company_key = ? AND j.status = 'rejected_by_company'
+            AND (
+              EXISTS (SELECT 1 FROM status_changes c WHERE c.job_id = j.id AND c.to_status IN ('interview', 'offer'))
+              OR EXISTS (SELECT 1 FROM application_steps s WHERE s.job_id = j.id AND s.kind = 'interview')
+            )
+          ) WHERE closed >= datetime('now', '-' || ? || ' days')`,
+        )
+        .get(job.id, job.company_key, days)?.at ?? null)
+    : null;
 
 // Other live jobs at the same employer.
 // Practice assessments recorded on full assessments of other jobs at the same employer, newest first.
@@ -278,6 +290,14 @@ const jaccard = (a: Set<string>, b: Set<string>) => {
   for (const x of a) if (b.has(x)) both++;
   return both / (a.size + b.size - both || 1);
 };
+function similarAtLeast(a: Set<string>, b: Set<string>, threshold: number) {
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  const needed = Math.ceil((threshold * (a.size + b.size)) / (1 + threshold) - 1e-9);
+  if (needed > small.size) return false;
+  let misses = small.size - needed;
+  for (const x of small) if (!large.has(x) && --misses < 0) return false;
+  return jaccard(a, b) >= threshold;
+}
 function shingles(text: string) {
   const words = squash(text.slice(0, 4000)).split(" ");
   const out = new Set<string>();
@@ -286,6 +306,24 @@ function shingles(text: string) {
 }
 
 type Twinnable = Pick<Job, "company" | "title" | "description">;
+interface Prepared {
+  title: string;
+  description: string | null;
+  tokens: Set<string>;
+  key: string;
+  text?: Set<string>;
+}
+const prepared = new WeakMap<Twinnable, Prepared>();
+function prepare(j: Twinnable): Prepared {
+  const hit = prepared.get(j);
+  if (hit?.title === j.title && hit.description === j.description) return hit;
+  const tokens = new Set(titleTokens(j.title));
+  const p: Prepared = { title: j.title, description: j.description, tokens, key: [...tokens].join(" ") };
+  prepared.set(j, p);
+  return p;
+}
+const textOf = (p: Prepared) => (p.text ??= shingles(p.description ?? ""));
+
 // The existing job this posting duplicates, if any.
 // The title a posting added by hand without one gets. Two of them say nothing about being the same role.
 export const UNTITLED = "(untitled posting)";
@@ -294,28 +332,26 @@ export function findTwin(j: Twinnable, candidates?: Job[]): Job | null {
   const term = termOf(j.title);
   const pool = candidates ?? db.query<Job, [string]>("SELECT * FROM jobs WHERE company_key = ? ORDER BY id").all(companyKey(j.company));
   if (!pool.length) return null;
-  const tokens = new Set(titleTokens(j.title)),
-    key = [...tokens].join(" ");
-  let text: Set<string> | null = null;
+  const mine = prepare(j);
+  const tokens = mine.tokens;
   for (const c of pool) {
     if (c.title === UNTITLED) continue;
     const theirTerm = term && termOf(c.title);
     if (theirTerm && theirTerm !== term) continue;
-    const theirs = new Set(titleTokens(c.title));
-    if ([...theirs].join(" ") === key) return c;
+    const other = prepare(c);
+    const theirs = other.tokens;
+    if (other.key === mine.key) return c;
     const overlap = jaccard(tokens, theirs);
     if (overlap < 0.5) continue;
     const differing = [...tokens].filter(t => !theirs.has(t)).concat([...theirs].filter(t => !tokens.has(t)));
     if (differing.some(t => LEVEL.has(t))) continue; // "Engineer 1" and "Engineer 2" are different jobs
     // Close titles: accept unless both bodies are there to compare and they disagree.
     // Related titles: only when the body text is nearly identical.
-    const mine = j.description ?? "",
-      other = c.description ?? "";
-    if (mine.length <= 400 || other.length <= 400) {
+    if ((j.description ?? "").length <= 400 || (c.description ?? "").length <= 400) {
       if (overlap >= 0.8) return c;
       continue;
     }
-    if (jaccard((text ??= shingles(mine)), shingles(other)) >= (overlap >= 0.8 ? 0.6 : 0.85)) return c;
+    if (similarAtLeast(textOf(mine), textOf(other), overlap >= 0.8 ? 0.6 : 0.85)) return c;
   }
   return null;
 }
@@ -446,26 +482,34 @@ export function relocateJob(job: Job, rawUrl: string, description: string | null
 const DEDUPE_VERSION = "3";
 export function dedupeExisting() {
   const stale = kvGet("dedupe.version") !== DEDUPE_VERSION;
+  const swept = stale ? null : (JSON.parse(kvGet("dedupe.swept") ?? "null") as { id: number; at: string } | null);
+  const now = db.query<{ id: number; at: string }, []>("SELECT coalesce(max(id), 0) AS id, datetime('now') AS at FROM jobs").get() ?? { id: 0, at: "" };
   const unkeyed = stale ? db.query<Job, []>("SELECT * FROM jobs").all() : db.query<Job, []>("SELECT * FROM jobs WHERE company_key IS NULL").all();
-  for (const j of unkeyed)
-    db.query("UPDATE jobs SET dedupe_key = ?, company_key = ? WHERE id = ?").run(dedupeKey(j.company, j.title), companyKey(j.company), j.id);
+  const rekeyed = new Set<string>();
+  for (const j of unkeyed) {
+    const key = companyKey(j.company);
+    rekeyed.add(key);
+    db.query("UPDATE jobs SET dedupe_key = ?, company_key = ? WHERE id = ?").run(dedupeKey(j.company, j.title), key, j.id);
+  }
   kvSet("dedupe.version", DEDUPE_VERSION);
-  // insertJob folds a posting as it arrives, so once every company has been searched under these rules
-  // only the companies of rows keyed just now can hold a duplicate. Searching one compares each of its
-  // postings with the others, so searching every company on every start took minutes.
-  const companies = stale
+  // insertJob folds a posting as it arrives, so only employers with a new, changed or newly keyed job since
+  // the last sweep can hold a duplicate; a full pass runs when the matching rules change.
+  const groups = swept
     ? db
-        .query<{ company_key: string }, []>("SELECT company_key FROM jobs GROUP BY company_key HAVING count(*) > 1")
-        .all()
-        .map(g => g.company_key)
-    : [...new Set(unkeyed.map(j => companyKey(j.company)))];
+        .query<{ company_key: string }, [number, string, string]>(
+          `SELECT company_key FROM jobs WHERE company_key IN (
+             SELECT company_key FROM jobs WHERE id > ? OR updated_at >= ? UNION SELECT value FROM json_each(?)
+           ) GROUP BY company_key HAVING count(*) > 1`,
+        )
+        .all(swept.id, swept.at, JSON.stringify([...rekeyed]))
+    : db.query<{ company_key: string }, []>("SELECT company_key FROM jobs GROUP BY company_key HAVING count(*) > 1").all();
   // Only rows nothing has acted on yet may be folded away; the most advanced row of a set is kept.
   const rank = (st: Status) => (st === "skipped" ? 0 : st === "found" ? 1 : st === "held" ? 2 : UNASSESSED.includes(st) ? 3 : 9);
   let merged = 0;
-  for (const company of companies) {
+  for (const g of groups) {
     const rows = db
       .query<Job, [string]>("SELECT * FROM jobs WHERE company_key = ?")
-      .all(company)
+      .all(g.company_key)
       .sort((a, b) => rank(b.status) - rank(a.status) || a.id - b.id);
     const kept: Job[] = [];
     for (const r of rows) {
@@ -481,6 +525,7 @@ export function dedupeExisting() {
       merged++;
     }
   }
+  kvSet("dedupe.swept", JSON.stringify(now));
   if (merged) logEvent("system", `Folded ${merged} duplicate postings into existing jobs`);
 }
 

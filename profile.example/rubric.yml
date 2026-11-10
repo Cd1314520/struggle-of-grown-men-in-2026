@@ -8,6 +8,8 @@
 #   required: true   a "no" rules the job out, whatever the score ("unclear" does not)
 #   screen: false    a requirement the cheap pre-read leaves to the full assessment; other
 #                    requirements are screened
+#   unclearOk: true  an "unclear" on this requirement does not send the job to your review under
+#                    auto apply: for what a posting rarely states and the form settles anyway
 #   weight: N        points earned when the answer is "yes"; a negative weight is a penalty
 #   score            = points earned / total positive weight * 100
 #   unclear          earns this fraction of the weight (the posting did not say)
@@ -46,10 +48,12 @@ practice:
     - id: no_cover_letter
       label: No cover letter
       required: true
+      unclearOk: true
       statement: The posting does not ask applicants to submit a cover letter.
     - id: no_references
       label: No references asked
       required: true
+      unclearOk: true
       statement: The posting does not ask applicants to submit references (names and contact details of people to contact) with the application.
     - id: applies_online
       label: Online application
@@ -92,10 +96,12 @@ real:
     - id: no_cover_letter
       label: No cover letter
       required: true
+      unclearOk: true
       statement: The posting does not ask applicants to submit a cover letter.
     - id: no_references
       label: No references asked
       required: true
+      unclearOk: true
       statement: The posting does not ask applicants to submit references (names and contact details of people to contact) with the application.
     - id: applies_online
       label: Online application

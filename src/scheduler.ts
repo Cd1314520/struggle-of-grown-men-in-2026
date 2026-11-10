@@ -5,7 +5,6 @@ import * as chrome from "./chrome";
 import { browserCount, config, describing } from "./config";
 import {
   dedupeExisting,
-  employerApplications,
   getJob,
   jobsByStatus,
   jobsInStatuses,
@@ -19,9 +18,9 @@ import {
   requeueInterruptedPrep,
   type Job,
 } from "./db";
-import { autoApply, checkAutoApprovedPractice, employerCapNote } from "./auto";
+import { checkAutoApprovedPractice, employerHold } from "./auto";
 import { jobBlockers, type BlockerCause } from "./blockers";
-import { forgetDeferredApproval, pumpDeferredApprovals } from "./deferred-approvals";
+import { deferApproval, forgetDeferredApproval, pumpDeferredApprovals } from "./deferred-approvals";
 import { tickQuestionDigest } from "./digest";
 import { errorMessage, isCapacityError, limitResetsAt } from "./errors";
 import { fill } from "./fill";
@@ -154,12 +153,14 @@ function recoverCapacityHandoffs() {
   }
 }
 
-// Hand-offs that a fresh try usually clears, and how many tries each job gets before the hand-off
-// waits for the user: a browser that stopped taking input gets a new worker and tab at once; an
-// employer's site that was down gets another look a few hours later.
-const RETRIED: Partial<Record<BlockerCause, { afterMs: number; tries: number }>> = {
-  browser: { afterMs: 0, tries: 1 },
-  site_down: { afterMs: 3 * 60 * 60 * 1000, tries: 2 },
+// Hand-offs that a fresh try usually clears, and the wait before each try a job gets before the hand-off
+// waits for the user: a browser that stopped taking input gets a new worker and tab at once and once more an
+// hour later; an employer's site that was down gets another look a few hours later.
+const HOUR = 60 * 60 * 1000;
+const RETRIED: Partial<Record<BlockerCause, readonly number[]>> = {
+  browser: [0, HOUR],
+  site_down: [3 * HOUR, 3 * HOUR],
+  unknown: [HOUR / 2],
 };
 export function retryPassingHandoffs() {
   for (const job of jobsByStatus("needs_manual")) {
@@ -168,14 +169,15 @@ export function retryPassingHandoffs() {
     // The worker records the cause just before it parks; a gate without its own blocker is not retried.
     const blockers = jobBlockers(job.id);
     const last = blockers.at(-1);
-    const rule = last && RETRIED[last.cause];
-    if (!last || !rule || last.gate_id !== gate.id) continue;
+    const waits = last && RETRIED[last.cause];
+    if (!last || !waits || last.gate_id !== gate.id) continue;
     const parkedAt = Date.parse(gate.createdAt);
     const tried = blockers.filter(b => b.cause === last.cause).length - 1;
-    if (tried >= rule.tries || Date.now() - parkedAt < rule.afterMs) continue;
+    const wait = waits[tried];
+    if (wait === undefined || Date.now() - parkedAt < wait) continue;
     try {
       queueRecovery(job.id, gate.id);
-      logEvent("system", `Stopped by ${last.cause.replace("_", " ")}: retrying the same draft (try ${tried + 1} of ${rule.tries})`, job.id);
+      logEvent("system", `Stopped by ${last.cause.replace("_", " ")}: retrying the same draft (try ${tried + 1} of ${waits.length})`, job.id);
     } catch (err) {
       logEvent("error", `Automatic retry: ${errorMessage(err)}`, job.id);
     }
@@ -228,11 +230,11 @@ export function trimEmployerApprovals() {
     .filter(job => job.approved_by === "auto" && !applicationStarted(job))
     .sort((a, b) => (a.score ?? -1) - (b.score ?? -1) || b.id - a.id);
   for (const job of queued) {
-    const others = employerApplications(job);
-    if (others < autoApply().perEmployer) continue;
-    if (!moveJob(job.id, "approved", { ...to.awaitingApproval(`needs your review: ${employerCapNote(others)}`), approved_by: null })) continue;
-    forgetDeferredApproval(job.id);
-    logEvent("auto", `Auto-approval withdrawn: ${employerCapNote(others)}`, job.id);
+    const hold = employerHold(job);
+    if (!hold) continue;
+    if (!moveJob(job.id, "approved", { ...to.awaitingApproval(`needs your review: ${hold}`), approved_by: null })) continue;
+    deferApproval(job.id);
+    logEvent("auto", `Auto-approval withdrawn: ${hold}`, job.id);
   }
 }
 
