@@ -12,15 +12,16 @@ import { assessPractice, targetsKey, type PracticeAssessment } from "./practice"
 import { changedTemplateFiles, compileWorking, MAIN, pageCount, PDF_NAME, stageResume, stockPages, workingPdf } from "./resume";
 import { checklistText, evaluate, screenChecklistText, screenVerdict, type Verdict } from "./rubric";
 import { to } from "./status";
-import { screenPosting } from "./screen";
+import { screenOut } from "./screen";
 import { render } from "./worker-tools";
 
 export async function prep(job: Job, run: RunWorker) {
   const handPicked = job.hand_picked === 1; // the user asked for this job explicitly
   // The listing that would be applied through, not the other offices the same role is listed for.
   const location = appliedLocation(job);
-  // What the text alone rules out, for jobs that skipped triage or whose description came after it.
-  const out = handPicked ? null : screenPosting(location, job.description);
+  // What the title, portal and text alone rule out, for jobs that skipped triage, were triaged before the
+  // screen's rules last changed (screen.titles, a dead-end portal), or whose description came after it.
+  const out = handPicked ? null : screenOut(job.title, location, job.url, job.description);
   if (out) {
     uncountOne("prep");
     moveJob(job.id, "prepping", to.skipped(out));

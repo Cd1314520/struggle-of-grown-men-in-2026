@@ -53,7 +53,7 @@ export interface Config {
   feeds?: Record<string, { minutes: number; [param: string]: unknown }>;
   boards?: import("./boards").Boards;
   concurrency: { prep: number; fill?: number };
-  limits: { prepPerDay: number; applyPerDay: number; locatePerDay?: number; applySpreadHours?: number };
+  limits: { prepPerDay: number; applyPerDay: number; locatePerDay?: number; applySpreadHours?: number; fillSteps?: number };
   fillPauseSeconds: [number, number];
   resume: { dir: string; main: string; pdfName: string };
   chrome: { cdpPort: number; proxyPort: number; display: string; window: [number, number]; vncPort: number };

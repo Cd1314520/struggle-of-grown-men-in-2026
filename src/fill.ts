@@ -5,7 +5,7 @@ import YAML from "yaml";
 import { checkAutoApprovedPractice } from "./auto";
 import { browserSlot, config, jobDir, PROFILE, readProfile } from "./config";
 import { isCapacityError } from "./errors";
-import { db, jobsWithCheckpoint, logEvent, moveJob, notifyJobChange, updateJob, type Job } from "./db";
+import { db, jobsWithCheckpoint, lastEventId, logEvent, moveJob, notifyJobChange, stepsSince, updateJob, type Job } from "./db";
 import { isSubmitting, isVerifying, queueDraftRecovery, queueVerification, rememberSlot } from "./fill-state";
 import { endSession, ownsFill, stopFailedFill, type FillRuntime, type FillSession } from "./fill-session";
 import { fillTools, prefillTool } from "./fill-tools";
@@ -197,6 +197,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     prefillModule: PREFILL_MODULE,
     prefillFacts,
   };
+  const firstEvent = lastEventId();
   session.handle = rt.runWorker({
     name: "fill",
     builtins: onPlaywright ? ["read", "write"] : ["read", "write", "eval"],
@@ -210,7 +211,9 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     prompt: render("fill", { ...vars, browser: fillTemplate(readPrompt(guide), vars, `prompts/${guide}.md`).trimEnd() }),
     tools,
   });
+  const stopWatch = isVerification ? null : watchSteps(rt, session, firstEvent);
   const result = await session.handle.done;
+  if (stopWatch) clearInterval(stopWatch);
   const fallback = isCapacityError(result.error) ? nextChoice("fill", config.models.fill, choice) : null;
   if (fallback)
     logEvent(
@@ -256,4 +259,31 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     return;
   }
   stopFailedFill(rt, session, `Worker ended without a verified outcome (${result.error ?? result.status}).`);
+}
+
+// A fill that takes limits.fillSteps browser steps in one sitting without finishing is costing more than
+// it is likely to return (one took over a thousand): it stops and waits for the owner, who can finish it
+// by hand or recover it for another round. One whose final submit is authorized is left to finish.
+const STEP_CHECK_MS = 15_000;
+// The browser steps a fill has taken since event `firstEvent` once they reach `cap`, or null while they
+// have not, or once its final submit is authorized.
+export function overStepCap(jobId: number, firstEvent: number, cap: number): number | null {
+  const steps = stepsSince(jobId, "fill", firstEvent);
+  return steps < cap || isSubmitting(jobId) ? null : steps;
+}
+function watchSteps(rt: FillRuntime, session: FillSession, firstEvent: number): ReturnType<typeof setInterval> | null {
+  const cap = config.limits.fillSteps ?? 0;
+  if (cap <= 0) return null;
+  const watch = setInterval(() => {
+    const steps = overStepCap(session.jobId, firstEvent, cap);
+    if (steps === null) return;
+    clearInterval(watch);
+    stopFailedFill(
+      rt,
+      session,
+      `Stopped after ${steps} browser steps without finishing (limits.fillSteps: ${cap}), to save tokens. Finish it by hand, or recover it for another ${cap} steps.`,
+      "other",
+    );
+  }, STEP_CHECK_MS);
+  return watch;
 }

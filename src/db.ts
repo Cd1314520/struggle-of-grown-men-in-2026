@@ -634,6 +634,12 @@ export interface EventRow {
   at: string;
 }
 
+// How many steps `worker` has logged for a job since event `after`.
+export const stepsSince = (jobId: number, worker: string, after: number) =>
+  db
+    .query<{ n: number }, [number, number, string]>("SELECT count(*) AS n FROM events WHERE id > ? AND job_id = ? AND worker = ? AND kind = 'step'")
+    .get(after, jobId, worker)?.n ?? 0;
+
 export function logEvent(kind: string, message: string, jobId?: number | null, worker?: string) {
   db.query("INSERT INTO events (job_id, worker, kind, message) VALUES (?, ?, ?, ?)").run(jobId ?? null, worker ?? null, kind, message.slice(0, 4000));
   emit(jobId == null ? { type: "event" } : { type: "event", jobId });

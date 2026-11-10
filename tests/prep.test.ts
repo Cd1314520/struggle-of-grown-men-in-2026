@@ -104,6 +104,25 @@ describe("prep before the full assessment", () => {
     expect(usedToday("prep")).toBe(before - 1);
   });
 
+  it("skips a job its title or portal now rules out, without starting a worker", async () => {
+    const saved = config.screen?.titles;
+    config.screen = { ...config.screen, titles: String.raw`^(?!.*data scien\w*).*engineer` };
+    try {
+      const job = preppingJob("Title Co");
+      db.run("UPDATE jobs SET title = 'Data Science Engineer' WHERE id = ?", [job.id]);
+      const lever = preppingJob("Lever Co");
+      db.run("UPDATE jobs SET url = 'https://jobs.lever.co/acme/1' WHERE id = ?", [lever.id]);
+      const { run, started } = fakeRun();
+      await prep({ ...job, title: "Data Science Engineer" }, run);
+      await prep({ ...lever, url: "https://jobs.lever.co/acme/1" }, run);
+      expect(started).toEqual([]);
+      expect(getJob(job.id)).toMatchObject({ status: "skipped", note: "the title does not match screen.titles" });
+      expect(getJob(lever.id)).toMatchObject({ status: "skipped", note: "Lever's hCaptcha rejects this machine's submissions" });
+    } finally {
+      config.screen = { ...config.screen, titles: saved ?? null };
+    }
+  });
+
   it("skips a job whose description asks for 5 or more years, without starting a worker", async () => {
     const job = preppingJob("Senior Years Co", "Requirements\n- 6+ years of professional software experience");
     const before = usedToday("prep");
