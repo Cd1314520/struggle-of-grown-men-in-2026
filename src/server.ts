@@ -28,6 +28,7 @@ import {
   statusHistory,
   UNTITLED,
   type Job,
+  usageSince,
 } from "./db";
 import * as gmail from "./gmail";
 import { startCdpProxy } from "./cdp-proxy";
@@ -410,6 +411,8 @@ export function createHandler(scheduler: Scheduler) {
     if (path === "/api/state") return json(state(scheduler));
     if (path === "/api/summary") return json(summary(scheduler));
     if (path === "/api/stats") return json(stats());
+    // Tokens by stage and model over the last `days` days (default 7), as each worker's CLI reported them.
+    if (path === "/api/usage") return json(usageSince(Math.min(90, Math.max(1, Number(url.searchParams.get("days")) || 7))));
     if (path === "/api/activity") return json(activity(url));
     if (path === "/api/jobs" && req.method === "GET") {
       const view = url.searchParams.get("view");

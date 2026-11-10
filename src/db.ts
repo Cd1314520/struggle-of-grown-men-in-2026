@@ -684,11 +684,52 @@ export const stepsSince = (jobId: number, worker: string, after: number) =>
   db
     .query<{ n: number }, [number, number, string]>("SELECT count(*) AS n FROM events WHERE id > ? AND job_id = ? AND worker = ? AND kind = 'step'")
     .get(after, jobId, worker)?.n ?? 0;
+// How many steps `worker` has logged, for any job or none, since event `after`.
+export const workerStepsSince = (worker: string, after: number) =>
+  db.query<{ n: number }, [number, string]>("SELECT count(*) AS n FROM events WHERE id > ? AND worker = ? AND kind = 'step'").get(after, worker)?.n ?? 0;
 
 export function logEvent(kind: string, message: string, jobId?: number | null, worker?: string) {
   db.query("INSERT INTO events (job_id, worker, kind, message) VALUES (?, ?, ?, ?)").run(jobId ?? null, worker ?? null, kind, message.slice(0, 4000));
   emit(jobId == null ? { type: "event" } : { type: "event", jobId });
 }
+
+// What one worker run used, as its CLI reported it. `input` is tokens read at full price (cache writes
+// included), `cached` tokens read from the provider's cache, `output` tokens written. `cost` is Claude
+// Code's own dollar figure. `partial` marks a run stopped before its CLI totalled it: `output` is then
+// short. `window` and `week` are the percent of Codex's 5-hour and weekly allowance used after the run.
+export interface TokenUse {
+  input: number;
+  cached: number;
+  output: number;
+  cost?: number;
+  partial?: boolean;
+  window?: number;
+  week?: number;
+}
+export function logUsage(worker: string, model: string, use: TokenUse | null, jobId?: number | null) {
+  if (use && use.input + use.cached + use.output > 0) logEvent("usage", JSON.stringify({ model, ...use }), jobId, worker);
+}
+export interface UsageRow {
+  stage: string;
+  model: string;
+  runs: number;
+  jobs: number;
+  input: number;
+  cached: number;
+  output: number;
+  cost: number | null;
+}
+// Token use over the last `days` days, by stage and model, the largest first.
+export const usageSince = (days: number) =>
+  db
+    .query<UsageRow, [string]>(
+      `SELECT coalesce(worker, '?') AS stage, coalesce(json_extract(message, '$.model'), '?') AS model, count(*) AS runs, count(DISTINCT job_id) AS jobs,
+        sum(json_extract(message, '$.input')) AS input, sum(json_extract(message, '$.cached')) AS cached,
+        sum(json_extract(message, '$.output')) AS output, sum(json_extract(message, '$.cost')) AS cost
+      FROM events WHERE kind = 'usage' AND json_valid(message) AND at >= datetime('now', ?)
+      GROUP BY 1, 2 ORDER BY sum(json_extract(message, '$.input')) + sum(json_extract(message, '$.cached')) + sum(json_extract(message, '$.output')) DESC`,
+    )
+    .all(`-${days} days`);
 
 // The newest event's id, so a run can later ask for only the events logged after it started.
 export const lastEventId = () => db.query<{ id: number | null }, []>("SELECT MAX(id) AS id FROM events").get()?.id ?? 0;
@@ -711,6 +752,8 @@ export const recentEvents = (limit = 150, before: number | null = null, kinds: r
 // The agents' step-by-step chatter: each step taken, each tool call, each message. Useful while an
 // application is in flight and for a while after; everything else in events is a decision or an outcome.
 const CHATTER = JSON.stringify(["step", "tool", "agent"]);
+// What the highlights leave out: the chatter, and each run's token count (GET /api/usage adds those up).
+const QUIET = JSON.stringify(["step", "tool", "agent", "usage"]);
 
 // Without the chatter: what a person scanning the feed cares about.
 export const highlightEvents = (limit = 80, before: number | null = null, kinds: readonly string[] = []) =>
@@ -724,7 +767,7 @@ export const highlightEvents = (limit = 80, before: number | null = null, kinds:
       ORDER BY e.id DESC
       LIMIT ?5`,
     )
-    .all(CHATTER, before ?? Number.MAX_SAFE_INTEGER, kinds.length, JSON.stringify(kinds), limit);
+    .all(QUIET, before ?? Number.MAX_SAFE_INTEGER, kinds.length, JSON.stringify(kinds), limit);
 
 // Removes chatter older than `days`; returns how many records went. Nothing else is ever removed:
 // approvals, gates, errors, mail and what the user did stay for good.

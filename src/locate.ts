@@ -1,7 +1,7 @@
 import { addCompany, fetchDescription, watchBoardOf } from "./ats";
 import { isBoardUrl, linkedinDescription, probeEmployer } from "./boards";
 import { config } from "./config";
-import { findTwin, jobsByStatus, logEvent, moveJob, relocateJob, updateJob } from "./db";
+import { findTwin, jobsByStatus, lastEventId, logEvent, moveJob, relocateJob, updateJob, workerStepsSince } from "./db";
 import { countOne, usedToday } from "./limits";
 import { arg, S, schema, type RunWorker } from "./worker";
 import { to } from "./status";
@@ -10,6 +10,10 @@ import { addCompanyTool, render, workDir } from "./worker-tools";
 const LOCATE_BATCH = 8;
 const NOT_EMPLOYER = /(linkedin|indeed|dice|ziprecruiter|glassdoor|simplyhired|monster|lensa|builtin|jooble|talent|careerbuilder|jobgether|google)\.com\//i;
 export const locatePerDay = () => config.limits.locatePerDay ?? 40;
+// Steps (searches, pages read) a job may cost the search agent, counted over its batch; 0 = no cap.
+export const locateSteps = () => config.limits.locateSteps ?? 0;
+// Whether a batch of `jobs` that has taken `steps` has spent its allowance.
+export const overLocateCap = (steps: number, jobs: number, perJob = locateSteps()) => perJob > 0 && steps >= perJob * jobs;
 
 export async function locateEmployerPostings(run: RunWorker) {
   for (const job of jobsByStatus("locating")) {
@@ -33,13 +37,21 @@ export async function locateEmployerPostings(run: RunWorker) {
       countOne("locate");
       updateJob(j.id, { locate_tries: j.locate_tries + 1 });
     }
-    const { done } = run({
+    const perJob = locateSteps();
+    const firstEvent = lastEventId();
+    const { done, abort } = run({
       name: "locate",
       builtins: ["read", "write", "web_search"],
       model: config.models.locate,
       cwd: workDir(),
       maxTime: "25m",
-      prompt: render("locate", { jobs: batch.map(j => `${j.id} | ${j.company} | ${j.title} | ${j.location ?? "?"} | ${j.source}`).join("\n") }),
+      prompt: render("locate", {
+        jobs: batch.map(j => `${j.id} | ${j.company} | ${j.title} | ${j.location ?? "?"} | ${j.source}`).join("\n"),
+        budget:
+          perJob > 0
+            ? `- Keep to about ${perJob} searches and page reads a job. When that has not found the posting, call \`no_posting\` and go on to the next job: the whole task is stopped once it has taken ${perJob * batch.length} steps, and jobs not reported by then are lost.`
+            : "",
+      }),
       tools: {
         found_posting: {
           description: "Record the employer's own posting for one job.",
@@ -102,8 +114,20 @@ export async function locateEmployerPostings(run: RunWorker) {
         },
       },
     });
+    // A search that wanders costs more than the postings it might still find: stop the batch at its
+    // allowance. Jobs it had not reported get their second try in a later batch, like any others left over.
+    let capped = false as boolean; // set from the timer, which control-flow narrowing cannot see
+    const watch = setInterval(() => {
+      const steps = workerStepsSince("locate", firstEvent);
+      if (!overLocateCap(steps, batch.length, perJob)) return;
+      clearInterval(watch);
+      capped = true;
+      logEvent("system", `Locate stopped after ${steps} steps on ${batch.length} jobs (limits.locateSteps: ${perJob} a job), to save tokens`, null, "locate");
+      abort("over its step allowance");
+    }, 15_000);
     const res = await done;
+    clearInterval(watch);
     for (const j of open.values()) if (j.locate_tries + 1 >= 2) moveJob(j.id, "locating", to.skipped("could not find a posting on the employer's own site"));
-    if (res.status !== "completed") break;
+    if (res.status !== "completed" && !capped) break;
   }
 }

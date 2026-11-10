@@ -80,7 +80,10 @@ describe("a Codex worker", () => {
     expect(flag(argv, "-s")).toBe("read-only");
     expect(flag(argv, "-C")).toBe(dir);
     expect(argv).toContain("--ignore-user-config");
-    expect(argv).toContain("--ephemeral");
+    // The session file holds the running token count; nothing else of the thread stays in the home.
+    expect(argv).not.toContain("--ephemeral");
+    expect(argv).toContain('history.persistence="none"');
+    expect(argv.some(a => a.startsWith("sqlite_home=") && a.includes("run-"))).toBe(true);
     expect(argv.at(-1)).toBe("-");
     const c = settings(argv);
     expect(c["approval_policy"]).toBe("never");

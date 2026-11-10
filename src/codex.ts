@@ -6,11 +6,11 @@
 // config, skills, memories, plugins or hooks, which `--ignore-user-config` alone does not skip. Skills
 // are also found outside CODEX_HOME, in ~/.agents/skills (the home directory, which CODEX_HOME does not
 // move), so host skill discovery is turned off as well.
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { browserServer, serveHostTools, stepOf } from "./claude";
 import { config, DATA, PROMPTS } from "./config";
-import { logEvent } from "./db";
+import { logEvent, logUsage, type TokenUse } from "./db";
 import { errorMessage, settled } from "./errors";
 import type { CatalogModel } from "./models";
 import { CODEX_PREFIX, durationMs, modelEffort, type WorkerHandle, type WorkerOptions, type WorkerResult } from "./worker";
@@ -97,6 +97,71 @@ function stepOfItem(item: Item): string | null {
   }
 }
 
+interface TokenCount {
+  payload?: {
+    type?: string;
+    info?: { total_token_usage?: { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number } } | null;
+    rate_limits?: { primary?: { used_percent?: number } | null; secondary?: { used_percent?: number } | null } | null;
+  };
+}
+// What a session file says the thread used: its last running total, and how much of the 5-hour and weekly
+// allowance was spent by then. Codex counts cached tokens inside `input_tokens`.
+export function codexUsage(rollout: string): TokenUse | null {
+  let use: TokenUse | null = null;
+  for (const line of rollout.split("\n")) {
+    if (!line.includes('"token_count"')) continue;
+    let p: TokenCount["payload"];
+    try {
+      p = (JSON.parse(line) as TokenCount).payload;
+    } catch {
+      continue;
+    }
+    if (p?.type !== "token_count") continue;
+    const t = p.info?.total_token_usage;
+    const cached = t?.cached_input_tokens ?? 0;
+    const window = p.rate_limits?.primary?.used_percent,
+      week = p.rate_limits?.secondary?.used_percent;
+    use = {
+      ...(t ? { input: Math.max(0, (t.input_tokens ?? 0) - cached), cached, output: t.output_tokens ?? 0 } : (use ?? { input: 0, cached: 0, output: 0 })),
+      ...(window === undefined ? {} : { window }),
+      ...(week === undefined ? {} : { week }),
+    };
+  }
+  return use;
+}
+// Reads a finished thread's usage from its session file, and removes the file: it holds the whole
+// conversation, which the app has no further use for.
+function takeUsage(home: string, threadId: string): TokenUse | null {
+  if (!threadId) return null;
+  try {
+    const sessions = join(home, "sessions");
+    let use: TokenUse | null = null;
+    for (const file of new Bun.Glob(`**/rollout-*-${threadId}.jsonl`).scanSync({ cwd: sessions, absolute: true })) {
+      use = codexUsage(readFileSync(file, "utf8")) ?? use;
+      rmSync(file, { force: true });
+    }
+    return use;
+  } catch {
+    return null;
+  }
+}
+
+// What a stopped app or a file Windows still held left behind: run folders and session files no live
+// worker can own any more (a worker runs for a day at most).
+let swept = false;
+function sweepLeftovers(home: string) {
+  if (swept) return;
+  swept = true;
+  const old = (path: string) => Date.now() - statSync(path).mtimeMs > 2 * 24 * 3600_000;
+  try {
+    for (const name of readdirSync(home)) if (name.startsWith("run-") && old(join(home, name))) rmSync(join(home, name), { recursive: true, force: true });
+    for (const file of new Bun.Glob("**/rollout-*.jsonl").scanSync({ cwd: join(home, "sessions"), absolute: true }))
+      if (old(file)) rmSync(file, { force: true });
+  } catch {
+    // Nothing depends on it.
+  }
+}
+
 const active = new Set<Bun.Subprocess>();
 export const killCodexWorkers = () => {
   for (const p of active) p.kill();
@@ -114,6 +179,11 @@ export function runCodex(opts: WorkerOptions): WorkerHandle {
   }
   const { model, effort } = modelEffort(opts.model, CODEX_PREFIX);
   const host = serveHostTools(opts.tools, log);
+  const home = codexHome();
+  mkdirSync(home, { recursive: true });
+  sweepLeftovers(home);
+  // This run's own folder for the thread history Codex keeps in SQLite, removed when the run ends.
+  const state = mkdtempSync(join(home, "run-"));
   const tokenVar = "AUTO_APPLY_HOST_TOKEN";
   const token = host.config.headers.Authorization.replace(/^Bearer /, "");
   const writes = opts.builtins.some(b => b === "write" || b === "edit" || b === "bash");
@@ -122,7 +192,6 @@ export function runCodex(opts: WorkerOptions): WorkerHandle {
     ...bin,
     "exec",
     "--json",
-    "--ephemeral",
     "--ignore-user-config",
     "--ignore-rules",
     "--skip-git-repo-check",
@@ -131,6 +200,11 @@ export function runCodex(opts: WorkerOptions): WorkerHandle {
     "-s",
     writes ? "workspace-write" : "read-only",
     ...set("approval_policy", "never"),
+    // Not `--ephemeral`: the session file is where Codex keeps a running token count, which outlives a
+    // worker stopped mid-turn (`takeUsage` reads it and deletes the file). Nothing else of the thread is
+    // kept: no prompt history, and its SQLite state goes to a folder of the run's own.
+    ...set("history.persistence", "none"),
+    ...set("sqlite_home", state),
     // Codex lists the skills in CODEX_HOME/skills, ~/.agents/skills and its own bundled set in the
     // prompt. A worker gets none. (`features.skip_host_skill_discovery` does not stop the
     // ~/.agents/skills search in codex-cli 0.164, and warns that it is unstable.)
@@ -164,8 +238,6 @@ export function runCodex(opts: WorkerOptions): WorkerHandle {
   if (effort) args.push(...set("model_reasoning_effort", effort));
   args.push("-");
 
-  const home = codexHome();
-  mkdirSync(home, { recursive: true });
   const env: Record<string, string | undefined> = { ...process.env, ...opts.env, CODEX_HOME: home, [tokenVar]: token };
   const proc = Bun.spawn(args, { cwd: opts.cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
   active.add(proc);
@@ -269,6 +341,12 @@ export function runCodex(opts: WorkerOptions): WorkerHandle {
         ? { status: "error", error: `the ${server} MCP server did not start` }
         : { status: "error", error: `${failure ? `${failure}. ` : ""}codex exited with code ${code} before finishing. ${lines.slice(-5).join("\n")}`.trim() };
     }
+    try {
+      rmSync(state, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch {
+      // Windows can hold a file a moment after its process ends: a later start sweeps it (sweepLeftovers).
+    }
+    logUsage(opts.name, opts.model ?? "codex/default", takeUsage(home, threadId), opts.jobId);
     if (result.status !== "completed")
       log(
         result.status === "aborted" && abortRequested ? "system" : "error",

@@ -42,6 +42,16 @@ models:
 
 Settings → Models does not show fallbacks or accounts: they are set in `config.local.yml` (or `config.yml`). Setup counts the fallback models when it checks which harnesses and tools are needed.
 
+## Token use
+
+Each worker run logs what its CLI says it used, as a `usage` event (`logUsage` in `src/db.ts`): `input` tokens read at full price (cache writes included), `cached` tokens read from the provider's cache, and `output` tokens. `GET /api/usage?days=7` adds them up by stage and model.
+
+- **Claude Code** reports a total and a dollar figure when a run finishes. A run stopped before that (a fill ends that way once it reports its result) is summed from the responses it had reported; its input and cached counts are exact, its output count runs short, and it is marked `partial`.
+- **Codex** keeps a running total in the thread's session file, which survives a stopped run. The app reads the last total there, with the percent of the 5-hour and weekly allowance used (`window`, `week`), and deletes the file.
+- **agy** reports a total only in its closing event, so a stopped run logs nothing.
+
+Two caps stop work that is costing more than it is likely to return: `limits.fillSteps` (browser steps one fill may take in a sitting) and `limits.locateSteps` (searches and page reads a posting may cost the web-search agent, counted over its batch).
+
 ## What each harness is given
 
 | | omp | Claude Code | Codex |

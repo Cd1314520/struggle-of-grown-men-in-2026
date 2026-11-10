@@ -149,6 +149,7 @@ limits:
   applyPerDay: 100 # new applications; resuming one already started does not count
   applySpreadHours: 24 # new applications start at most one per applySpreadHours / applyPerDay (about 14 minutes); postings opened in the last day skip the wait; 0 = as fast as browsers allow
   fillSteps: 200 # browser steps one fill may take before it stops and waits for you (most finish in about 100); 0 = no cap
+  locateSteps: 10 # searches and page reads a posting may cost the web-search agent, counted over its batch of 8, before the batch stops; 0 = no cap
 
 # Seconds a browser rests between applications, randomised within the range. Applications in
 # different browsers also start at least the lower number of seconds apart.

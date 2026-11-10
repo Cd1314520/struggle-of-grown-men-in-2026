@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { browserServer, serveHostTools, stepOf } from "./claude";
 import { config, PROMPTS } from "./config";
-import { logEvent } from "./db";
+import { logEvent, logUsage, type TokenUse } from "./db";
 import { errorMessage, settled } from "./errors";
 import type { CatalogModel } from "./models";
 import { AGY_PREFIX, durationMs, type Builtin, type WorkerHandle, type WorkerOptions, type WorkerResult } from "./worker";
@@ -57,7 +57,25 @@ interface Event {
   event?: string;
   conversation_id?: string;
   step_update?: Step;
-  result?: { conversation_id?: string; status?: string; response?: string; error?: string };
+  result?: { conversation_id?: string; status?: string; response?: string; error?: string; usage?: Usage };
+}
+interface Usage {
+  input_tokens?: number;
+  output_tokens?: number;
+  thinking_tokens?: number;
+  cache_read_tokens?: number;
+  total_tokens?: number;
+}
+// What agy's closing event says the run used. agy does not say whether `input_tokens` counts the cached
+// ones too; its total settles that. A run stopped before that event reports nothing.
+export function agyUsage(u: Usage | undefined): TokenUse | null {
+  if (!u) return null;
+  const input = u.input_tokens ?? 0,
+    cached = u.cache_read_tokens ?? 0,
+    output = (u.output_tokens ?? 0) + (u.thinking_tokens ?? 0);
+  const inclusive =
+    u.total_tokens === undefined ? input >= cached : Math.abs(u.total_tokens - (input + output)) <= Math.abs(u.total_tokens - (input + cached + output));
+  return { input: inclusive ? Math.max(0, input - cached) : input, cached, output };
 }
 
 const record = (v: unknown): Record<string, unknown> => {
@@ -222,6 +240,7 @@ export function runAntigravity(opts: WorkerOptions): WorkerHandle {
       if (step !== null) log("step", step);
     };
 
+    let used = null as TokenUse | null;
     const onEvent = (e: Event) => {
       switch (e.event) {
         case "init":
@@ -234,6 +253,7 @@ export function runAntigravity(opts: WorkerOptions): WorkerHandle {
           const r = e.result ?? {};
           conversation = r.conversation_id ?? conversation;
           if (r.response?.trim()) lastText = r.response.trim();
+          used = agyUsage(r.usage) ?? used;
           result ??= r.status === "SUCCESS" ? { status: "completed" } : { status: "error", error: r.error || `agy ended with status ${r.status ?? "unknown"}` };
           endInput();
           break;
@@ -270,6 +290,7 @@ export function runAntigravity(opts: WorkerOptions): WorkerHandle {
         ? { status: "error", error: "agy is not signed in (run agy once in a terminal to sign in)" }
         : { status: "error", error: `agy exited with code ${code} before finishing. ${lines.slice(-5).join("\n")}`.trim() };
     }
+    logUsage(opts.name, opts.model ?? "antigravity/default", used, opts.jobId);
     if (result.status !== "completed")
       log(
         result.status === "aborted" && abortRequested ? "system" : "error",

@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, DATA, PROMPTS } from "./config";
-import { logEvent } from "./db";
+import { logEvent, logUsage, type TokenUse } from "./db";
 import { errorMessage, settled } from "./errors";
 import type { CatalogModel } from "./models";
 import {
@@ -144,6 +144,12 @@ interface Block {
   name?: string;
   input?: Record<string, unknown>;
 }
+interface Usage {
+  input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  output_tokens?: number;
+}
 interface Event {
   type?: string;
   subtype?: string;
@@ -151,8 +157,29 @@ interface Event {
   result?: string;
   errors?: string[];
   mcp_servers?: { name?: string; status?: string }[];
-  message?: { content?: Block[] };
+  message?: { id?: string; usage?: Usage; content?: Block[] };
+  usage?: Usage;
+  total_cost_usd?: number;
   rate_limit_info?: { status?: string; rateLimitType?: string; resetsAt?: number };
+}
+
+const tokens = (u: Usage): TokenUse => ({
+  input: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
+  cached: u.cache_read_input_tokens ?? 0,
+  output: u.output_tokens ?? 0,
+});
+// What a run used: the CLI's own total when it finished, else the sum over the responses it reported
+// before it was stopped (a response's output count is taken as it starts, so that sum runs short).
+export function claudeUsage(total: Pick<Event, "usage" | "total_cost_usd"> | null, responses: Iterable<Usage>): TokenUse | null {
+  if (total?.usage) return { ...tokens(total.usage), ...(total.total_cost_usd === undefined ? {} : { cost: total.total_cost_usd }) };
+  const sum: TokenUse = { input: 0, cached: 0, output: 0, partial: true };
+  for (const u of responses) {
+    const t = tokens(u);
+    sum.input += t.input;
+    sum.cached += t.cached;
+    sum.output += t.output;
+  }
+  return sum;
 }
 
 // What a built-in or browser tool call is doing, for the activity log. Never the text it types.
@@ -236,6 +263,9 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
       }, durationMs(opts.maxTime))
     : null;
 
+  // Claude Code repeats a response's usage on each block of it: the last one per response id counts.
+  const responses = new Map<string, Usage>();
+  let total: Event | null = null;
   const onEvent = (e: Event) => {
     switch (e.type) {
       case "system":
@@ -248,6 +278,7 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
         }
         break;
       case "assistant":
+        if (e.message?.id && e.message.usage) responses.set(e.message.id, e.message.usage);
         for (const block of e.message?.content ?? []) {
           if (block.type === "text" && block.text?.trim()) {
             lastText = block.text.trim();
@@ -264,6 +295,7 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
         }
         break;
       case "result":
+        total = e;
         if (e.subtype === "success" && !e.is_error) result ??= { status: "completed" };
         else {
           const said = e.result?.trim() || e.errors?.join("; ") || e.subtype || "unknown error";
@@ -303,6 +335,7 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
       const tail = (await stderr).trim().split("\n").slice(-5).join("\n");
       result = { status: "error", error: `${limited ? `${limited}. ` : ""}claude exited with code ${code} before finishing. ${tail}`.trim() };
     }
+    logUsage(opts.name, opts.model ?? "claude-code/default", claudeUsage(total, responses.values()), opts.jobId);
     if (result.status === "aborted" && abortReason !== null) log("system", `${opts.name} worker stopped: ${abortReason} (Claude Code session ${sessionId})`);
     else if (result.status !== "completed")
       log("error", `${opts.name} worker ${result.status}: ${result.error || "no error details reported"} (Claude Code session ${sessionId})`);

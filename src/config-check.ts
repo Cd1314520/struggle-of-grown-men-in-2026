@@ -95,7 +95,10 @@ const CONFIG = shape(
     ),
     schedule: shape({ scanMinutes: amount(), discoverMinutes: amount(), trackMinutes: amount() }),
     concurrency: shape({ prep: count() }, { fill: count(1) }),
-    limits: shape({ prepPerDay: count(), applyPerDay: count() }, { locatePerDay: count(), applySpreadHours: amount(), fillSteps: count() }),
+    limits: shape(
+      { prepPerDay: count(), applyPerDay: count() },
+      { locatePerDay: count(), applySpreadHours: amount(), fillSteps: count(), locateSteps: count() },
+    ),
     fillPauseSeconds: pair(amount()),
     resume: shape({ dir: text, main: text, pdfName: text }),
     chrome: shape({ cdpPort: port, proxyPort: port, display: matching(/^:\d+$/, 'an X display such as ":99"'), window: pair(count(1)), vncPort: count() }),
