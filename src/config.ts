@@ -44,6 +44,10 @@ export interface Config {
   // A form that requires a cover letter: "skip" drops the application; "draft" has the fill worker
   // draft one and park it for the owner to edit and approve, whatever `approval` says.
   coverLetters?: "skip" | "draft";
+  // The owner writes the prose of a job scoring above this themselves: its required cover letter and essay
+  // questions park for them. At or below it, the fill worker writes them and enters them without waiting.
+  // Absent: every required cover letter parks on its draft, and the worker answers essay questions.
+  ownWritingAbove?: number;
   // A case-insensitive regular expression every title must match to be read at all; the rest are dropped
   // before triage, at no cost. null or absent: every title goes to triage. `terms` ("Summer 2027"): a
   // title naming any other term is dropped too. null or absent: only terms that are over. `readPostings`:
@@ -126,6 +130,11 @@ if (process.env["AUTO_APPLY_PORT"]) {
 }
 // Whether the owner describes target employers in words, beyond the frontier list.
 export const describing = () => !!config.targets.describe?.trim();
+
+// Whether the owner writes this job's prose themselves, rather than the fill worker (`ownWritingAbove`).
+export const ownerWrites = (score: number | null | undefined) => config.ownWritingAbove != null && score != null && score > config.ownWritingAbove;
+// Whether the fill worker's own cover letter goes in without waiting for the owner.
+export const sendsOwnLetter = (score: number | null | undefined) => config.ownWritingAbove != null && !ownerWrites(score);
 
 export const publicUrl = () => (config.publicUrl ?? `http://localhost:${config.port}`).replace(/\/$/, "");
 

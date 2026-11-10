@@ -1,7 +1,9 @@
 // The host tools a fill worker is given. Each one acts for the session it was built for and for
 // nothing else: once that session no longer owns the application, every tool refuses.
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { resolveAccount } from "./accounts";
-import { config } from "./config";
+import { config, jobDir, sendsOwnLetter } from "./config";
 import { CAUSE_GUIDE, recordBlocker, WORKER_CAUSES } from "./blockers";
 import { connectTab } from "./cdp-tab";
 import type { JobBrowser } from "./chrome";
@@ -31,6 +33,7 @@ import {
   resolveAmbiguityWithEvidence,
   type AmbiguityEvidence,
   approvedCoverLetter,
+  saveCoverLetter,
   type GateInput,
 } from "./questions";
 import { to } from "./status";
@@ -120,7 +123,7 @@ const SKIPPED_FOR = {
 const SKIP_GUIDE =
   "What the form requires. cover_letter and references: as the task says. " +
   "recording: a video or audio recording of the candidate. " +
-  "own_work: a portfolio file, work sample or take-home the candidate has not supplied, or an answer the employer says must be written without AI. " +
+  "own_work: a portfolio file, work sample or take-home the candidate has not supplied, or an answer the employer says must be written without AI that the candidate has not written (one in resumeContext.answers or the answer bank is theirs: enter it). " +
   "phone_code: a code texted or phoned to the candidate, or an authenticator app, with no email alternative. " +
   "personal_login: signing in to a personal account you have no credentials for (Google, LinkedIn, Microsoft, Apple). " +
   "hcaptcha: an hCaptcha that rejected every honest attempt allowed, or a form on jobs.lever.co. " +
@@ -143,7 +146,7 @@ const WHY_GUIDE =
   "agreement: an agreement or acknowledgement out of the ordinary, outside the terms rule. " +
   "fact_missing: a fact about the candidate that is in neither the candidate details nor the answer bank. " +
   "skill_not_on_resume: a skill, tool or experience question you cannot settle from the resume; rare, since these are answered from the resume. " +
-  "free_text: a free-text question you cannot answer with a grounded, honest answer from the resume, the job description and the candidate details. " +
+  "free_text: a free-text question you cannot answer with a grounded, honest answer from the resume, the job description and the candidate details, or one the task says the candidate writes themselves. " +
   "sensitive_id: a Social Security number, date of birth or other ID number. " +
   "history_detail: employment or education detail the resume does not give, such as supervisors, an employer's phone number or exact dates. " +
   "other: none of these.";
@@ -251,7 +254,7 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
     ...(config.coverLetters === "draft" && {
       cover_letter: {
         description:
-          "The form requires a cover letter. Returns the letter the candidate approved for this application if there is one; otherwise parks the application on your draft for the candidate to edit and approve, and terminates this worker.",
+          "The form requires a cover letter. Returns the letter to enter for this application when there is one: the one the candidate approved, or your own draft where the task says it goes in without waiting. Otherwise parks the application on your draft for the candidate to edit and approve, and terminates this worker.",
         parameters: schema({
           field: S.str("The cover letter field's label, and whether it is a text box or an upload"),
           draft: S.str("Your complete draft letter, under 250 words"),
@@ -272,6 +275,18 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
             context: `${job.company}, ${job.title}`,
             options: [draft],
           };
+          // The candidate writes only the letters of the jobs they rate highest; this one goes in as drafted.
+          if (sendsOwnLetter(job.score)) {
+            saveCoverLetter(job.id, input, draft);
+            writeFileSync(join(jobDir(job.id), "cover_letter.txt"), draft + "\n");
+            logEvent(
+              "auto",
+              `Cover letter written by the agent and entered without waiting for review (score ${job.score ?? "none"}): ${draft}`,
+              job.id,
+              "fill",
+            );
+            return `Recorded (also saved as cover_letter.txt in this application's folder). Enter it exactly as written:\n\n${draft}`;
+          }
           return parkFill(rt, session, input, await checkpointFrom(rt, session, args));
         },
       },

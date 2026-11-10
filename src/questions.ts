@@ -326,6 +326,17 @@ export const approvedCoverLetter = (jobId: number) =>
   db
     .query<{ answer: string }, [number]>("SELECT answer FROM application_answers WHERE job_id = ? AND kind = 'cover_letter' ORDER BY answered_at DESC LIMIT 1")
     .get(jobId)?.answer ?? null;
+// A letter the fill worker wrote that goes in without the candidate reading it first (`ownWritingAbove`).
+// Stored like an approved one, so a later worker on this application is handed the same letter.
+export function saveCoverLetter(jobId: number, input: GateInput, letter: string) {
+  const key = identity(requireJob(jobId), input);
+  db.query(
+    `
+      INSERT INTO application_answers (job_id, match_key, kind, question, context, options, answer, answered_at)
+      VALUES (?, ?, 'cover_letter', ?, ?, ?, ?, ?)
+      ON CONFLICT(job_id, match_key) DO UPDATE SET answer = excluded.answer, answered_at = excluded.answered_at`,
+  ).run(jobId, key.matchKey, input.text, key.context, JSON.stringify(key.options), letter, now());
+}
 // ---- questions a worker found together. It queues every unknown question on a page and parks once,
 // on the first still unanswered; answering that one opens the next instead of starting a worker for it.
 export function queueQuestion(jobId: number, input: GateInput) {

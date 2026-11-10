@@ -422,12 +422,18 @@ if (scenario === "freshest-first") {
   process.exit(0);
 }
 
-if (scenario === "cover-letter") config.coverLetters = "draft";
+if (scenario === "cover-letter" || scenario === "cover-letter-sent") {
+  config.coverLetters = "draft";
+  config.ownWritingAbove = 80;
+}
 if (scenario === "paced") {
   config.limits.applySpreadHours = 24;
   config.limits.applyPerDay = 100;
 }
 addJob(1);
+// The owner writes for a job scoring above `ownWritingAbove`; the worker's own letter goes in at or below it.
+if (scenario === "cover-letter") db.query("UPDATE jobs SET score = 91 WHERE id = 1").run();
+if (scenario === "cover-letter-sent") db.query("UPDATE jobs SET score = 80 WHERE id = 1").run();
 if (
   [
     "paced",
@@ -501,6 +507,10 @@ if (scenario === "release" || scenario === "quick-answer") {
   const parking = call(first, "cover_letter", { ...field, draft: letter });
   await until(() => core.getOpenGate(1) !== null);
   const gate = must(core.getOpenGate(1), "cover letter gate");
+  assert.match(first.options.prompt, /The candidate writes the prose of this application themselves/);
+  assert.match(first.options.prompt, /Ask in the same way for an answer the employer says must be written without AI/);
+  assert.match(first.options.prompt, /written without AI and the candidate has not written it/);
+  assert.match(first.options.prompt, /the application parks while the candidate reads and edits your draft/);
   assert.equal(gate.kind, "cover_letter");
   assert.deepEqual(gate.options, [letter], "the draft travels on the gate for the owner to edit");
   assert.equal(jobRow(1).status, "needs_input", "a letter waits for the owner even though nothing else would");
@@ -511,6 +521,29 @@ if (scenario === "release" || scenario === "quick-answer") {
   await until(() => workers.length === 2);
   assert.equal(readFileSync(join(jobDir(1), "cover_letter.txt"), "utf8"), "My edited letter.\n");
   assert.match(await call(workerAt(1), "cover_letter", { ...field, draft: letter }), /Enter it exactly as written:\n\nMy edited letter\.$/);
+} else if (scenario === "cover-letter-sent") {
+  const field = { ...navigation, field: "Cover Letter* (text box)" };
+  const letter = Array.from({ length: 90 }, (_, i) => `word${i}`).join(" ");
+  assert.match(first.options.prompt, /No one reads this letter before it is sent/);
+  assert.match(first.options.prompt, /For free-text questions \("why this company"\), write a concise/);
+  assert.match(await call(first, "cover_letter", { ...field, draft: "Too short." }), /^ERROR: the draft has 2 words/);
+  const reply = await call(first, "cover_letter", { ...field, draft: letter });
+  assert.ok(
+    reply.endsWith(`Enter it exactly as written:
+
+${letter}`),
+    "the worker's own letter comes straight back to be entered",
+  );
+  assert.equal(core.getOpenGate(1), null, "nothing waits for the owner");
+  assert.equal(jobRow(1).status, "filling");
+  assert.equal(first.aborted, false);
+  assert.equal(
+    readFileSync(join(jobDir(1), "cover_letter.txt"), "utf8"),
+    `${letter}
+`,
+  );
+  assert.equal(core.approvedCoverLetter(1), letter, "a later worker on this application is handed the same letter");
+  assert.match(await call(first, "cover_letter", { ...field, draft: `${letter} changed` }), new RegExp(`Enter it exactly as written:\n\n${letter}$`));
 } else if (scenario === "skip-after-submit") {
   assert.equal(authorizeSubmit(1), true);
   assert.match(await call(first, "skip_application", { requires: "references", note: "References*" }), /cannot be skipped/);

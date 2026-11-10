@@ -33,6 +33,12 @@ approval: auto
 # approve it, even under approval: auto. An optional cover letter is always left empty.
 coverLetters: skip
 
+# Whose words go on an application: a job scoring above this number waits for you to write its required
+# cover letter and its essay questions ("why this company", "tell us about a project"); at or below it
+# the agent writes them under the writing rules and enters them without waiting. Leave it out and every
+# required cover letter waits on its draft, and the agent answers essay questions on every job.
+# ownWritingAbove: 80
+
 # Target employers: the ones you are saving for later. The frontier list in profile/employers.yml, plus
 # any employer the assessment judges to fit `describe` (empty or null: the list alone).
 #   holdBack: true   their jobs are set aside in Archive → Held, and the rest are applied to (practice)

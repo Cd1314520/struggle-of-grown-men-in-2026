@@ -3,7 +3,7 @@ import { copyFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
 import { checkAutoApprovedPractice } from "./auto";
-import { browserSlot, config, jobDir, PROFILE, readProfile } from "./config";
+import { browserSlot, config, jobDir, ownerWrites, PROFILE, readProfile, sendsOwnLetter } from "./config";
 import { isCapacityError } from "./errors";
 import { db, jobsWithCheckpoint, lastEventId, logEvent, moveJob, notifyJobChange, stepsSince, updateJob, type Job } from "./db";
 import { isSubmitting, isVerifying, queueDraftRecovery, queueVerification, rememberSlot } from "./fill-state";
@@ -39,10 +39,22 @@ const SUBMIT_RULE =
 // What the worker does about cover letters and references, by `coverLetters` (config.yml).
 const REFERENCES =
   "Never invent a reference. Leave optional reference fields empty. When the form requires references (names and contact details of people to contact), the candidate does not apply: call `skip_application` with `requires: references` and the field's label in `note`, as soon as you see it and before filling further. A question asking only whether references can be provided is answered from the answer bank, not skipped. When the form makes completed coursework a condition of applying and the answer bank says the candidate has not completed it, call `skip_application` with `requires: coursework` and the question in `note`.";
-export const coverLetterRule = () =>
+const LETTER_ENTRY =
+  "paste it into a text box, or upload `cover_letter.txt` from this application's folder (if the upload refuses a .txt file, call `need_manual`)";
+export const coverLetterRule = (score: number | null = null) =>
   config.coverLetters === "draft"
-    ? `- **Cover letters and references:** leave an optional cover letter field or upload empty. When the form requires a cover letter, call \`cover_letter\` with the field's label and your draft. If it returns the candidate's approved letter, enter that exactly: paste it into a text box, or upload \`cover_letter.txt\` from this application's folder (if the upload refuses a .txt file, call \`need_manual\`). Otherwise the application parks while the candidate reads and edits your draft; stop. Write the draft in under 250 words from the resume and the answer bank only, with one or two specifics from the posting: what draws the candidate to this role, the one or two projects that match it best with their real numbers, and when they can start. Plain sentences under the writing rules: no invented facts, tools or numbers, no em or en dashes, no generic openers. ${REFERENCES}`
+    ? `- **Cover letters and references:** leave an optional cover letter field or upload empty. When the form requires a cover letter, call \`cover_letter\` with the field's label and your draft. ${
+        sendsOwnLetter(score)
+          ? `No one reads this letter before it is sent, so edit the draft as "Editing a free-text answer" below says before you call. It returns the letter to enter, exactly as written: ${LETTER_ENTRY}.`
+          : `If it returns the candidate's approved letter, enter that exactly: ${LETTER_ENTRY}. Otherwise the application parks while the candidate reads and edits your draft; stop.`
+      } Write the draft in under 250 words from the resume and the answer bank only, with one or two specifics from the posting: what draws the candidate to this role, the one or two projects that match it best with their real numbers, and when they can start. Plain sentences under the writing rules: no invented facts, tools or numbers, no em or en dashes, no generic openers. ${REFERENCES}`
     : `- **Cover letters and references:** never write a cover letter. Leave an optional cover letter field or upload empty. When the form requires a cover letter, the candidate does not apply: call \`skip_application\` with \`requires: cover_letter\` and the field's label in \`note\`, as soon as you see it and before filling further. ${REFERENCES}`;
+
+// Who writes a free-text answer that takes sentences about the candidate (`ownWritingAbove`).
+export const freeTextRule = (score: number | null = null) =>
+  ownerWrites(score)
+    ? 'The candidate writes the prose of this application themselves. A question that asks for sentences about the candidate (why this company or this role, a project or a story, a short essay) is not yours to write: when an answer bank entry covers it, enter the text of that entry exactly as written; otherwise call `ask_user` with `why: free_text` and `options: []`, which is the true reason here, whether or not the field is required. Ask in the same way for an answer the employer says must be written without AI, instead of skipping the application. Leave an optional catch-all ("anything else", "additional information") empty. A text box that takes a fact (a date, a number, a name, a link, where you heard of the job) is filled as usual.'
+    : 'For free-text questions ("why this company"), write a concise, specific, honest answer grounded in the resume, the resume notes and the job description, and edit it as "Editing a free-text answer" below says before typing it.';
 
 export const PARKED_TABS = 8;
 
@@ -178,7 +190,8 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     answers: readProfile("answers.md"),
     resumeNotes: readProfile("resume-notes.md"),
     lowStakes: lowStakesRule(),
-    coverLetterRule: coverLetterRule(),
+    coverLetterRule: coverLetterRule(job.score),
+    freeTextRule: freeTextRule(job.score),
     terms: termsRule(),
     humanizer: humanizerRules(),
     resumeContext: JSON.stringify(context, null, 2),
