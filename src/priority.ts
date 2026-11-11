@@ -2,9 +2,10 @@
 // (optional) gives each a keyword score, no model: points for the title's tier, for how well the
 // posting's skills match the resumes, for the place, the year welcome, a frontier employer, a fresh
 // posting and a close deadline, less for skills required but missing and for what rules the candidate
-// out. The highest is assessed first; ties, and every job when there is no file, the most recently opened.
+// out, and more for a likely startup. The highest is assessed first; ties, and every job when there
+// is no file, the most recently opened.
 import YAML from "yaml";
-import { getJob, logEvent, openedAt, triagedJobs, type Job } from "./db";
+import { companyKey, getJob, logEvent, openedAt, triagedJobs, type Job } from "./db";
 import { employerListing, loadEmployers } from "./employers";
 import { errorMessage } from "./errors";
 import { readProfile } from "./config";
@@ -23,6 +24,9 @@ interface Rules {
   eligible?: { points: number; match: string }; // the posting welcomes the candidate's year
   ineligible?: { points: number; match?: string; required?: string }; // it rules the candidate out
   frontier?: number; // an employer on the frontier list in employers.yml
+  // A likely startup: the posting's link is on an application system startups use, or the company is
+  // one the candidate listed. Counted once, whichever matches.
+  startup?: { points: number; url?: string; companies?: string[] };
   fresh?: { days: number; points: number }; // opened within so many days
   closing?: { days: number; points: number }; // a deadline the posting states, within so many days
 }
@@ -64,6 +68,11 @@ export function compile(text: string) {
       required: r.ineligible.required ? re(r.ineligible.required, "ineligible.required") : null,
     },
     frontier: r.frontier === undefined ? 0 : num(r.frontier, "frontier"),
+    startup: r.startup && {
+      points: num(r.startup.points, "startup.points"),
+      url: r.startup.url ? re(r.startup.url, "startup.url") : null,
+      companies: new Set((r.startup.companies ?? []).map(companyKey).filter(Boolean)),
+    },
     fresh: r.fresh && { days: num(r.fresh.days, "fresh.days"), points: num(r.fresh.points, "fresh.points") },
     closing: r.closing && { days: num(r.closing.days, "closing.days"), points: num(r.closing.points, "closing.points") },
   };
@@ -102,7 +111,7 @@ function required(pattern: RegExp, text: string) {
   return false;
 }
 
-type Scored = Pick<Job, "title" | "location" | "company" | "description" | "posted_at" | "found_at">;
+type Scored = Pick<Job, "title" | "location" | "company" | "description" | "posted_at" | "found_at"> & { url?: string };
 
 export function priorityOf(job: Scored, rules: Compiled, frontier: boolean, now = Date.now()): number {
   const text = (job.description ?? "").replace(/\s+/g, " ");
@@ -115,6 +124,8 @@ export function priorityOf(job: Scored, rules: Compiled, frontier: boolean, now 
   }
   score += rules.places.find(p => p.match.test(job.location ?? ""))?.points ?? 0;
   if (frontier) score += rules.frontier;
+  const { startup } = rules;
+  if (startup && (!!startup.url?.test(job.url ?? "") || startup.companies.has(companyKey(job.company)))) score += startup.points;
   if (rules.fresh && now - openedAt(job) <= rules.fresh.days * 86_400_000) score += rules.fresh.points;
   if (!text) return score;
   if (rules.gaps) score += rules.gaps.points * Math.min(rules.gaps.max, rules.gaps.skills.filter(p => required(p, req)).length);

@@ -57,6 +57,17 @@ closing: { days: 7, points: 8 }`;
     expect(score(rules, { description: "Applications close 10/01/2026." })).toBe(-100);
   });
 
+  it("adds startup points once, for a startup application system or a listed company", () => {
+    const rules = `startup: { points: 15, url: 'ashbyhq\\.com|greenhouse\\.io', companies: [Rugged Robotics, 'Persona AI, Inc.'] }`;
+    expect(score(rules, { url: "https://jobs.ashbyhq.com/acme/123" })).toBe(15);
+    expect(score(rules, { company: "Rugged Robotics" })).toBe(15);
+    expect(score(rules, { company: "Persona AI" })).toBe(15);
+    expect(score(rules, { company: "Rugged Robotics", url: "https://job-boards.greenhouse.io/rugged/jobs/1" })).toBe(15);
+    expect(score(rules, { url: "https://acme.wd5.myworkdayjobs.com/x" })).toBe(0);
+    expect(score(rules)).toBe(0);
+    expect(score("startup: { points: 15 }", { url: "https://jobs.ashbyhq.com/acme/1" })).toBe(0);
+  });
+
   it("names the setting that is not a regular expression", () => {
     expect(() => compile("tiers: [{ points: 1, title: '(intern' }]")).toThrow(/tiers\[0\]\.title/);
     expect(() => compile("frontier: lots")).toThrow(/frontier needs a number/);
