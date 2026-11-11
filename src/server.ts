@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { scoreJob } from "./ats-job";
 import type { ActivityResult, AppState, Attention, BlockersResult, JobDetail, ModelsResult, ResumeState, SettingsResult, Summary } from "./api-types";
 import { feedNames, loadCompanies } from "./ats";
-import { jobBlockers, listBlockers } from "./blockers";
+import { jobBlockers, listBlockers, siteBlockedJobs } from "./blockers";
 import { isBoardUrl } from "./boards";
 import { screenshot, tabs } from "./chrome";
 import { browserCount, config, jobDir, LOCAL_CONFIG, PROFILE, RESUME_DIR, STOCK_MAIN, vncUrl } from "./config";
@@ -151,14 +151,17 @@ function summary(scheduler: Scheduler): Summary {
   const rest = settings(scheduler),
     questionGroups = listQuestionGroups();
   const gates = (kind: string) => questionGroups.filter(g => g.kind === kind).reduce((n, g) => n + g.jobs.length, 0);
+  const blocked = [...siteBlockedJobs().values()],
+    blockedFailed = blocked.filter(status => status === "failed").length;
   const attention: Omit<Attention, "total"> = {
     review: rest.counts["awaiting_approval"] ?? 0,
     questions: questionGroups.filter(g => g.kind === "question").length,
     confirmSubmit: gates("confirm_submit"),
-    manual: gates("manual"),
+    manual: gates("manual") - (blocked.length - blockedFailed),
     coverLetter: gates("cover_letter"),
     ambiguous: gates("submission_ambiguous"),
-    failed: rest.counts["failed"] ?? 0,
+    failed: (rest.counts["failed"] ?? 0) - blockedFailed,
+    blocked: blocked.length,
   };
   const total = attention.questions + attention.confirmSubmit + attention.manual + attention.coverLetter + attention.ambiguous + attention.failed;
   return { ...rest, attention: { ...attention, total } };

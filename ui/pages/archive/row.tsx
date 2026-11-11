@@ -7,6 +7,7 @@ import { AppliedHere } from "../review/queue-row";
 
 const BLOCKER: Record<string, string> = {
   site_down: "Site down",
+  blocked: "Blocked by site",
   no_form: "No application form",
   login: "Login wall",
   captcha: "Captcha",

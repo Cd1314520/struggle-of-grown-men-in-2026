@@ -33,10 +33,13 @@ describe("durable parking lifecycle", () => {
   it("preserves a fast answer against old cleanup/callbacks and resumes the same frozen artifact", () => runScenarios(["quick-answer"]));
   it("drops an application whose form requires a cover letter, without parking it", () => runScenarios(["skip"]));
   it("releases stopped manual blockers and resumes their frozen drafts later", () => runScenarios(["manual"]));
-  it("retries a browser stop at once and again an hour later, before it waits for the user", () => runScenarios(["retry-browser"]));
-  it("retries a stop the host recorded itself once, after half an hour", () => runScenarios(["retry-crash"]));
+  it("retries a browser stop at once, an hour and six hours later, then marks it failed", () => runScenarios(["retry-browser"]));
+  it("retries a stop the host recorded itself after half an hour and three hours, then marks it failed", () => runScenarios(["retry-crash"]));
   it("retries an outage after the approved click when the site itself refused the submission", () => runScenarios(["refused-submit"]));
-  it("keeps an unclear outcome after the approved click for inspection", () => runScenarios(["unclear-submit"]));
+  it("checks an unclear outcome after the approved click twice by itself before it waits for the user", () => runScenarios(["unclear-submit"]));
+  it("shows a site block apart from what needs the user, retries it once a day later, and keeps it for finishing by hand", () =>
+    runScenarios(["site-blocked"]));
+  it("resets a password with a new one and saves it only once the site confirms", () => runScenarios(["reset-password"]));
   it("skips after the approved click only for what the site demands then", () => runScenarios(["skip-after-submit"]));
   it("retries a site outage after a few hours", () => runScenarios(["retry-site-down"]));
   it("keeps a new application to a stopped blocker's employer waiting until that one is finished", () => runScenarios(["manual-same-employer"]));

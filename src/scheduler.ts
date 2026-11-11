@@ -1,6 +1,7 @@
 import * as chrome from "./chrome";
 import { browserCount, config, describing } from "./config";
 import {
+  db,
   dedupeExisting,
   getJob,
   jobsByStatus,
@@ -23,7 +24,18 @@ import { tickQuestionDigest } from "./digest";
 import { errorMessage, isCapacityError } from "./errors";
 import { fill } from "./fill";
 import { defaultCheckpoint, endSession, ownsFill, stopFailedFill, type Browser, type FillRuntime, type FillSession } from "./fill-session";
-import { beginAttempt, dropManualLease, fillPhase, isRecovering, isSubmitting, isVerifying, lastSlot, manualLeaseGate, markAmbiguous } from "./fill-state";
+import {
+  beginAttempt,
+  dropManualLease,
+  fillPhase,
+  isRecovering,
+  isSubmitting,
+  isVerifying,
+  lastSlot,
+  manualLeaseGate,
+  markAmbiguous,
+  resetFillPhase,
+} from "./fill-state";
 import { backedOff, backOff, clearBackoff, countOne, due, usedToday } from "./limits";
 import { briefInterviews } from "./interview-prep";
 import { preferUsListings } from "./listings";
@@ -45,7 +57,9 @@ import {
   recordCheckpoint,
   releaseManualLease,
   reserveManualLease,
+  verificationsTried,
   type FillCheckpoint,
+  type Gate,
 } from "./questions";
 import { interruptedImport, runImport, type ImportRun } from "./resume-import";
 import { scanSources } from "./scan";
@@ -122,14 +136,48 @@ function recoverCapacityHandoffs() {
 
 const HOUR = 60 * 60 * 1000;
 const RETRIED: Partial<Record<BlockerCause, readonly number[]>> = {
-  browser: [0, HOUR],
-  site_down: [3 * HOUR, 3 * HOUR],
-  unknown: [HOUR / 2],
+  browser: [0, HOUR, 6 * HOUR],
+  site_down: [3 * HOUR, 6 * HOUR, 12 * HOUR, 24 * HOUR],
+  blocked: [24 * HOUR],
+  unknown: [HOUR / 2, 3 * HOUR],
 };
+const GIVEN_UP: readonly BlockerCause[] = ["browser", "site_down", "unknown"];
+const VERIFIED_AFTER = [HOUR / 2, 24 * HOUR];
+
+function giveUp(job: Job, cause: BlockerCause, tries: number, detail: string) {
+  const failed = db.transaction(() => {
+    if (!moveJob(job.id, "needs_manual", to.failed(`gave up after ${tries} tries (${cause.replace("_", " ")}): ${detail}`), { quiet: true })) return false;
+    cancelJobGates(job.id);
+    resetFillPhase(job.id);
+    return true;
+  })();
+  if (!failed) return;
+  notifyJobChange(job.id);
+  logEvent("system", `Stopped by ${cause.replace("_", " ")} on every retry: marked failed`, job.id);
+}
+
+function verifyAmbiguous(job: Job, gate: Gate) {
+  if (fillPhase(job.id) !== "ambiguous") return;
+  const tried = verificationsTried(job.id);
+  const wait = VERIFIED_AFTER[tried];
+  if (wait === undefined || Date.now() - Date.parse(gate.createdAt) < wait) return;
+  try {
+    queueRecovery(job.id, gate.id);
+    logEvent("system", `Unclear whether it was sent: checking the site and mailbox (check ${tried + 1} of ${VERIFIED_AFTER.length})`, job.id);
+  } catch (err) {
+    logEvent("error", `Automatic verification: ${errorMessage(err)}`, job.id);
+  }
+}
+
 export function retryPassingHandoffs() {
   for (const job of jobsByStatus("needs_manual")) {
     const gate = getOpenGate(job.id);
-    if (gate?.kind !== "manual" || isSubmitting(job.id) || manualLeaseGate(job.id) || !readCheckpoint(job.id)) continue;
+    if (!gate || manualLeaseGate(job.id) || !readCheckpoint(job.id)) continue;
+    if (gate.kind === "submission_ambiguous") {
+      verifyAmbiguous(job, gate);
+      continue;
+    }
+    if (gate.kind !== "manual" || isSubmitting(job.id)) continue;
     const blockers = jobBlockers(job.id);
     const last = blockers.at(-1);
     const waits = last && RETRIED[last.cause];
@@ -137,7 +185,11 @@ export function retryPassingHandoffs() {
     const parkedAt = Date.parse(gate.createdAt);
     const tried = blockers.filter(b => b.cause === last.cause).length - 1;
     const wait = waits[tried];
-    if (wait === undefined || Date.now() - parkedAt < wait) continue;
+    if (wait === undefined) {
+      if (GIVEN_UP.includes(last.cause)) giveUp(job, last.cause, tried + 1, last.detail);
+      continue;
+    }
+    if (Date.now() - parkedAt < wait) continue;
     try {
       queueRecovery(job.id, gate.id);
       logEvent("system", `Stopped by ${last.cause.replace("_", " ")}: retrying the same draft (try ${tried + 1} of ${waits.length})`, job.id);

@@ -574,6 +574,11 @@ export function returnManualControl(jobId: number, gateId: string, answer: strin
   if (returned) notifyJobChange(jobId);
   return returned;
 }
+export const verificationsTried = (jobId: number) =>
+  db
+    .query<{ n: number }, [number]>("SELECT count(*) AS n FROM question_gates WHERE job_id = ? AND kind = 'submission_ambiguous' AND state = 'closed'")
+    .get(jobId)?.n ?? 0;
+
 export function cancelJobGates(jobId: number): void {
   db.transaction(() => {
     requireJob(jobId);

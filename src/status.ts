@@ -50,7 +50,7 @@ export const TRANSITIONS: Readonly<Record<Status, readonly Status[]>> = {
   filling: ["approved", "needs_input", "awaiting_submit", "needs_manual", "held", "skipped", "rejected", "failed", "submitted"],
   needs_input: ["approved", "needs_input", "needs_manual", "held", "rejected", "submitted"],
   awaiting_submit: ["approved", "needs_manual", "held", "rejected", "submitted"],
-  needs_manual: ["approved", "filling", "needs_manual", "held", "rejected", "submitted"],
+  needs_manual: ["approved", "filling", "needs_manual", "held", "rejected", "failed", "submitted"],
   submitted: ["interview", "offer", "rejected_by_company", "withdrawn"],
   interview: ["submitted", "offer", "rejected_by_company", "withdrawn"],
   offer: ["submitted", "interview", "rejected_by_company", "withdrawn"],

@@ -95,6 +95,7 @@ export interface Attention {
   coverLetter: number;
   ambiguous: number;
   failed: number;
+  blocked: number;
   total: number;
 }
 

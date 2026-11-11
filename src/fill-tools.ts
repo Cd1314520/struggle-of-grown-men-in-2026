@@ -1,4 +1,4 @@
-import { resolveAccount } from "./accounts";
+import { newPassword, normalizeTenantDomain, resolveAccount, saveResetPassword } from "./accounts";
 import { CAUSE_GUIDE, recordBlocker, WORKER_CAUSES } from "./blockers";
 import { connectTab } from "./cdp-tab";
 import type { JobBrowser } from "./chrome";
@@ -31,6 +31,14 @@ import {
 } from "./questions";
 import { to } from "./status";
 import { gmailTools } from "./worker-tools";
+
+const tenantOf = (domain: string): string | { error: string } => {
+  try {
+    return normalizeTenantDomain(domain);
+  } catch (err) {
+    return { error: JSON.stringify({ error: "invalid_domain", message: errorMessage(err) }) };
+  }
+};
 
 const STALE_WORKER = "ERROR: stale or parked fill worker; no action recorded.";
 
@@ -145,6 +153,7 @@ const askUserFields = {
 export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, HostTool> {
   const { job, session, mailbox, isVerification, jobBrowser } = ctx;
   const { slot } = session;
+  const resets = new Map<string, string>();
   const tools: Record<string, HostTool> = {
     ...gmailTools(),
     application_tabs: {
@@ -181,6 +190,42 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
         const min = arg.optInt(args, "password_min"),
           max = arg.optInt(args, "password_max");
         return resolveAccount(arg.str(args, "domain"), mailbox, allowCreate, { ...(min ? { min } : {}), ...(max ? { max } : {}) });
+      },
+    },
+    reset_password: {
+      description:
+        "Get a new password for this site's own password reset form, once its reset link or code has come by email. Nothing is saved until you call password_reset_done.",
+      parameters: schema(
+        {
+          domain: S.str("Site domain, exactly as for get_account"),
+          password_min: S.int("The shortest password the reset form accepts, when it states one"),
+          password_max: S.int("The longest password the reset form accepts, when it states one"),
+        },
+        ["domain"],
+      ),
+      handler: args => {
+        const min = arg.optInt(args, "password_min"),
+          max = arg.optInt(args, "password_max");
+        const domain = tenantOf(arg.str(args, "domain"));
+        if (typeof domain !== "string") return domain.error;
+        const password = newPassword({ ...(min ? { min } : {}), ...(max ? { max } : {}) });
+        resets.set(domain, password);
+        logEvent("auto", `Password reset started for ${domain}`, job.id, "fill");
+        return JSON.stringify({ email: mailbox, password, saved: false });
+      },
+    },
+    password_reset_done: {
+      description:
+        "Save the password from reset_password as this site's login, once the site confirms it changed (it says so, or signing in with it works). Do not call it when the reset failed.",
+      parameters: schema({ domain: S.str("Site domain, exactly as given to reset_password") }),
+      handler: args => {
+        const domain = tenantOf(arg.str(args, "domain"));
+        if (typeof domain !== "string") return domain.error;
+        const password = resets.get(domain);
+        if (!password) return "ERROR: call reset_password for this domain first, and enter its password in the site's reset form.";
+        resets.delete(domain);
+        logEvent("auto", `Password reset saved for ${domain}`, job.id, "fill");
+        return saveResetPassword(domain, mailbox, password);
       },
     },
     ask_user: {

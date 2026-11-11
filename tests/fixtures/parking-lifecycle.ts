@@ -155,6 +155,7 @@ const core = await import("../../src/questions");
 const { jobBlockers } = await import("../../src/blockers");
 const { backedOff, usedToday } = await import("../../src/limits");
 const { Scheduler, retryPassingHandoffs } = await import("../../src/scheduler");
+const { listJobs } = await import("../../src/listing");
 const scheduler = new Scheduler({ runWorker, browser });
 
 function must<T>(value: T | null | undefined, what: string): T {
@@ -492,9 +493,35 @@ if (scenario === "release" || scenario === "quick-answer") {
     await until(() => workers.length === 2);
     assert.equal(workerAt(1).options.jobId, 1, "the site's own refusal makes the outage retryable");
   } else {
+    await until(() => workers.length === 2);
+    assert.equal(workerAt(1).options.jobId, 1, "an unclear outcome is checked without the user");
+    assert.equal(isVerifying(1), true);
+    const unresolved = call(workerAt(1), "verify_status", { ...navigation, outcome: "unresolved", evidence: "No candidate portal; no confirmation mail yet" });
+    await until(() => core.getOpenGate(1)?.kind === "submission_ambiguous");
+    workerAt(1).exit();
+    await unresolved;
+    await until(() => !scheduler.activeFillSession(1));
+    db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 4 * 3600_000).toISOString());
+    retryPassingHandoffs();
+    scheduler.pump();
     await Bun.sleep(20);
-    assert.equal(workers.length, 1, "an unclear outcome still waits for inspection");
+    assert.equal(workers.length, 2, "the second check waits a day");
+    db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 25 * 3600_000).toISOString());
+    retryPassingHandoffs();
+    scheduler.pump();
+    await until(() => workers.length === 3);
+    const again = call(workerAt(2), "verify_status", { ...navigation, outcome: "unresolved", evidence: "Still no confirmation mail" });
+    await until(() => core.getOpenGate(1)?.kind === "submission_ambiguous");
+    workerAt(2).exit();
+    await again;
+    await until(() => !scheduler.activeFillSession(1));
+    db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 48 * 3600_000).toISOString());
+    retryPassingHandoffs();
+    scheduler.pump();
+    await Bun.sleep(20);
+    assert.equal(workers.length, 3, "two checks only; what they could not settle waits for the user");
     assert.equal(jobRow(1).status, "needs_manual");
+    assert.equal(openGate(1).kind, "submission_ambiguous");
   }
 } else if (scenario === "retry-crash") {
   first.fail("worker crashed");
@@ -514,7 +541,19 @@ if (scenario === "release" || scenario === "quick-answer") {
   retryPassingHandoffs();
   scheduler.pump();
   await Bun.sleep(20);
-  assert.equal(workers.length, 2, "one retry only");
+  assert.equal(workers.length, 2, "the second retry waits three hours");
+  db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 4 * 3600_000).toISOString());
+  retryPassingHandoffs();
+  scheduler.pump();
+  await until(() => workers.length === 3);
+  workerAt(2).fail("worker crashed a third time");
+  await until(() => core.getOpenGate(1) !== null && jobRow(1).status === "needs_manual");
+  await until(() => !scheduler.activeFillSession(1));
+  db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 4 * 3600_000).toISOString());
+  retryPassingHandoffs();
+  assert.equal(jobRow(1).status, "failed", "a stop that never clears is marked failed, not left for the user");
+  assert.equal(core.getOpenGate(1), null);
+  assert.match(jobRow(1).note ?? "", /^gave up after 3 tries \(unknown\)/);
 } else if (scenario === "paced") {
   await call(first, "report_result", { outcome: "submitted", note: "Submitted" });
   first.exit();
@@ -612,8 +651,21 @@ if (scenario === "release" || scenario === "quick-answer") {
     db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 2 * 3600_000).toISOString());
     retryPassingHandoffs();
     scheduler.pump();
-    assert.equal(jobRow(1).status, "needs_manual", "two retries only: the third stop waits for the user");
+    assert.equal(jobRow(1).status, "needs_manual", "the third retry waits six hours");
     assert.equal(workers.length, 3);
+    db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 7 * 3600_000).toISOString());
+    retryPassingHandoffs();
+    scheduler.pump();
+    await until(() => workers.length === 4);
+    const fourth = call(workerAt(3), "need_manual", { ...navigation, cause, reason: "Clicks still time out" });
+    await until(() => core.getOpenGate(1) !== null);
+    workerAt(3).exit();
+    await fourth;
+    await until(() => !scheduler.activeFillSession(1));
+    db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 7 * 3600_000).toISOString());
+    retryPassingHandoffs();
+    assert.equal(jobRow(1).status, "failed", "three retries only: a browser stop that never clears is marked failed");
+    assert.equal(workers.length, 4);
   }
 } else if (scenario === "manual-same-employer") {
   const parking = call(first, "need_manual", { ...navigation, cause: "other", reason: "CAPTCHA/session needs human" });
@@ -636,12 +688,12 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(workerAt(2).options.jobId, 2);
 } else if (["manual", "manual-lost-tab"].includes(scenario ?? "")) {
   if (scenario === "manual-lost-tab") simulatedTabs.delete(navigation.tab_id);
-  const parking = call(first, "need_manual", { ...navigation, cause: "captcha", reason: "CAPTCHA/session needs human" });
+  const parking = call(first, "need_manual", { ...navigation, cause: "blocked", reason: "CAPTCHA/session needs human" });
   await until(() => core.getOpenGate(1) !== null);
   const gate = openGate(1);
   assert.deepEqual(
     jobBlockers(1).map(b => b.cause),
-    ["captcha"],
+    ["blocked"],
   );
   assert.match(jobBlockers(1)[0]?.detail ?? "", /^CAPTCHA\/session needs human/);
   await assert.rejects(scheduler.reserveBrowser(1, gate.id));
@@ -1071,6 +1123,58 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(jobRow(1).status, "submitted");
   assert.equal(second.aborted, true);
   second.exit();
+} else if (scenario === "site-blocked") {
+  const pipelineGroup = (id: number) => listJobs({ view: "pipeline", limit: 500 }).rows.find(r => r.id === id)?.group;
+  const parking = call(first, "need_manual", { ...navigation, cause: "blocked", reason: "reCAPTCHA rejected every honest attempt" });
+  await until(() => core.getOpenGate(1) !== null);
+  first.exit();
+  await parking;
+  await until(() => !scheduler.activeFillSession(1));
+  assert.equal(pipelineGroup(1), "blocked", "a site block is not shown as needing the user");
+  db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 2 * 3600_000).toISOString());
+  retryPassingHandoffs();
+  assert.equal(jobRow(1).status, "needs_manual", "a block waits a day before its one retry");
+  db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 25 * 3600_000).toISOString());
+  retryPassingHandoffs();
+  scheduler.pump();
+  await until(() => workers.length === 2);
+  assert.equal(workerAt(1).options.jobId, 1);
+  const again = call(workerAt(1), "need_manual", { ...navigation, cause: "blocked", reason: "Still rejected" });
+  await until(() => core.getOpenGate(1) !== null);
+  workerAt(1).exit();
+  await again;
+  await until(() => !scheduler.activeFillSession(1));
+  db.query("UPDATE question_gates SET created_at = ? WHERE job_id = 1 AND state = 'open'").run(new Date(Date.now() - 49 * 3600_000).toISOString());
+  retryPassingHandoffs();
+  assert.equal(jobRow(1).status, "needs_manual", "a block stays for the user to finish by hand, not failed");
+  assert.equal(pipelineGroup(1), "blocked");
+  addJob(2);
+  scheduler.pump();
+  await until(() => workers.length === 3);
+  await call(workerAt(2), "report_result", { outcome: "failed", cause: "blocked", note: "HTTP 406 Access Denied on the posting" });
+  workerAt(2).exit();
+  await until(() => !scheduler.activeFillSession(2));
+  assert.equal(jobRow(2).status, "failed");
+  assert.equal(pipelineGroup(2), "blocked");
+  core.parkGate(1, { kind: "manual", text: "Different stop, no cause recorded" }, core.readCheckpoint(1));
+  assert.equal(pipelineGroup(1), "needs_you", "a later stop without a block needs the user again");
+} else if (scenario === "reset-password") {
+  const json = async (name: string, args: Record<string, unknown>) => JSON.parse(await call(first, name, args)) as Record<string, unknown>;
+  db.query("INSERT INTO accounts (domain, email, password) VALUES ('acme.wd5.myworkdayjobs.com', 'me@example.com', 'old-pass')").run();
+  const stored = () => db.query<{ password: string }, []>("SELECT password FROM accounts WHERE domain = 'acme.wd5.myworkdayjobs.com'").get()?.password;
+  const fresh = await json("reset_password", { domain: "https://acme.wd5.myworkdayjobs.com/en-US/External", password_min: 20 });
+  const password = String(fresh["password"]);
+  assert.equal(fresh["saved"], false);
+  assert.ok(password.length >= 20);
+  assert.notEqual(password, "old-pass");
+  assert.equal(stored(), "old-pass", "nothing is saved until the site confirms the reset");
+  assert.match(await call(first, "password_reset_done", { domain: "other.wd1.myworkdayjobs.com" }), /call reset_password/);
+  const saved = await json("password_reset_done", { domain: "acme.wd5.myworkdayjobs.com" });
+  assert.deepEqual(saved, { saved: true, domain: "acme.wd5.myworkdayjobs.com", email: "me@example.com" });
+  assert.equal(stored(), password);
+  assert.equal((await json("get_account", { domain: "acme.wd5.myworkdayjobs.com" }))["password"], password);
+  assert.match(await call(first, "password_reset_done", { domain: "acme.wd5.myworkdayjobs.com" }), /call reset_password/, "a reset is saved once");
+  assert.match(await call(first, "reset_password", { domain: "ftp://acme.example" }), /invalid_domain/);
 } else {
   throw new Error(`Unknown fixture scenario: ${scenario}`);
 }

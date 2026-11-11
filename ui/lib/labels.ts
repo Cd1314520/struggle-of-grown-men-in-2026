@@ -37,6 +37,7 @@ export const GATE: Record<GateKind, string> = {
 
 export const CAUSE: Record<BlockerCause, string> = {
   site_down: "Site down",
+  blocked: "Blocked by site",
   login: "Can't log in",
   captcha: "CAPTCHA",
   email_code: "Emailed code",

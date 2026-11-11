@@ -8,6 +8,7 @@ interface Stage {
 export const STAGES: Record<string, Stage> = {
   needs_you: { label: "Needs you", short: "Needs you", tone: "warning" },
   failed: { label: "Failed", short: "Failed", tone: "danger" },
+  blocked: { label: "Blocked by site", short: "Blocked" },
   questions: { label: "Questions", short: "Questions", tone: "warning" },
   applying: { label: "Applying", short: "Applying" },
   assessing: { label: "Assessing", short: "Assessing" },

@@ -1,4 +1,5 @@
 import type { ListedJob } from "./api-types";
+import { siteBlockedJobs } from "./blockers";
 import { config, describing } from "./config";
 import { countByCompany, lastMovedFrom, listedJobs, openedAt } from "./db";
 import { homeOf, nearHome } from "./home";
@@ -23,6 +24,7 @@ const VIEW_STATUSES: Record<ListView, readonly Status[]> = {
 export interface ListRow extends ListedJob {
   group: string;
   gate: GateKind | null;
+  blocked: boolean;
   appliedThere: number;
   companyCount: number;
   reason: Reason | null;
@@ -91,20 +93,23 @@ const SPECS: Record<ListView, Spec> = {
     groups: [
       ["needs_you", "Needs you"],
       ["questions", "Waiting on answers"],
+      ["blocked", "Blocked by site"],
       ["failed", "Failed"],
       ["applying", "Applying"],
       ["assessing", "Assessing"],
     ],
     of: j =>
-      j.status === "failed"
-        ? "failed"
-        : j.status === "needs_input" && j.gate === "question"
-          ? "questions"
-          : PARKED.includes(j.status)
-            ? "needs_you"
-            : QUEUED.includes(j.status)
-              ? "applying"
-              : "assessing",
+      j.blocked
+        ? "blocked"
+        : j.status === "failed"
+          ? "failed"
+          : j.status === "needs_input" && j.gate === "question"
+            ? "questions"
+            : PARKED.includes(j.status)
+              ? "needs_you"
+              : QUEUED.includes(j.status)
+                ? "applying"
+                : "assessing",
     sorts: {
       default: (a, b) =>
         (QUEUED.includes(a.status) && QUEUED.includes(b.status)) || (ASSESSING.includes(a.status) && ASSESSING.includes(b.status))
@@ -182,6 +187,7 @@ function filtersOf(view: ListView): Filter[] {
 function viewRows(view: ListView): ListRow[] {
   const jobs = listedJobs(VIEW_STATUSES[view]);
   const gates = openGateKinds(),
+    blocked = view === "pipeline" ? siteBlockedJobs() : new Map<number, Status>(),
     applied = countByCompany(SENT),
     next: Map<number, NextStep> = view === "applications" ? nextSteps() : new Map<number, NextStep>();
   const here = new Map<string, number>();
@@ -195,6 +201,7 @@ function viewRows(view: ListView): ListRow[] {
       opened_at: openedAt(j),
       next: next.get(j.id) ?? null,
       gate: gates.get(j.id) ?? null,
+      blocked: blocked.has(j.id),
       appliedThere: applied.get(j.company) ?? 0,
       companyCount: here.get(j.company) ?? 1,
       reason: from ? setAsideReason(j.note, from.get(j.id) ?? null, hold_reason) : null,

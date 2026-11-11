@@ -30,7 +30,7 @@ import { FitFact } from "../job/fit";
 import { ATTENTION, stageSegments, STAGES } from "./stages";
 import { thresholdOf } from "../job/model";
 
-const STUCK = new Set(["needs_you", "questions", "failed"]);
+const STUCK = new Set(["needs_you", "questions", "blocked", "failed"]);
 
 const firstStage = (list: ListResult) => Object.keys(STAGES).find(key => list.groups.some(g => g.key === key && g.count > 0)) ?? "needs_you";
 
@@ -64,6 +64,7 @@ const timeOf = (group: string, row: Row) => (group === "assessing" ? row.opened_
 const EMPTY: Record<string, string> = {
   needs_you: "Nothing needs you",
   questions: "No applications waiting on answers",
+  blocked: "No site is refusing the agent",
   failed: "Nothing has failed",
   applying: "Nothing is applying right now",
   assessing: "Nothing waiting to be assessed",
@@ -196,7 +197,7 @@ export function PipelinePage() {
         rows.map(r => {
           const at = timeOf(group, r),
             score = ASSESSING.includes(r.status) ? null : r.score,
-            ask = group === "needs_you" || group === "questions" ? askOf(r) : null,
+            ask = group === "needs_you" || group === "questions" ? askOf(r) : group === "blocked" ? (askOf(r) ?? (r.note?.trim() || null)) : null,
             [cause, detail] = group === "failed" && r.note?.trim() ? splitNote(r.note) : [null, ""];
           return (
             <ListRow

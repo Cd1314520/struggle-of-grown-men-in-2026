@@ -9,6 +9,7 @@ import {
   MousePointerClick,
   Radar,
   Send,
+  ShieldBan,
   ListChecks,
   TriangleAlert,
   type LucideIcon,
@@ -118,6 +119,15 @@ export function attentionRows(s: Summary): Row[] {
       href: "#questions",
       icon: MessageSquareText,
       tone: "warning",
+    },
+    {
+      key: "blocked",
+      label: "Blocked by site",
+      hint: "The site refused the agent: finish it by hand or set it aside",
+      count: a.blocked,
+      href: "#pipeline?group=blocked",
+      icon: ShieldBan,
+      tone: "accent",
     },
     {
       key: "failed",
