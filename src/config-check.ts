@@ -101,7 +101,10 @@ const CONFIG = shape(
     ),
     fillPauseSeconds: pair(amount()),
     resume: shape({ dir: text, main: text, pdfName: text }),
-    chrome: shape({ cdpPort: port, proxyPort: port, display: matching(/^:\d+$/, 'an X display such as ":99"'), window: pair(count(1)), vncPort: count() }),
+    chrome: shape(
+      { cdpPort: port, proxyPort: port, display: matching(/^:\d+$/, 'an X display such as ":99"'), window: pair(count(1)), vncPort: count() },
+      { offscreen: bool },
+    ),
   },
   {
     publicUrl: orNull(url),

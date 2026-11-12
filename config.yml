@@ -174,6 +174,7 @@ chrome:
   display: ":99"
   window: [1440, 900]
   vncPort: 6080 # noVNC for manual takeover (localhost only); 0 disables
+  # offscreen: true # Windows: keep the browser windows off the desktop; one comes back while you inspect it
 
 # When a provider (Codex, a Claude account, omp) refuses work for capacity, it is out until the reset it
 # names (5 minutes when it names none), and the work moves to these models in turn, unless the stage

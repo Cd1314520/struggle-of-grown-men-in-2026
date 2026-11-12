@@ -428,6 +428,7 @@ export class Scheduler {
     let activated = false;
     try {
       reserveManualLease(jobId, gateId);
+      await this.rt.browser.showWindows?.(slot, true);
       await this.rt.browser.activateApplicationTab(slot, tabId);
       if (getOpenGate(jobId)?.id !== gateId || manualLeaseGate(jobId) !== gateId || readCheckpoint(jobId)?.tabId !== tabId)
         throw new Error("This handoff changed while opening its browser");
@@ -442,7 +443,9 @@ export class Scheduler {
 
   releaseBrowser(jobId: number, gateId: string): void {
     if ([...this.manualActivations.values()].includes(jobId)) throw new Error("Browser inspection is still opening");
+    const slot = [...manualLeases()].find(([, owner]) => owner === jobId)?.[0];
     releaseManualLease(jobId, gateId);
+    if (slot !== undefined) void this.rt.browser.showWindows?.(slot, false);
     this.pump();
   }
 

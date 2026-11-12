@@ -86,7 +86,11 @@ async function ensureVnc(slot: number) {
 }
 
 export async function ensureChrome(slot = 0) {
-  if (await cdpAlive(slot)) return ensureVnc(slot);
+  if (await cdpAlive(slot)) {
+    // A worker is about to take this browser: off the desktop again, if the owner left it on screen.
+    await showWindows(slot, false);
+    return ensureVnc(slot);
+  }
   const { window } = config.chrome;
   const { display, cdpPort, profile } = browserSlot(slot);
   if (!WINDOWS && !(await displayAlive(display))) {
@@ -104,7 +108,7 @@ export async function ensureChrome(slot = 0) {
       `--remote-debugging-port=${cdpPort}`,
       "--remote-debugging-address=127.0.0.1",
       `--window-size=${window[0]},${window[1]}`,
-      "--window-position=0,0",
+      offscreen() ? `--window-position=${OFFSCREEN},${OFFSCREEN}` : "--window-position=0,0",
       "--no-first-run",
       "--no-default-browser-check",
       "--disable-session-crashed-bubble",
@@ -198,6 +202,64 @@ export async function pruneTabs(slot: number, keep: number, protectedIds: Readon
 }
 
 // PNG of a tab (default: the most recently used real page), for the live view in the UI.
+// With chrome.offscreen on Windows, each browser's windows sit off the desktop (-32000,-32000) while
+// workers use them, and come back to the top left only while the owner inspects one by hand. Chrome
+// keeps painting a window there (the page stays visible and animation frames run), since occlusion
+// tracking is off; a minimized window would stop painting instead.
+const OFFSCREEN = -32000;
+export const offscreen = () => WINDOWS && config.chrome.offscreen === true;
+
+// Every top-level window of browser `slot` moves on screen or off it. Best effort: a browser that is
+// not running, or a window that will not move, is left as it is.
+export async function showWindows(slot: number, visible: boolean): Promise<void> {
+  if (!offscreen() || !(await cdpAlive(slot))) return;
+  const at = visible ? 0 : OFFSCREEN;
+  try {
+    const version = (await (await fetch(`${cdp(slot)}/json/version`, { signal: AbortSignal.timeout(1500) })).json()) as { webSocketDebuggerUrl?: string };
+    const pages = await tabs(slot);
+    if (!version.webSocketDebuggerUrl || !pages.length) return;
+    const ws = new WebSocket(version.webSocketDebuggerUrl);
+    const waiting = new Map<number, (result: Record<string, unknown> | null) => void>();
+    let next = 0;
+    ws.onmessage = ev => {
+      const msg = JSON.parse(String(ev.data)) as { id?: number; result?: Record<string, unknown> };
+      if (msg.id !== undefined) waiting.get(msg.id)?.(msg.result ?? null);
+    };
+    const send = (method: string, params: Record<string, unknown>) =>
+      new Promise<Record<string, unknown> | null>(resolve => {
+        const id = ++next;
+        const timer = setTimeout(() => {
+          resolve(null);
+        }, 3000);
+        waiting.set(id, result => {
+          clearTimeout(timer);
+          resolve(result);
+        });
+        ws.send(JSON.stringify({ id, method, params }));
+      });
+    await new Promise<void>((resolve, reject) => {
+      ws.onopen = () => {
+        resolve();
+      };
+      ws.onerror = () => {
+        reject(new Error("CDP connection failed"));
+      };
+    });
+    const windows = new Set<number>();
+    for (const page of pages) {
+      const found = await send("Browser.getWindowForTarget", { targetId: page.id });
+      if (typeof found?.["windowId"] === "number") windows.add(found["windowId"]);
+    }
+    for (const windowId of windows) {
+      await send("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal" } });
+      await send("Browser.setWindowBounds", { windowId, bounds: { left: at, top: at } });
+    }
+    ws.close();
+  } catch {
+    // left where it is
+  }
+}
+
 export async function screenshot(slot = 0, tabId?: string): Promise<Uint8Array | null> {
   const all = await tabs(slot);
   const tab = tabId !== undefined ? all.find(t => t.id === tabId) : (all.find(t => !t.url.startsWith("about:") && !t.url.startsWith("chrome")) ?? all[0]);

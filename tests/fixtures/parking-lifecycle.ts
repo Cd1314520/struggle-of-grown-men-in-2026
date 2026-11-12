@@ -107,11 +107,16 @@ const simulatedTabs = new Set<string>();
 const jobBrowsers: JobBrowser[] = [];
 let nextTab = 0;
 let activateWait: Promise<void> | null = null;
+const windowMoves: string[] = [];
 if (scenario?.startsWith("restart-")) for (const id of [1, 2, 3, 4]) simulatedTabs.add(id === 1 ? "draft-tab" : `draft-tab-${id}`);
 const browser: Browser = {
   ensureChrome: async () => {},
   pruneTabs: async () => {},
   screenshot: () => Promise.resolve(null),
+  showWindows: (slot: number, visible: boolean) => {
+    windowMoves.push(`${slot}:${visible ? "shown" : "hidden"}`);
+    return Promise.resolve();
+  },
   tabs: () => Promise.resolve([...simulatedTabs].map(id => ({ id, title: "Fixture requisition", url: "https://fixture.invalid/draft", ws: "" }))),
   activateApplicationTab: async (_slot: number, tabId: string) => {
     if (!simulatedTabs.has(tabId)) throw new Error("Missing saved draft tab");
@@ -808,6 +813,7 @@ ${letter}`),
   } else {
     await scheduler.reserveBrowser(1, gate.id);
     assert.equal(scheduler.manualBrowserReserved(1), true);
+    assert.deepEqual(windowMoves, ["0:shown"], "an inspected browser comes on screen");
     assert.equal(scheduler.fillSlot(1), 0);
     addJob(2);
     scheduler.pump();
@@ -817,6 +823,7 @@ ${letter}`),
     });
     assert.equal(scheduler.manualBrowserReserved(1), true);
     scheduler.releaseBrowser(1, gate.id);
+    assert.deepEqual(windowMoves, ["0:shown", "0:hidden"], "a released browser goes back off screen");
     assert.equal(core.getOpenGate(1)?.id, gate.id);
     assert.equal(scheduler.manualBrowserReserved(1), false);
     await until(() => workers.length === 2);

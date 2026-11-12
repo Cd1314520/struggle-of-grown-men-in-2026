@@ -61,7 +61,8 @@ export interface Config {
   limits: { prepPerDay: number; applyPerDay: number; locatePerDay?: number; applySpreadHours?: number; fillSteps?: number; locateSteps?: number };
   fillPauseSeconds: [number, number];
   resume: { dir: string; main: string; pdfName: string };
-  chrome: { cdpPort: number; proxyPort: number; display: string; window: [number, number]; vncPort: number };
+  // offscreen (Windows): the browsers' windows sit off the desktop except while inspected by hand.
+  chrome: { cdpPort: number; proxyPort: number; display: string; window: [number, number]; vncPort: number; offscreen?: boolean };
   // When a stage's provider hits its usage limit, the work moves to these models in turn, and a Claude Code
   // model to these extra Claude config directories (each signed in once) in turn (src/providers.ts).
   fallback?: string[];
