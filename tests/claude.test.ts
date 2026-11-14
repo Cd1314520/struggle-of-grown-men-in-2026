@@ -107,6 +107,11 @@ describe("a Claude Code worker", () => {
     expect(result.error).toContain("host MCP server did not start");
   });
 
+  it("counts an expired sign-in as the account being out, so the next account takes the work", () => {
+    expect(isCapacityError("Failed to authenticate: OAuth session expired and could not be refreshed (Claude Code session 1)")).toBe(true);
+    expect(isCapacityError("prep worker error: the posting could not be read")).toBe(false);
+  });
+
   it("reports a usage limit as the provider being at capacity", async () => {
     const result = await run({ tool: "report_result", args: {}, limited: true }, { tools: { report_result: tool(() => "ok") } }).done;
     expect(result.status).toBe("error");

@@ -18,10 +18,12 @@ export function settled(write: () => unknown): void {
 // does agy failing its sign-in check (it says this when the network is down, as just after the
 // computer wakes from sleep), and agy not knowing the model: it says that when it could not fetch its
 // model list (a network outage), and for a model the plan no longer offers (Claude 4.6 goes on
-// 2026-11-18).
+// 2026-11-18). So does a Claude account whose sign-in expired ("Failed to authenticate: OAuth session
+// expired and could not be refreshed"): the work moves to the next signed-in account instead of
+// failing every job until someone signs in again (2026-11-14: 541 jobs failed that way in an hour).
 export const isCapacityError = (message: string | null | undefined): boolean =>
   !!message &&
-  /at capacity|rate[ _-]?limit|too many requests|\b429\b|overloaded|usage limit|hit your (?:\w+ )?limit|quota (?:exceeded|exhausted|reached)|exceeded (?:your |the )?(?:\w+ )?quota|resource[ _-]?exhausted|\b(?:agy|codex|claude|omp) is not (?:installed|signed in)|authentication failed or timed out|is not recognized as a known model/i.test(
+  /at capacity|rate[ _-]?limit|too many requests|\b429\b|overloaded|usage limit|hit your (?:\w+ )?limit|quota (?:exceeded|exhausted|reached)|exceeded (?:your |the )?(?:\w+ )?quota|resource[ _-]?exhausted|\b(?:agy|codex|claude|omp) is not (?:installed|signed in)|authentication failed or timed out|failed to authenticate|oauth session expired|is not recognized as a known model/i.test(
     message,
   );
 
