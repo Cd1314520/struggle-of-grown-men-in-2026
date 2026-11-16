@@ -37,6 +37,8 @@ export interface Config {
     perDay?: number;
     perEmployer?: number;
     cooldownDays?: number;
+    // Below minScore, a job still goes from lowerBar.minScore when it answers "yes" to any rubric criterion in anyOf.
+    lowerBar?: { minScore: number; anyOf: string[] };
   };
   schedule: { scanMinutes: number; discoverMinutes: number; trackMinutes: number };
   quietDays?: number;

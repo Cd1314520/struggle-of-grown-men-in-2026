@@ -28,6 +28,15 @@ function storedAssessment(job: { company?: string; practice_assessment?: string 
   return assessment && job.company !== undefined ? { ...assessment, listed: employerListing(job.company) } : assessment;
 }
 
+// `autoApply.lowerBar`: a job below minScore still goes when it scores at least lowerBar.minScore and its
+// rubric answers "yes" to any of the criteria named in lowerBar.anyOf (ids in profile/rubric.yml, such as
+// texas or startup).
+type LowerBar = { minScore: number; anyOf: string[] } | undefined;
+function underLowerBar(verdict: Verdict, bar: LowerBar): boolean {
+  if (!bar || verdict.score < bar.minScore) return false;
+  return verdict.items.some(i => i.phase === verdict.rubric && i.answer === "yes" && bar.anyOf.includes(i.key.slice(i.key.indexOf(".") + 1)));
+}
+
 export interface AutoApprovalResult {
   approve: boolean;
   note: string | null;
@@ -47,7 +56,8 @@ export function autoApproval(
   const refusal = employerRefusal(verdict.practice);
   if (refusal) return review(refusal);
 
-  if (verdict.score < rules.minScore) return review(`score ${verdict.score} is below the auto-apply bar of ${rules.minScore}`);
+  if (verdict.score < rules.minScore && !underLowerBar(verdict, rules.lowerBar))
+    return review(`score ${verdict.score} is below the auto-apply bar of ${rules.minScore}`);
   const unclear = verdict.items.filter(i => i.phase === verdict.rubric && i.required && !i.unclearOk && i.answer === "unclear");
   if (unclear.length) return review(`the posting does not settle: ${unclear.map(i => i.label).join(", ")}`);
   if (!rules.allowConcerns && facts.concerns?.trim()) return review("the assessment raised concerns");

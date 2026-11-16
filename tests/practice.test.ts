@@ -289,6 +289,42 @@ describe("rubric evaluate", () => {
   });
 });
 
+describe("autoApproval's lower bar", () => {
+  it("lets a job below minScore go from lowerBar when it answers yes to a named criterion", () => {
+    config.targets.holdBack = false;
+    config.approval = "auto";
+    config.autoApply = { minScore: 75, perDay: 5, lowerBar: { minScore: 70, anyOf: ["texas", "startup"] } };
+    const item = (key: string, answer: "yes" | "no" | "unclear") =>
+      ({
+        key,
+        phase: key.startsWith("real.") ? "real" : "practice",
+        label: key,
+        statement: "",
+        required: false,
+        weight: 20,
+        answer,
+        evidence: "",
+        points: 0,
+      }) as const;
+    const verdict = (score: number, texas: "yes" | "no", startup: "yes" | "no" | "unclear"): Verdict => ({
+      decision: "apply",
+      rubric: "practice",
+      score,
+      threshold: 70,
+      reason: "passed",
+      items: [item("practice.texas", texas), item("practice.startup", startup), item("real.texas", "yes")],
+      practice: QUALIFIES,
+    });
+    const facts = { concerns: null, handPicked: false, approvedToday: 0 };
+    expect(autoApproval(verdict(74, "yes", "no"), facts).approve).toBe(true);
+    expect(autoApproval(verdict(72, "no", "yes"), facts).approve).toBe(true);
+    expect(autoApproval(verdict(74, "no", "unclear"), facts).note).toBe("needs your review: score 74 is below the auto-apply bar of 75");
+    expect(autoApproval(verdict(69, "yes", "yes"), facts).approve).toBe(false);
+    config.autoApply = { minScore: 75, perDay: 5 };
+    expect(autoApproval(verdict(74, "yes", "yes"), facts).approve).toBe(false);
+  });
+});
+
 describe("autoApproval and submission safety", () => {
   it("autoApproval independently requires practiceReason in practice mode", () => {
     config.targets.holdBack = true;
