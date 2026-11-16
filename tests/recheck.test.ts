@@ -95,6 +95,7 @@ describe("recheck", () => {
     config.ownWritingAbove = 80;
     job(1, "Acme"); job(2, "Beta"); job(3, "Gamma");
     updateJob(1, { score: 91 }); updateJob(2, { score: 80 }); updateJob(3, { score: 91 });
+    for (const id of [1, 2, 3]) updateJob(id, { posted_at: new Date(Date.now() - id * 864e5).toISOString() });
     const essay = { ...ask("Why do you want to work here?", []), why: "free_text" };
     const mine = parkGate(1, essay, null);
     const agents = parkGate(2, essay, null);
