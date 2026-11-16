@@ -6,7 +6,11 @@ import type { ModelCatalog } from "./models";
 import type { ImportState } from "./resume-import";
 import type { StockResume } from "./resume";
 import type { FillCheckpoint, Gate, QuestionGroup } from "./questions";
+import type { InterviewPrep } from "./interview";
 import type { NextStep, Step } from "./steps";
+import type { Drafts } from "./referral-drafts";
+import type { ContactStep, PickKind } from "./referral-plan";
+import type { Contact } from "./referrals";
 
 export type ListedJob = BoardJob & { opened_at: number; next: NextStep | null };
 
@@ -64,6 +68,7 @@ export interface JobDetail extends Job {
   manualBrowserReserved: boolean;
   submissionAmbiguous: boolean;
   recoveryMode: "verify" | "fill" | null;
+  interviewPrep: InterviewPrep | null; // the story bank and a prep note, once the employer moves it on
   vncUrl: string | null;
   hasPdf: boolean;
   resumeFrozen: boolean;
@@ -148,4 +153,45 @@ export interface ResumeState {
   limits: { files: number; bytes: number };
 }
 
+// GET /api/referrals: the referral outreach page (src/outreach.ts). The daily list names contacts, connections
+// and employers; every draft is built from profile/referral.yml.
+export interface ReferralJob {
+  id: number;
+  title: string;
+  company: string;
+  url: string;
+  status: Job["status"];
+}
+export type ReferralContact = Contact & {
+  job: ReferralJob | null;
+  next: ContactStep;
+  area: string | null; // the facts its drafts use
+  drafts: Drafts | null; // null while referral.yml is not filled in
+};
+export interface ReferralsState {
+  day: string;
+  problems: string[]; // what in referral.yml stops drafting
+  due: { contactId: number; overdue: boolean }[];
+  people: { key: string; name: string; url: string | null; position: string; company: string; why: string; jobId: number | null }[];
+  companies: {
+    key: string;
+    company: string;
+    kind: PickKind;
+    place: string | null;
+    why: string;
+    job: ReferralJob | null;
+    careers: string | null;
+    links: { label: string; url: string }[];
+  }[];
+  peopleTotal: number;
+  contacts: ReferralContact[];
+  notes: { left: number; perMonth: number; limit: number };
+  linkedin: { lastExportOn: string | null; file: string | null; connections: number; due: boolean; exportUrl: string };
+  mail: { connected: boolean; checkedAt: string | null };
+  areas: string[];
+}
+export interface ReferralImportResult {
+  connections: number | null; // null: the upload had no Connections.csv
+  updates: number;
+}
 export type { AtsReport, Dimension, Keyword } from "./ats-score";

@@ -176,7 +176,7 @@ Then close the Playwright page (`browser_close`). `stop` never matches by proces
 
 | File | Invocation | Does |
 |---|---|---|
-| `ctl.sh` | `ctl.sh start \| doctor \| stop \| reset` | Process lifecycle, the snapshot copy, and the read-only health check described above. |
+| `ctl.sh` | `ctl.sh start \| doctor \| stop \| reset` | Process lifecycle, the snapshot copy, and the read-only health check described above. Runs on Linux and in Git Bash on Windows (where it finds the process with PowerShell, `tasklist` and `netstat`, and stops it with `taskkill`). |
 | `serve.ts` | started by `ctl.sh` (`VERIFY_STATE=… VERIFY_PORT=… bun serve.ts`) | The verification instance: isolation, stand-ins, seed, `/__verify`. Typechecked and linted with the app (`bun run check`), so a change to the `Scheduler`, `Browser` or worker interfaces breaks it loudly; a host tool that starts requiring an argument shows as `threw:` in `server.log`. |
 
 To add a scripted behaviour (say, a worker that leaves a submission ambiguous), extend `actOut` in `serve.ts` and add a seed row; keep the stand-in calling host tools rather than writing state.

@@ -38,4 +38,5 @@ describe("job actions over HTTP", () => {
   it("refuses a posting it already has, naming the job it matched", () => runScenario("add-posting"));
   it("changes the steps of a sent application, and records the outcomes the user knows of", () => runScenario("steps"));
   it("refuses requests that come from another site or arrive under another host name", () => runScenario("other-sites"));
+  it("keeps referral contacts, drafts from referral.yml, and reads an uploaded LinkedIn export", () => runScenario("referrals"));
 });

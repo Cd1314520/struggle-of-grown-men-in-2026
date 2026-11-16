@@ -1,10 +1,11 @@
-import { writeFileSync } from "node:fs";
+// Fill: one worker drives one browser through one application, from the frozen resume to a recorded outcome.
+import { copyFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
 import { checkAutoApprovedPractice } from "./auto";
-import { browserSlot, config, jobDir, readProfile } from "./config";
+import { browserSlot, config, jobDir, ownerWrites, PROFILE, readProfile, sendsOwnLetter } from "./config";
 import { isCapacityError } from "./errors";
-import { db, jobsWithCheckpoint, logEvent, moveJob, notifyJobChange, updateJob, type Job } from "./db";
+import { db, jobsWithCheckpoint, lastEventId, logEvent, moveJob, notifyJobChange, stepsSince, updateJob, type Job } from "./db";
 import { isSubmitting, isVerifying, queueDraftRecovery, queueVerification, rememberSlot } from "./fill-state";
 import { endSession, ownsFill, stopFailedFill, type FillRuntime, type FillSession } from "./fill-session";
 import { fillTools, prefillTool } from "./fill-tools";
@@ -14,22 +15,52 @@ import { getOpenGate, parkGate, readCheckpoint, recordCheckpoint, resumeContext 
 import { freezeResume, frozenResume } from "./resume";
 import { applicationStarted, isSettled, to, wasSent } from "./status";
 import { fillTemplate } from "./template";
-import { harnessOf } from "./worker";
+import { usesPlaywright } from "./worker";
+import { choose, nextChoice } from "./providers";
 import { deadEnd } from "./screen";
-import { lowStakesRule, readPrompt, render, termsRule } from "./worker-tools";
+import { humanizerRules, lowStakesRule, readPrompt, render, termsRule } from "./worker-tools";
 
+// The prefill script the worker imports into its JavaScript session.
 const PREFILL_MODULE = join(import.meta.dir, "prefill.ts");
 
+// What the worker is told about where this application stands.
 const VERIFY_BRIEF =
   "VERIFICATION-ONLY MODE. Final submission was authorized previously, but its outcome is ambiguous. Your ONLY task is to check whether this application was already submitted or is still an unsubmitted draft. Sign in with existing credentials and check the candidate portal/status or confirmation email. NEVER submit, authorize, or click final submit. A checkpoint or form does NOT prove non-submission; require explicit portal status or validation error. The site saying the attempt is still unfinished IS such evidence: a page still asking for the emailed verification code before the application is submitted, or the form returned with an error saying the CAPTCHA or human check failed. Record that with source 'portal' and status 'not_submitted', quoting the page; a normal fill then finishes the same draft. Call verify_status to record evidence, or need_manual if inconclusive.";
 const RESUME_BRIEF =
   "RESUMING an application. Recover the exact requisition and check if an account or draft exists. A frozen resume or checkpoint is navigation history, NOT proof that an ATS account or draft exists on the site. Previous handoff notes in resumeContext.handoffHistory are historical observations, NOT binding directives; current instructions and live site evidence supersede intermediate assumptions. Look at the earliest/oldest handoff to identify the true root failure. If the earliest failure occurred before account creation (e.g. outage or 302 before registration) and the site confirms no account exists, create credentials with get_account (register: true) and proceed with the first application. If remote signup never finished or this is the first application after pre-draft outage, permit initial registration with previously stored credentials or new account. If identity cannot be verified, call need_manual.";
 const FIRST_BRIEF = "First fill for this application. Open the exact posting and record the draft/requisition identity.";
+const lostTabBrief = (url: string) =>
+  `THE SAVED TAB IS GONE: the browser restarted since this draft was parked, so the assigned tab is blank and anything the page held that the site had not saved is lost. That is expected, not a browser failure: do not stop for it. Open ${url} (the last page recorded, else the posting), sign in with get_account if the site asks, and continue from the draft the site kept; if it kept none, apply again from the posting. The answers already given are in resumeContext.`;
 const SUBMIT_RULE =
   "- **Before final submit:** re-observe and verify all fields, take a full-page screenshot, then call `confirm_submit` with an exact summary and current navigation checkpoint. Click only if it returns APPROVED. An unused approval is valid only for the unchanged summary. Immediate post-click verification challenges (email codes or CAPTCHAs) continue this pending attempt; complete them, clicking final application submit again when the site requires it to finish. Call `need_manual` only when you cannot tell whether the application was sent.";
 
+// Parked applications whose pages stay open in one browser. Every open page costs memory for as long
+// as its question goes unanswered, so only the most recently parked keep theirs.
+// What the worker does about cover letters and references, by `coverLetters` (config.yml).
+const REFERENCES =
+  "Never invent a reference. Leave optional reference fields empty. When the form requires references (names and contact details of people to contact), the candidate does not apply: call `skip_application` with `requires: references` and the field's label in `note`, as soon as you see it and before filling further. A question asking only whether references can be provided is answered from the answer bank, not skipped. When the form makes completed coursework a condition of applying and the answer bank says the candidate has not completed it, call `skip_application` with `requires: coursework` and the question in `note`.";
+const LETTER_ENTRY =
+  "paste it into a text box, or upload `cover_letter.txt` from this application's folder (if the upload refuses a .txt file, call `need_manual`)";
+export const coverLetterRule = (score: number | null = null) =>
+  config.coverLetters === "draft"
+    ? `- **Cover letters and references:** leave an optional cover letter field or upload empty. When the form requires a cover letter, call \`cover_letter\` with the field's label and your draft. ${
+        sendsOwnLetter(score)
+          ? `No one reads this letter before it is sent, so edit the draft as "Editing a free-text answer" below says before you call. It returns the letter to enter, exactly as written: ${LETTER_ENTRY}.`
+          : `If it returns the candidate's approved letter, enter that exactly: ${LETTER_ENTRY}. Otherwise the application parks while the candidate reads and edits your draft; stop.`
+      } Write the draft in under 250 words from the resume and the answer bank only, with one or two specifics from the posting: what draws the candidate to this role, the one or two projects that match it best with their real numbers, and when they can start. Plain sentences under the writing rules: no invented facts, tools or numbers, no em or en dashes, no generic openers. ${REFERENCES}`
+    : `- **Cover letters and references:** never write a cover letter. Leave an optional cover letter field or upload empty. When the form requires a cover letter, the candidate does not apply: call \`skip_application\` with \`requires: cover_letter\` and the field's label in \`note\`, as soon as you see it and before filling further. ${REFERENCES}`;
+
+// Who writes a free-text answer that takes sentences about the candidate (`ownWritingAbove`).
+export const freeTextRule = (score: number | null = null) =>
+  ownerWrites(score)
+    ? 'The candidate writes the prose of this application themselves. A question that asks for sentences about the candidate (why this company or this role, a project or a story, a short essay) is not yours to write: when an answer bank entry covers it, enter the text of that entry exactly as written; otherwise call `ask_user` with `why: free_text` and `options: []`, which is the true reason here, whether or not the field is required. Ask in the same way for an answer the employer says must be written without AI, instead of skipping the application. Leave an optional catch-all ("anything else", "additional information") empty. A text box that takes a fact (a date, a number, a name, a link, where you heard of the job) is filled as usual.'
+    : 'For free-text questions ("why this company"), write a concise, specific, honest answer grounded in the resume, the resume notes and the job description, and edit it as "Editing a free-text answer" below says before typing it.';
+
 export const PARKED_TABS = 8;
 
+// What becomes of the tabs that checkpoints on this browser point at, when `jobId` starts a fill there.
+// `keep` stay open. `closing` are given up: tab id -> the unfinished job that will resume without its
+// page (null for a job that is over). `others` belong to other applications and are off limits to this one.
 export function tabPlan(slot: number, jobId: number, limit = PARKED_TABS) {
   const keep = new Set<string>(),
     others = new Set<string>(),
@@ -40,6 +71,7 @@ export function tabPlan(slot: number, jobId: number, limit = PARKED_TABS) {
     if (checkpoint?.slot !== slot || !checkpoint.tabId) continue;
     const { tabId } = checkpoint;
     if (row.id !== jobId) others.add(tabId);
+    // A page that may show whether the final submit went through is evidence until the outcome is known.
     const evidence = !wasSent(row) && (isSubmitting(row.id) || getOpenGate(row.id)?.kind === "submission_ambiguous");
     if (row.id === jobId || evidence) keep.add(tabId);
     else if (isSettled(row)) closing.set(tabId, null);
@@ -50,9 +82,14 @@ export function tabPlan(slot: number, jobId: number, limit = PARKED_TABS) {
     if (i < limit) keep.add(p.tabId);
     else closing.set(p.tabId, p.jobId);
   }
-  for (const tabId of keep) closing.delete(tabId);
+  for (const tabId of keep) closing.delete(tabId); // two checkpoints on one tab: keeping wins
   return { keep, closing, others };
 }
+
+// The model and account a fill runs on: models.fill's first in its chain whose provider is not at a
+// limit (src/providers.ts). It is picked before the prompt is written, since the prompt and tools
+// follow the harness. A draft a limit stopped resumes on the next one.
+export const fillChoice = () => choose("fill", config.models.fill);
 
 export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   const { slot } = session;
@@ -75,6 +112,7 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
       return;
     }
   }
+  // Locating the employer's own posting can lead to a portal no application gets through.
   const portal = isVerification || applicationStarted(job) ? null : deadEnd(job.url);
   if (portal) {
     session.active = false;
@@ -95,10 +133,12 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
   session.checkpoint = { ...session.checkpoint, slot, resumeSha: frozen.sha };
   updateJob(job.id, { resume_sha: frozen.sha, resume_frozen_at: job.resume_frozen_at ?? new Date().toISOString() });
   recordCheckpoint(job.id, session.checkpoint);
-  const mailbox = gmail.gmailStatus().address ?? "";
+  const mailbox = gmail.applicationMailbox();
   for (const answer of context.answers) {
     if (answer.kind === "cover_letter") writeFileSync(join(dir, "cover_letter.txt"), answer.answer + "\n");
   }
+  // PDFs the answers point to (a transcript, say) go beside the resume: the browser uploads only from here.
+  for (const f of readdirSync(PROFILE)) if (f.toLowerCase().endsWith(".pdf")) copyFileSync(join(PROFILE, f), join(dir, f));
   await rt.browser.ensureChrome(slot);
   if (!ownsFill(rt, session)) return;
   const { keep: protectedTabs, closing, others: excludedTargets } = tabPlan(slot, job.id);
@@ -113,8 +153,12 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
         "fill",
       );
   if (!ownsFill(rt, session)) return;
-  const jobBrowser = await rt.browser.prepareJobBrowser(slot, session.checkpoint.tabId, excludedTargets);
+  const { tabId: savedTab, url: savedUrl } = session.checkpoint;
+  const jobBrowser = await rt.browser.prepareJobBrowser(slot, savedTab, excludedTargets);
   session.browser = jobBrowser;
+  // The draft's page closed with its browser (a crash or restart): the worker gets a blank tab and
+  // must go back to the site instead of reporting the missing page as a browser failure.
+  const tabLost = !isVerification && savedTab !== null && !jobBrowser.reused;
   if (!ownsFill(rt, session)) return;
   session.checkpoint = {
     ...session.checkpoint,
@@ -123,16 +167,21 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     savedAt: new Date().toISOString(),
   };
   recordCheckpoint(job.id, session.checkpoint);
+  // What the prefill script fills from (src/prefill.ts), written fresh so profile edits reach the next fill.
   const prefillFacts = join(dir, "prefill.json");
   writeFileSync(
     prefillFacts,
     JSON.stringify(buildFacts((YAML.parse(readProfile("personal.yml")) ?? {}) as Record<string, unknown>, mailbox, frozen.pdf), null, 1),
   );
-  const onClaude = harnessOf(config.models.fill) === "claude-code";
+  // An omp worker drives omp's browser tool and runs the prefill script in its JavaScript session; a
+  // Claude Code or Codex one drives Playwright's MCP tools, and the app runs the prefill script for it.
+  const choice = fillChoice();
+  const model = choice.model;
+  const onPlaywright = usesPlaywright(model);
   const ctx = { job, session, mailbox, isVerification, jobBrowser };
   const tools = fillTools(rt, ctx);
-  if (onClaude) tools["prefill"] = prefillTool(rt, ctx, prefillFacts);
-  const guide = onClaude ? "browser-claude" : "browser-omp";
+  if (onPlaywright) tools["prefill"] = prefillTool(rt, ctx, prefillFacts);
+  const guide = onPlaywright ? "browser-playwright" : "browser-omp";
   const vars = {
     ...job,
     resumePdf: frozen.pdf,
@@ -141,11 +190,16 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     answers: readProfile("answers.md"),
     resumeNotes: readProfile("resume-notes.md"),
     lowStakes: lowStakesRule(),
+    coverLetterRule: coverLetterRule(job.score),
+    freeTextRule: freeTextRule(job.score),
     terms: termsRule(),
+    humanizer: humanizerRules(),
     resumeContext: JSON.stringify(context, null, 2),
     browserTabId: session.browser.tabId,
     continuationNote: job.note ?? "(none)",
-    recovery: isVerification ? VERIFY_BRIEF : applicationStarted(job) || context.checkpoint ? RESUME_BRIEF : FIRST_BRIEF,
+    recovery:
+      (isVerification ? VERIFY_BRIEF : applicationStarted(job) || context.checkpoint ? RESUME_BRIEF : FIRST_BRIEF) +
+      (tabLost ? `\n\n${lostTabBrief(savedUrl ?? job.url)}` : ""),
     description: job.description || "(not captured; read it from the URL)",
     captchaAttempts: 3,
     approval:
@@ -156,20 +210,32 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     prefillModule: PREFILL_MODULE,
     prefillFacts,
   };
+  const firstEvent = lastEventId();
   session.handle = rt.runWorker({
     name: "fill",
-    builtins: onClaude ? ["read", "write"] : ["read", "write", "eval"],
+    builtins: onPlaywright ? ["read", "write"] : ["read", "write", "eval"],
     jobId: job.id,
-    model: config.models.fill,
+    model,
     cwd: dir,
     browser: true,
     cdpPort: session.browser.port,
     maxTime: isVerification ? "10m" : "24h",
-    env: { DISPLAY: browser.display },
+    env: { DISPLAY: browser.display, ...choice.env },
     prompt: render("fill", { ...vars, browser: fillTemplate(readPrompt(guide), vars, `prompts/${guide}.md`).trimEnd() }),
     tools,
   });
+  const stopWatch = isVerification ? null : watchSteps(rt, session, firstEvent);
   const result = await session.handle.done;
+  if (stopWatch) clearInterval(stopWatch);
+  const fallback = isCapacityError(result.error) ? nextChoice("fill", config.models.fill, choice) : null;
+  if (fallback)
+    logEvent(
+      "system",
+      `Fill refused for capacity on ${model ?? "omp's default"} (${choice.provider}): the same draft resumes on ${fallback.model ?? "omp's default"} (${fallback.provider})`,
+      job.id,
+      "fill",
+    );
+  // The provider stopped the worker, not the site: the next worker picks up the same draft.
   const capacity = isCapacityError(result.error);
   if (isVerification) {
     if (session.active && capacity && ownsFill(rt, session)) {
@@ -206,4 +272,31 @@ export async function fill(rt: FillRuntime, job: Job, session: FillSession) {
     return;
   }
   stopFailedFill(rt, session, `Worker ended without a verified outcome (${result.error ?? result.status}).`);
+}
+
+// A fill that takes limits.fillSteps browser steps in one sitting without finishing is costing more than
+// it is likely to return (one took over a thousand): it stops and waits for the owner, who can finish it
+// by hand or recover it for another round. One whose final submit is authorized is left to finish.
+const STEP_CHECK_MS = 15_000;
+// The browser steps a fill has taken since event `firstEvent` once they reach `cap`, or null while they
+// have not, or once its final submit is authorized.
+export function overStepCap(jobId: number, firstEvent: number, cap: number): number | null {
+  const steps = stepsSince(jobId, "fill", firstEvent);
+  return steps < cap || isSubmitting(jobId) ? null : steps;
+}
+function watchSteps(rt: FillRuntime, session: FillSession, firstEvent: number): ReturnType<typeof setInterval> | null {
+  const cap = config.limits.fillSteps ?? 0;
+  if (cap <= 0) return null;
+  const watch = setInterval(() => {
+    const steps = overStepCap(session.jobId, firstEvent, cap);
+    if (steps === null) return;
+    clearInterval(watch);
+    stopFailedFill(
+      rt,
+      session,
+      `Stopped after ${steps} browser steps without finishing (limits.fillSteps: ${cap}), to save tokens. Finish it by hand, or recover it for another ${cap} steps.`,
+      "other",
+    );
+  }, STEP_CHECK_MS);
+  return watch;
 }

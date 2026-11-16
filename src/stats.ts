@@ -1,33 +1,79 @@
+// Numbers for the Overview: how the pipeline is doing over time. Read-only aggregates over jobs and
+// status_changes. Rows are counted by UTC hour in SQL and put on local days here, which keeps
+// daylight saving right and is far cheaper than SQLite's 'localtime' on every row.
 import { db, onChange } from "./db";
 import type { Status } from "./status";
 
 export const STATS_DAYS = 30;
+// The employer answered: a next step, an offer, or a no.
 const RESPONDED: readonly Status[] = ["interview", "offer", "rejected_by_company"];
+// Not past the assessment yet, or turned down by it.
 const NOT_RECOMMENDED: readonly Status[] = ["found", "locating", "triaged", "prepping", "skipped"];
 
 export interface Funnel {
-  found: number;
-  assessed: number;
-  recommended: number;
-  approved: number;
-  applied: number;
-  responded: number;
+  found: number; // postings found in the window
+  assessed: number; // of those, scored by the assessment
+  recommended: number; // ...and passed it: sent for review, held, or decided on since
+  approved: number; // ...and approved, by the owner or by auto apply
+  applied: number; // ...and sent
+  responded: number; // ...and answered by the employer
 }
 export interface Stats {
-  days: string[];
-  found: number[];
-  applied: number[];
-  responses: number[];
-  funnel: Funnel;
-  response: { sent: number; heard: number };
-  approvals: { auto: number; user: number };
+  days: string[]; // the last STATS_DAYS local days as YYYY-MM-DD, oldest first; each series lines up with it
+  found: number[]; // postings found
+  applied: number[]; // applications sent
+  responses: number[]; // applications the employer answered, each counted once a day
+  funnel: Funnel; // the postings found in the window, by how far they got
+  response: { sent: number; heard: number }; // applications sent in the window, and how many were answered
+  approvals: { auto: number; user: number }; // jobs approved in the window, by who gave gate 1
+  calibration: Band[]; // every application ever sent, by its Fit score: does the score predict who moves on?
+}
+// Applications sent in one Fit score band. `advanced`: the employer moved them on (an assessment, a call
+// to schedule, an interview or an offer), even if a no came later; `rejected`: a no with nothing before it.
+export interface Band {
+  label: string;
+  sent: number;
+  advanced: number;
+  rejected: number;
+}
+// "No score": sent without an assessment (imported from elsewhere, or added by hand).
+const BANDS = ["80 and up", "70 to 79", "60 to 69", "Under 60", "No score"] as const;
+const bandOf = (score: number | null) => (score === null ? 4 : score >= 80 ? 0 : score >= 70 ? 1 : score >= 60 ? 2 : 3);
+const MOVED_ON = ["interview", "offer"];
+const MOVED_ON_STEPS = ["assessment", "schedule", "interview"];
+
+export function calibration(): Band[] {
+  const rows = db
+    .query<{ score: number | null; advanced: number; rejected: number }, [string, string]>(
+      `SELECT score,
+        status IN (SELECT value FROM json_each(?1))
+          OR EXISTS (SELECT 1 FROM status_changes c WHERE c.job_id = j.id AND c.to_status IN (SELECT value FROM json_each(?1)))
+          OR EXISTS (SELECT 1 FROM application_steps s WHERE s.job_id = j.id AND s.kind IN (SELECT value FROM json_each(?2))) AS advanced,
+        status = 'rejected_by_company' AS rejected
+      FROM jobs j WHERE submitted_at IS NOT NULL`,
+    )
+    .all(JSON.stringify(MOVED_ON), JSON.stringify(MOVED_ON_STEPS));
+  const bands: Band[] = BANDS.map(label => ({ label, sent: 0, advanced: 0, rejected: 0 }));
+  for (const r of rows) {
+    const band = bands[bandOf(r.score)];
+    if (!band) continue;
+    band.sent++;
+    if (r.advanced) band.advanced++;
+    else if (r.rejected) band.rejected++;
+  }
+  return bands;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const localDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+// SQLite's own "YYYY-MM-DD HH:MM:SS" in UTC, as found_at and status_changes.at are written.
 const sqliteTime = (ms: number) => new Date(ms).toISOString().slice(0, 19).replace("T", " ");
+// "YYYY-MM-DD HH", a UTC hour, to the local day it falls on.
 const dayOf = (hour: string) => localDay(new Date(`${hour.slice(0, 10)}T${hour.slice(11, 13)}:00:00Z`));
 
+// One group per (hour found, hour sent): every posting found in the window and every application ever
+// sent, in a single pass over jobs. The stage columns are each a subset of the one before, so the
+// funnel never widens.
 interface JobGroup {
   found_hour: string;
   sent_hour: string | null;
@@ -36,8 +82,8 @@ interface JobGroup {
   recommended: number;
   approved: number;
   applied: number;
-  heard: number;
-  answered: number;
+  heard: number; // through every stage, and answered
+  answered: number; // answered, whatever the stages say
 }
 
 export function computeStats(now = Date.now()): Stats {
@@ -88,6 +134,7 @@ export function computeStats(now = Date.now()): Stats {
       funnel.applied += g.applied;
       funnel.responded += g.heard;
     }
+    // Any sent job counts as sent, whatever the assessment columns say about it.
     const s = g.sent_hour === null ? undefined : index.get(dayOf(g.sent_hour));
     if (s !== undefined) {
       applied[s] = (applied[s] ?? 0) + g.n;
@@ -96,6 +143,7 @@ export function computeStats(now = Date.now()): Stats {
     }
   }
 
+  // An application moving on twice in a day (an interview, then an offer) is one answer that day.
   const answers = db
     .query<{ hour: string; job_id: number }, [string, string]>(
       "SELECT DISTINCT substr(at, 1, 13) AS hour, job_id FROM status_changes WHERE at >= ? AND to_status IN (SELECT value FROM json_each(?))",
@@ -114,9 +162,12 @@ export function computeStats(now = Date.now()): Stats {
     .all(since);
   for (const r of approvers) if (r.by === "auto" || r.by === "user") approvals[r.by] = r.n;
 
-  return { days, found, applied, responses, funnel, response, approvals };
+  return { days, found, applied, responses, funnel, response, approvals, calibration: calibration() };
 }
 
+// The pass over jobs reads every posting's row, descriptions and all (~150ms on 80k), and the Overview
+// refetches on every change the server streams. So the numbers are kept until a job changes, and then
+// for at least FRESH_MS more: a day's chart can trail the event that moved it by that much.
 const FRESH_MS = 20_000;
 let kept: { stats: Stats; at: number; day: string } | null = null,
   changed = false;

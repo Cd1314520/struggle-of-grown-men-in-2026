@@ -43,6 +43,7 @@ async function fileBatch(run: RunWorker, kept: readonly BankedAnswer[], stamp: s
   const file = join(PROFILE, "answers.md");
   const { done } = run({
     name: "bank",
+    stage: "recheck",
     builtins: [],
     model: config.models.recheck,
     cwd: workDir(),

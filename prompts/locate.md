@@ -19,6 +19,7 @@ Each job below was found on LinkedIn or Indeed. The candidate does not apply the
   | workday | `<tenant>.<wdN>.myworkdayjobs.com/<site>` | `<tenant>.<wdN>/<site>`, e.g. `acme.wd5/External` |
 
 - If after a reasonable search (a handful of queries) the opening is not on the employer's site, or you cannot tell which posting it is, call `no_posting` with the job id and a short reason. Do not guess: a wrong posting means an application to the wrong job.
+{{budget}}
 
 Report every job with exactly one of `found_posting` or `no_posting`, then call `locate_done` with a one-line summary.
 

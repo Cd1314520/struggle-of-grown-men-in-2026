@@ -6,6 +6,7 @@ import { Button, ListNotice, Workspace, WorkspaceBody } from "../../components/u
 import { api, refreshAll, useSummary } from "../../lib/api";
 import { num } from "../../lib/format";
 import { href } from "../../lib/router";
+import { Calibration } from "./calibration";
 import { Funnel } from "./funnel";
 import { Health } from "./health";
 import { Kpis } from "./kpis";
@@ -120,6 +121,7 @@ export function OverviewPage() {
           <Kpis summary={s} />
           <Trend />
           <Funnel />
+          <Calibration />
         </div>
       </WorkspaceBody>
     </Workspace>

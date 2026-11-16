@@ -4,12 +4,14 @@ import YAML from "yaml";
 import { configProblems } from "./config-check";
 
 export const ROOT = resolve(import.meta.dir, "..");
+// Overridable so a test run can use throwaway state.
 export const DATA = process.env["AUTO_APPLY_DATA"] ?? join(ROOT, "data");
 export const PROFILE = process.env["AUTO_APPLY_PROFILE"] ?? join(ROOT, "profile");
 export const PROMPTS = join(ROOT, "prompts");
 
 mkdirSync(join(DATA, "jobs"), { recursive: true });
 
+// The kinds of agent work, each run on the model `models.<stage>` names (null: omp's default).
 export const MODEL_STAGES = ["triage", "discover", "locate", "screen", "prep", "fill", "track", "recheck", "import", "interview"] as const;
 export type ModelStage = (typeof MODEL_STAGES)[number];
 
@@ -18,9 +20,17 @@ export interface Config {
   publicUrl: string | null;
   vncUrl: string | null;
   mailbox: string | null;
+  // Who gives the go-ahead: the app, within autoApply's bar, or the owner at both gates.
   approval: "auto" | "gated";
+  // Employers saved for later: the frontier list in profile/employers.yml, plus any the assessment
+  // judges to fit `describe`. While holdBack is on their jobs are held instead of applied to.
   targets: { holdBack: boolean; describe?: string | null };
-  models: Record<Exclude<ModelStage, "import" | "interview">, string | null> & { import?: string | null; interview?: string | null };
+  // `fallback`: per stage, the models it moves to when its provider is out, replacing the global `fallback` (src/providers.ts).
+  models: Record<Exclude<ModelStage, "import" | "interview">, string | null> & {
+    import?: string | null;
+    interview?: string | null;
+    fallback?: Partial<Record<ModelStage, string | string[]>>;
+  };
   autoApply?: {
     minScore?: number;
     allowConcerns?: boolean;
@@ -31,17 +41,38 @@ export interface Config {
   schedule: { scanMinutes: number; discoverMinutes: number; trackMinutes: number };
   quietDays?: number;
   questionDigest?: { enabled: boolean; time: string; timeZone: string };
+  // A form that requires a cover letter: "skip" drops the application; "draft" has the fill worker
+  // draft one and park it for the owner to edit and approve, whatever `approval` says.
+  coverLetters?: "skip" | "draft";
+  // The owner writes the prose of a job scoring above this themselves: its required cover letter and essay
+  // questions park for them. At or below it, the fill worker writes them and enters them without waiting.
+  // Absent: every required cover letter parks on its draft, and the worker answers essay questions.
+  ownWritingAbove?: number;
+  // A case-insensitive regular expression every title must match to be read at all; the rest are dropped
+  // before triage, at no cost. null or absent: every title goes to triage. `terms` ("Summer 2027"): a
+  // title naming any other term is dropped too. null or absent: only terms that are over. `readPostings`:
+  // models.screen reads each posting for plain dealbreakers before prep; absent or false, prep alone does.
+  screen?: { titles?: string | null; terms?: string[] | null; readPostings?: boolean };
+  // Postings per triage call, and the hours a smaller batch waits for more (src/scan.ts).
+  triage?: { batch?: number; waitHours?: number };
   feeds?: Record<string, { minutes: number; [param: string]: unknown }>;
   boards?: import("./boards").Boards;
   concurrency: { prep: number; fill?: number };
-  limits: { prepPerDay: number; applyPerDay: number; locatePerDay?: number; applySpreadHours?: number };
+  limits: { prepPerDay: number; applyPerDay: number; locatePerDay?: number; applySpreadHours?: number; fillSteps?: number; locateSteps?: number };
   fillPauseSeconds: [number, number];
   resume: { dir: string; main: string; pdfName: string };
-  chrome: { cdpPort: number; proxyPort: number; display: string; window: [number, number]; vncPort: number };
+  // offscreen (Windows): the browsers' windows sit off the desktop except while inspected by hand.
+  chrome: { cdpPort: number; proxyPort: number; display: string; window: [number, number]; vncPort: number; offscreen?: boolean };
+  // When a stage's provider hits its usage limit, the work moves to these models in turn, and a Claude Code
+  // model to these extra Claude config directories (each signed in once) in turn (src/providers.ts).
+  fallback?: string[];
+  claudeAccounts?: string[];
+  // How long agents' step-by-step records are kept; 0 keeps them for good. Decisions, gates, errors and mail are never removed.
   retention?: { chatterDays?: number };
 }
 
 const isSection = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+// config.local.yml laid over config.yml: a section is merged key by key, anything else replaces what was there.
 export function overlay(base: unknown, over: unknown): unknown {
   if (!isSection(base) || !isSection(over)) return over === undefined ? base : over;
   const merged: Record<string, unknown> = { ...base };
@@ -49,6 +80,9 @@ export function overlay(base: unknown, over: unknown): unknown {
   return merged;
 }
 
+// One file's settings with the keys from before `approval` and `targets` read as those: `phase`
+// practice held targets back, and auto apply that also submitted is `approval: auto`. Old keys are
+// dropped; new ones set in the same file win.
 export function upgrade(file: unknown): unknown {
   if (!isSection(file)) return file;
   const out: Record<string, unknown> = { ...file };
@@ -67,9 +101,12 @@ export function upgrade(file: unknown): unknown {
   return out;
 }
 
+// config.yml holds the settings that are the same wherever the app runs. config.local.yml, which is
+// not tracked, holds what belongs to this machine and its owner. Checked once, here, against config-check.ts: past this line the file is what `Config` says it is.
 export const LOCAL_CONFIG = process.env["AUTO_APPLY_LOCAL_CONFIG"] ?? join(ROOT, "config.local.yml");
 function loadConfig(): Config {
   let raw: unknown = upgrade(YAML.parse(readFileSync(join(ROOT, "config.yml"), "utf8")));
+  // A test run sees config.yml alone, so it behaves the same on every machine.
   if (process.env.NODE_ENV !== "test" && existsSync(LOCAL_CONFIG)) raw = overlay(raw, upgrade(YAML.parse(readFileSync(LOCAL_CONFIG, "utf8"))));
   const problems = configProblems(raw);
   if (problems.length)
@@ -77,6 +114,7 @@ function loadConfig(): Config {
   started = structuredClone(raw) as Record<string, unknown>;
   return raw as Config;
 }
+// The files as the app started with them, before anything below or since changed the loaded config.
 export let started: Record<string, unknown> = {};
 export const config = loadConfig();
 config.questionDigest = {
@@ -86,14 +124,24 @@ config.questionDigest = {
   ...config.questionDigest,
 };
 if (process.env["AUTO_APPLY_PORT"]) {
+  // test runs: local port, no public URLs
   config.port = Number(process.env["AUTO_APPLY_PORT"]);
   config.chrome.proxyPort = config.port + 1;
   config.publicUrl = config.vncUrl = null;
 }
+// Whether the owner describes target employers in words, beyond the frontier list.
 export const describing = () => !!config.targets.describe?.trim();
+
+// Whether the owner writes this job's prose themselves, rather than the fill worker (`ownWritingAbove`).
+export const ownerWrites = (score: number | null | undefined) => config.ownWritingAbove != null && score != null && score > config.ownWritingAbove;
+// Whether the fill worker's own cover letter goes in without waiting for the owner.
+export const sendsOwnLetter = (score: number | null | undefined) => config.ownWritingAbove != null && !ownerWrites(score);
 
 export const publicUrl = () => (config.publicUrl ?? `http://localhost:${config.port}`).replace(/\/$/, "");
 
+// One real browser per application in flight. Browser 0 is the original one (its profile holds the
+// logins made so far); each further one gets its own display, ports and profile, counted up from
+// the configured ones, so nothing two applications do can meet in the same window or session.
 export const browserCount = () => Math.max(1, Math.floor(config.concurrency.fill ?? 1));
 export const browserSlot = (slot: number) => ({
   display: `:${Number(config.chrome.display.replace(":", "")) + slot}`,
@@ -102,6 +150,7 @@ export const browserSlot = (slot: number) => ({
   vncPort: config.chrome.vncPort ? config.chrome.vncPort + slot : 0,
   profile: join(DATA, slot ? `chrome-profile-${slot + 1}` : "chrome-profile"),
 });
+// The live view of browser `slot`: the configured address with its port counted up the same way.
 export const vncUrl = (slot = 0) => {
   const url = new URL(config.vncUrl ?? `http://localhost:${config.chrome.vncPort}`);
   if (slot) url.port = String(Number(url.port || config.chrome.vncPort) + slot);

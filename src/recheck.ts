@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import { config, readProfile } from "./config";
-import { kvGet, kvSet, logEvent } from "./db";
+import { config, ownerWrites, readProfile } from "./config";
+import { getJob, kvGet, kvSet, logEvent } from "./db";
 import { errorMessage } from "./errors";
 import { due } from "./limits";
 import { arg, S, schema, type RunWorker } from "./worker";
 import { answerGate, listQuestionGroups, type QuestionGroup } from "./questions";
 import { stockResumeSource } from "./resume";
-import { lowStakesRule, readPrompt, render, termsRule, workDir } from "./worker-tools";
+import { humanizerRules, lowStakesRule, readPrompt, render, termsRule, workDir } from "./worker-tools";
 
 const BATCH = 25;
 const SETTLE_MINUTES = 5;
@@ -25,14 +25,19 @@ const fingerprint = () =>
         readPrompt("recheck"),
         readPrompt("low-stakes"),
         readPrompt("terms"),
+        readPrompt("humanizer"),
       ]),
     )
     .digest("hex");
 
+// An essay question on a job whose prose the owner writes themselves (`ownWritingAbove`) is theirs to answer.
+const ownersEssay = (g: QuestionGroup) => g.why === "free_text" && g.jobs.some(j => ownerWrites(getJob(j.id)?.score));
+const recheckable = (g: QuestionGroup) => g.kind === "question" && !ownersEssay(g);
+
 function unconsideredQuestions(): boolean {
   const since = kvGet(CONSIDERED) ?? "";
   const settled = new Date(Date.now() - SETTLE_MINUTES * 60_000).toISOString();
-  return listQuestionGroups().some(g => g.kind === "question" && g.jobs.some(j => j.askedAt > since && j.askedAt <= settled));
+  return listQuestionGroups().some(g => recheckable(g) && g.jobs.some(j => j.askedAt > since && j.askedAt <= settled));
 }
 
 export function recheckDue(): boolean {
@@ -84,6 +89,7 @@ async function recheckBatch(run: RunWorker, groups: readonly QuestionGroup[]) {
       resumeNotes: readProfile("resume-notes.md"),
       lowStakes: lowStakesRule(),
       terms: termsRule(),
+      humanizer: humanizerRules(),
       questions: questionList(groups),
     }),
     tools: {
@@ -162,7 +168,7 @@ export async function recheckOpenQuestions(run: RunWorker) {
   const since = kvGet(CONSIDERED) ?? "";
   kvSet("recheck.tried", target);
   kvSet("recheck.triedAt", startedAt);
-  const groups = listQuestionGroups().filter(g => g.kind === "question" && (everything || g.jobs.some(j => j.askedAt > since)));
+  const groups = listQuestionGroups().filter(g => recheckable(g) && (everything || g.jobs.some(j => j.askedAt > since)));
   let answered = 0,
     complete = true;
   for (let i = 0; i < groups.length; i += BATCH) {

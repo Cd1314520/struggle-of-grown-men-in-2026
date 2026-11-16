@@ -66,6 +66,14 @@ describe("a Claude Code worker", () => {
     const servers = (JSON.parse(flag(args, "--mcp-config") ?? "{}") as { mcpServers: Record<string, { type: string; args?: string[] }> }).mcpServers;
     expect(Object.keys(servers)).toEqual(["host"]);
     expect(flag(args, "--append-system-prompt")).toContain("mcp__host__report_result");
+    expect(args).not.toContain("--effort");
+  });
+
+  it("asks for the effort a model@effort selector names", async () => {
+    await run({ tool: "report_result", args: {} }, { tools: { report_result: tool(() => "ok") }, model: "claude-code/claude-sonnet-5-5@low" }).done;
+    const args = given();
+    expect(flag(args, "--model")).toBe("claude-sonnet-5-5");
+    expect(flag(args, "--effort")).toBe("low");
   });
 
   it("attaches Playwright to the application's proxy for a browser worker, without the tools that would lose its tab", async () => {

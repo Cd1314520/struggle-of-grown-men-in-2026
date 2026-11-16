@@ -1,35 +1,45 @@
+// Prep: score one job against the rubric and, when it clears, tailor the resume for it.
 import { existsSync } from "node:fs";
 import { autoApply, autoApproval, employerHold } from "./auto";
 import { config, describing, jobDir, readProfile } from "./config";
 import { appliedLocation, getJob, jobSources, logEvent, moveJob, updateJob, type Job } from "./db";
 import { deferApproval, forgetDeferredApproval } from "./deferred-approvals";
 import { countOne, uncountOne, usedToday } from "./limits";
-import { placeOf } from "./location";
 import { arg, S, schema, type RunWorker } from "./worker";
 import { employerListing, employersText, rememberedEmployer } from "./employers";
 import { isCapacityError } from "./errors";
 import { assessPractice, targetsKey, type PracticeAssessment } from "./practice";
-import { changedTemplateFiles, MAIN, pageCount, PDF_NAME, stageResume, stockPages, workingPdf } from "./resume";
+import { changedTemplateFiles, compileWorking, MAIN, pageCount, PDF_NAME, stageResume, stockPages, workingPdf } from "./resume";
 import { checklistText, evaluate, screenChecklistText, screenVerdict, type Verdict } from "./rubric";
 import { to } from "./status";
+import { screenOut } from "./screen";
 import { render } from "./worker-tools";
 
 export async function prep(job: Job, run: RunWorker) {
-  const handPicked = job.hand_picked === 1;
+  const handPicked = job.hand_picked === 1; // the user asked for this job explicitly
+  // The listing that would be applied through, not the other offices the same role is listed for.
   const location = appliedLocation(job);
-  if (!handPicked && placeOf(location) === "abroad") {
-    moveJob(job.id, "prepping", to.skipped("the listing is for a position outside the United States"));
+  // What the title, portal and text alone rule out, for jobs that skipped triage, were triaged before the
+  // screen's rules last changed (screen.titles, a dead-end portal), or whose description came after it.
+  const out = handPicked ? null : screenOut(job.title, location, job.url, job.description);
+  if (out) {
+    uncountOne("prep");
+    moveJob(job.id, "prepping", to.skipped(out));
     return;
   }
+  // Auto apply could not take it whatever the assessment said: not worth one.
   const capped = handPicked ? null : employerCapped(job);
   if (capped) {
     uncountOne("prep");
     moveJob(job.id, "prepping", to.skipped(capped));
     return;
   }
+  // An employer judged before settles what the full assessment would only judge again.
   const settled = handPicked ? null : settledByEmployer(job);
   if (settled) {
-    if (job.description) {
+    // The real rubric decides whether a job held for the real search is worth keeping. Its plain
+    // requirements are left to the cheap screen, when it runs; the rest wait until the job is released.
+    if (job.description && config.screen?.readPostings) {
       const screened = await screen(job, location, run, "frontier");
       if (screened !== "pass") {
         uncountOne("prep");
@@ -45,7 +55,8 @@ export async function prep(job: Job, run: RunWorker) {
     });
     return;
   }
-  if (!handPicked && job.description) {
+  // The screen only rules jobs out: the full assessment answers every statement again, its own too.
+  if (!handPicked && job.description && config.screen?.readPostings) {
     const screened = await screen(job, location, run);
     if (screened !== "pass") {
       uncountOne("prep");
@@ -59,13 +70,18 @@ export async function prep(job: Job, run: RunWorker) {
   const dir = jobDir(job.id);
   stageResume(dir);
   const maxPages = stockPages();
+  // Both are set from tool callbacks.
   let verdict = null as Verdict | null;
   let reported = false as boolean;
+  // The user can reject a job, or send it back, while its worker is still running. From then on the
+  // worker's reports are for a job that is no longer its own.
   const WITHDRAWN = "ERROR: this job was taken out of prep while you were working; nothing was recorded. Stop.";
   const stillPrepping = () => getJob(job.id)?.status === "prepping";
   const { done } = run({
     name: "prep",
-    builtins: ["read", "write", "edit", "bash"],
+    // No shell: the job description it reads comes from anyone who can post a job, and a shell would
+    // let a planted instruction run commands on this machine. finish_prep compiles the resume itself.
+    builtins: ["read", "write", "edit"],
     jobId: job.id,
     model: config.models.prep,
     cwd: dir,
@@ -77,7 +93,7 @@ export async function prep(job: Job, run: RunWorker) {
         ? `\nThe same role is also listed for: ${[...new Set(elsewhere)].join("; ")}. Those are separate postings. Judge where the job is, its attendance rules and its pay only from the posting above, which is the one the application goes through.\n`
         : "",
       checklist: checklistText(),
-      employers: employersText(),
+      employers: employersText(undefined, [job.company]),
       targets: describing()
         ? `- \`target\`: \`yes\` when the employer fits the candidate's description of a target employer below, \`no\` when it does not. Judge the employer as a whole, not this team or role.\n\n  > ${(config.targets.describe ?? "").trim().replace(/\s+/g, " ")}\n\n`
         : "",
@@ -134,6 +150,8 @@ export async function prep(job: Job, run: RunWorker) {
           if (!practice || typeof practice !== "object" || Array.isArray(practice)) {
             return `ERROR: the 'practice' object is required, with ${describing() ? "target, " : ""}employerEvidence, agentNative and agentNativeEvidence. Call submit_checklist again with it.`;
           }
+          // Whether the employer is on one of the candidate's lists, and the description it was judged
+          // against, are the host's to say, not the worker's.
           const { target } = practice as Record<string, unknown>;
           practice = {
             ...practice,
@@ -152,6 +170,7 @@ export async function prep(job: Job, run: RunWorker) {
             checklist: JSON.stringify(result.items),
             practice_assessment: result.practice ? JSON.stringify(result.practice) : null,
           };
+          // A job the user asked for by hand is tailored whatever the checklist says.
           if (result.decision === "apply" || handPicked) {
             updateJob(job.id, fields);
             return `Checklist recorded (${result.reason}). CONTINUE: tailor the resume, then call finish_prep.`;
@@ -176,9 +195,11 @@ export async function prep(job: Job, run: RunWorker) {
           if (!stillPrepping()) return WITHDRAWN;
           if (!verdict) return "ERROR: call submit_checklist first.";
           if (reported) return "ERROR: this job was already closed by the checklist; nothing more to do.";
+          // Compiled here, not trusted from the worker: its sandbox may not run typst, and the PDF must match MAIN.
+          const failed = compileWorking(dir);
+          if (failed) return `ERROR: ${MAIN} does not compile. Fix it, then call finish_prep again. typst said:\n${failed}`;
           const pdf = workingPdf(job.id);
-          if (!existsSync(pdf))
-            return `ERROR: ${PDF_NAME} is missing in the working directory. Run \`typst compile ${MAIN} ${PDF_NAME}\`, then call finish_prep again.`;
+          if (!existsSync(pdf)) return `ERROR: ${PDF_NAME} was not written; call finish_prep again.`;
           const touched = changedTemplateFiles(dir);
           if (touched.length)
             return `ERROR: template file(s) ${touched.join(", ")} were modified. Restore them exactly, edit only ${MAIN}, recompile, then call finish_prep again.`;
@@ -218,15 +239,21 @@ export async function prep(job: Job, run: RunWorker) {
   const res = await done;
   if (reported || !stillPrepping()) return;
   if (isCapacityError(res.error)) {
+    // The provider stopped it, not the job: back in the queue, and the day's count given back.
     uncountOne("prep");
     moveJob(job.id, "prepping", to.triaged("assessing again: the model provider was at capacity"));
   } else moveJob(job.id, "prepping", to.failed(`prep did not finish: ${res.error ?? "no report"}`));
 }
 
+// Why auto apply would never take this job: its employer already has autoApply.perEmployer applications.
 function employerCapped(job: Job): string | null {
   return autoApply().enabled ? employerHold(job) : null;
 }
 
+// What the employer alone decides about a job, before a full assessment is spent on it: while target
+// employers are held back, a job at one is held without the practice assessment. The lists in
+// profile/employers.yml outrank an earlier judgment, and a practice-listed employer is left to the full
+// assessment.
 function settledByEmployer(job: Job): { reason: string; practice: PracticeAssessment | null } | null {
   if (!config.targets.holdBack) return null;
   const listed = employerListing(job.company);
@@ -241,13 +268,17 @@ function settledByEmployer(job: Job): { reason: string; practice: PracticeAssess
   };
 }
 
+// A cheap model reads the posting for the requirements it settles on its own, and a job that plainly
+// fails them is skipped without the full assessment. Anything else, including a screen that does not
+// finish, goes on to prep: the screen can only rule a job out. Runs only with `screen.readPostings`.
+// `listed` is the list the employer counts as being on, which decides the rubrics asked.
 async function screen(
   job: Job,
   location: string | null | undefined,
   run: RunWorker,
   listed = employerListing(job.company),
 ): Promise<"pass" | "stop" | "capacity"> {
-  let out = null as string | null;
+  let out = null as string | null; // set from the tool callback
   const { done } = run({
     name: "screen",
     builtins: [],
@@ -284,6 +315,7 @@ async function screen(
     },
   });
   const res = await done;
+  // Taken out of prep while it ran: whatever the user did with it stands.
   if (getJob(job.id)?.status !== "prepping") return "stop";
   if (out) {
     moveJob(job.id, "prepping", to.skipped(out));

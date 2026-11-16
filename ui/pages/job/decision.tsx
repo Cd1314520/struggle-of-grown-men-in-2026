@@ -479,8 +479,10 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
     };
   } else if ((kind === "question" || kind === "cover_letter") && gate) {
     const letter = kind === "cover_letter";
+    // A letter gate carries the agent's draft as its one option: the box starts from it.
+    const text = answer || (letter ? (gate.options[0] ?? "") : "");
     const save = () => {
-      typed(answer, () => {
+      typed(text, () => {
         setAnswer("");
       });
     };
@@ -489,7 +491,7 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
       placement: "card",
       tone: "warning",
       icon: letter ? <FileText /> : <CircleHelp />,
-      title: letter ? "This application needs a cover letter" : "The agent needs an answer",
+      title: letter ? (gate.options[0] ? "Check the cover letter the agent drafted" : "This application needs a cover letter") : "The agent needs an answer",
       lead: asked,
       body: (
         <div className="flex flex-col gap-4">
@@ -500,8 +502,8 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
             label={letter ? "Cover letter" : "Your answer"}
             hint={
               letter ? (
-                answer ? (
-                  `${words(answer)} words`
+                text ? (
+                  `${words(text)} words, entered exactly as written`
                 ) : (
                   "Entered exactly as you write it"
                 )
@@ -515,7 +517,7 @@ export function useDecision(job: JobDetail, kind: DecisionKind | null, a: JobAct
               )
             }
             rows={letter ? 12 : 3}
-            value={answer}
+            value={text}
             onChange={setAnswer}
             onSubmit={save}
             placeholder={letter ? "Dear hiring team," : "Type the answer the agent should enter"}

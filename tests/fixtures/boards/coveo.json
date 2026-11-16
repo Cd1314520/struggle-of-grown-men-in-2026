@@ -1,0 +1,20 @@
+{
+ "results": [
+  {
+   "clickUri": "https://careers.slb.com/jobdescription.aspx?id=WDR00137258",
+   "raw": {
+    "title": "Guide Operator",
+    "city": "Pleasanton",
+    "jobposteddate": 1793084400000
+   }
+  },
+  {
+   "clickUri": "https://careers.slb.com/jobdescription.aspx?id=WDR00137198",
+   "raw": {
+    "title": "Undergraduate Engineering Co-Op",
+    "city": "Evansville",
+    "jobposteddate": 1792393200000
+   }
+  }
+ ]
+}

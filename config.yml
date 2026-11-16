@@ -28,6 +28,17 @@ questionDigest:
 #   gated  you approve every job in Review, and OK every filled-in application before it is sent.
 approval: auto
 
+# A form that requires a cover letter. skip: the application is dropped. draft: the agent drafts one
+# (under 250 words, from the resume and answers.md) and the application waits for you to edit and
+# approve it, even under approval: auto. An optional cover letter is always left empty.
+coverLetters: skip
+
+# Whose words go on an application: a job scoring above this number waits for you to write its required
+# cover letter and its essay questions ("why this company", "tell us about a project"); at or below it
+# the agent writes them under the writing rules and enters them without waiting. Leave it out and every
+# required cover letter waits on its draft, and the agent answers essay questions on every job.
+# ownWritingAbove: 80
+
 # Target employers: the ones you are saving for later. The frontier list in profile/employers.yml, plus
 # any employer the assessment judges to fit `describe` (empty or null: the list alone).
 #   holdBack: true   their jobs are set aside in Archive → Held, and the rest are applied to (practice)
@@ -58,6 +69,10 @@ models:
   recheck: claude-code/opus # adds kept answers to answers.md, and answers parked questions the profile now settles
   import: claude-code/opus # turns uploaded resume files into the Typst resume (Resume page)
   interview: claude-code/sonnet # writes what to brush up on for a booked or requested interview (shown on the step)
+  # A stage's own fallbacks (one model or a list), which replace the global `fallback` below for that
+  # stage. Set in config.local.yml, for example:
+  #   fallback:
+  #     prep: [codex/gpt-6-luna, claude-code/haiku]
 
 # Scoring weights and thresholds live in profile/rubric.yml.
 
@@ -79,6 +94,24 @@ schedule:
   discoverMinutes: 0 # off: 1,800+ boards are watched already
   trackMinutes: 120
 
+# Titles a posting must match to be read at all, as a case-insensitive regular expression: the rest
+# are dropped before triage, at no cost, which matters when the watched boards list far more roles
+# than the targets want (an internship search, say). null: every title goes to triage.
+screen:
+  titles: null
+  # Terms wanted ("Summer 2027"): a title naming another term is dropped too. A title naming a term that
+  # is over is always dropped. null: every term not yet over goes to triage.
+  terms: [Summer 2027]
+  # Whether models.screen reads each posting for plain dealbreakers before prep. It ruled out about one
+  # job in ten, and prep answers the same statements anyway, so it is off: prep reads every posting.
+  readPostings: false
+
+# Triage reads titles `batch` at a time. A smaller batch waits for later scans to fill it, until its
+# oldest posting was found `waitHours` ago; a job you picked by hand never waits.
+triage:
+  batch: 100
+  waitHours: 2
+
 # Days an application waits on the employer after a step of yours (a done assessment, a held interview) before the
 # app flags it as quiet. An application with no step yet is never flagged: no reply to the application itself
 # just means it is still under review, or passed over.
@@ -90,6 +123,8 @@ feeds:
   remotive: { minutes: 480, categories: [software-development, artificial-intelligence, data] }
   jobicy: { minutes: 360, geo: usa, industries: [dev, data-science], count: 50 }
   remoteok: { minutes: 360, tags: [python, ai, junior] }
+  # The SimplifyJobs internship list: open roles for these terms. Thousands at once, so off by default.
+  simplify: { minutes: 0, terms: [Summer 2027] }
 
 # LinkedIn and Indeed job search, read logged out with no account during a scan. They only say what is
 # open: each posting that passes triage is then looked up on the employer's own site (its public job
@@ -119,6 +154,8 @@ limits:
   locatePerDay: 40 # LinkedIn/Indeed postings handed to the web-search agent
   applyPerDay: 100 # new applications; resuming one already started does not count
   applySpreadHours: 24 # new applications start at most one per applySpreadHours / applyPerDay (about 14 minutes); postings opened in the last day skip the wait; 0 = as fast as browsers allow
+  fillSteps: 200 # browser steps one fill may take before it stops and waits for you (most finish in about 100); 0 = no cap
+  locateSteps: 10 # searches and page reads a posting may cost the web-search agent, counted over its batch of 8, before the batch stops; 0 = no cap
 
 # Seconds a browser rests between applications, randomised within the range. Applications in
 # different browsers also start at least the lower number of seconds apart.
@@ -137,6 +174,15 @@ chrome:
   display: ":99"
   window: [1440, 900]
   vncPort: 6080 # noVNC for manual takeover (localhost only); 0 disables
+  # offscreen: true # Windows: keep the browser windows off the desktop; one comes back while you inspect it
+
+# When a provider (Codex, a Claude account, omp) refuses work for capacity, it is out until the reset it
+# names (5 minutes when it names none), and the work moves to these models in turn, unless the stage
+# has its own list under models.fallback. A Claude Code model also tries each extra Claude config
+# directory below that has been signed in. The app pauses only when every one is out, until the first
+# comes back. See docs/harnesses.md.
+fallback: []
+claudeAccounts: []
 
 # Agents' step-by-step records (each step, tool call and message) are removed after this many days;
 # 0 keeps them for good. Approvals, gates, errors, mail and your own actions are never removed.

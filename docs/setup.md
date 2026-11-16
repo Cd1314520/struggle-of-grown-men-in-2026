@@ -61,9 +61,19 @@ What the app does check is where a request comes from (`refusal` in `src/server.
 
 If you reach the app under another name, set `publicUrl` to it.
 
+## Windows (native)
+
+The app also runs on Windows itself, without a service manager. Each Chrome is an ordinary window on the desktop instead of on a virtual display, so Xvfb, x11vnc and websockify are not needed and there is no noVNC view: take over a tab in the window itself.
+
+1. **Programs**: `winget install Oven-sh.Bun --version <.bun-version>`, `winget install Typst.Typst`, `winget install oschwartz10612.Poppler`, plus Chrome, Git and Node (for `npx`). Install Claude Code with its native installer (`claude.exe`): the app hands it a multi-line prompt that the npm package's `claude.cmd` would mangle. Open a new terminal afterwards so `PATH` has them.
+2. **Line endings**: `.gitattributes` keeps the checkout in LF, which the format check and the hooks need. A checkout made before it with `core.autocrlf` on needs `git rm -r --cached -q . && git reset --hard` once.
+3. **Run**: `bun install`, then `bun run start` from the repository. It stops when the terminal closes; start it again (or from a Task Scheduler task at log on) to keep it running.
+
+Chrome is found where its installer puts it (`Program Files`, or `%LOCALAPPDATA%` for a per-user install). It uses Windows Chrome's default GPU backend, so run the [browser audit](browser.md) before the first real application.
+
 ## Windows (WSL2)
 
-The app does not run on Windows itself (Xvfb, `setsid`, X11 sockets, systemd), but it runs in a WSL2 Linux distro with the steps above. Inside WSL, systemd still runs the app; a Windows scheduled task only keeps the distro up. Untested so far.
+The app also runs in a WSL2 Linux distro with the steps above, as on Linux. Inside WSL, systemd still runs the app; a Windows scheduled task only keeps the distro up. Untested so far.
 
 1. **Distro**: `wsl --install -d Ubuntu` in an elevated PowerShell, then open Ubuntu and create your user.
 2. **Repository**: clone it to `~/auto-apply` inside the distro, not under `/mnt/c`: the Windows drive is slow from WSL and its line endings and permissions break the hooks and `chmod`.
@@ -83,11 +93,12 @@ The app does not run on Windows itself (Xvfb, `setsid`, X11 sockets, systemd), b
 
 ## Profile, Gmail and config
 
-1. **Profile** (Profile tab, or edit `profile/` directly). `profile/` is not tracked: on start, the app copies each file of `profile.example/` that is missing from it (never over one that exists), so a fresh checkout starts from working templates. Nothing is assessed or applied while a file still contains `TODO-FILL`; the examples carry it only where the choice is yours (`targets.md`, `personal.yml`, `answers.md`).
+1. **Profile** (Profile tab, or edit `profile/` directly). `profile/` is not tracked: on start, the app copies each file of `profile.example/` that is missing from it (never over one that exists), so a fresh checkout starts from working templates. Nothing is assessed or applied while a file still contains `TODO-FILL`; the examples carry it only where the choice is yours (`targets.md`, `personal.yml`, `answers.md`). A PDF put in `profile/` (an unofficial transcript, say) is copied beside the resume before every application, the only place the browser can upload from: name it in `answers.md` by its file name.
    - `targets.md`: what you want, in plain language; drives triage and discovery.
    - `rubric.yml`: the scoring checklist. The agent answers each statement yes / no / unclear with evidence; the app computes the score from the weights, applies the required items and threshold, and decides apply / hold / skip. A required item marked `screen: false` is left out of the cheap pre-read that comes before the full assessment: use it for judgments, such as what kind of employer it is, and for items the cheap model gets wrong. A required item marked `unclearOk: true` does not send a job to review when the posting leaves it unclear: the examples mark the cover letter and references items so, since postings rarely mention either and the fill worker skips an application whose form requires one.
    - `basic-resume/`: the stock resume (Typst). `main.typ` is yours and not tracked; `main.example.typ` shows the shape. The agent tailors a per-job copy of `main.typ` and never edits the template `resume.typ`. The **Resume** page (`#resume`) builds `main.typ` from whatever files you upload (any format, up to 8 files, 20 MB together): the `import` worker (`src/resume-import.ts`, `prompts/import.md`) writes it on the template and moves what does not fit into `resume-notes.md`, the host compiles the draft, and you can ask for changes before you accept it. Accepting keeps the files it replaced in `data/resume-import/history/`. "Start from the example" copies `main.example.typ` with a `TODO-FILL` line, so nothing is applied with the example's made-up person.
    - `resume-notes.md` (not tracked): optional bank of extra bullets/skills/examples the agent may swap in. Empty means reorder and trim only.
+   - `story-bank.md` (not tracked, optional): your interview stories (STAR) and which questions each answers, in Markdown lists. Once an employer moves an application on (an interview, assessment or scheduling step, or the Interview status), the job's page shows it under **Interview prep** (see [operations](operations.md#interview-prep)). Without the file the section stays hidden.
    - `personal.yml`, `answers.md`: form details and standard answers. Answers you keep on Questions are added to `answers.md` by an agent, which edits the entries as it sees fit (see operations.md).
    - `employers.yml`: employers settled by hand: `frontier` (the real targets, never spent on practice) and `practice`.
    - `companies.yml`: company boards to watch; it starts with the 1,800-odd boards found so far (`ats`: greenhouse, lever, ashby, workable, recruitee, smartrecruiters, workday). The discover step adds to it. A Workday slug is `<tenant>.<wdN>/<site>`; an optional `search:` narrows a large employer to matching titles.

@@ -1,2 +1,4 @@
 [test]
 preload = ["./tests/setup.ts"]
+# Worktrees made under .claude/worktrees hold other checkouts of this repository.
+pathIgnorePatterns = [".claude/**"]

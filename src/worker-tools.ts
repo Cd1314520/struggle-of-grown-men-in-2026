@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { addCompany, ATS, fetchCompany, isAts, isCampusBoard, type Posting } from "./ats";
+import { addCompany, ATS, fetchCompany, isAts, type Posting } from "./ats";
 import { config, DATA, PROMPTS } from "./config";
 import { errorMessage } from "./errors";
 import * as gmail from "./gmail";
@@ -19,6 +19,10 @@ export const render = (name: string, vars: Record<string, string | number | null
 
 export const lowStakesRule = () => readPrompt("low-stakes").trim();
 export const termsRule = () => readPrompt("terms").trim();
+// How the fill and recheck agents edit a free-text answer before it goes onto a form: the humanizer
+// skill (prompts/humanizer.md, MIT, prompts/humanizer.LICENSE), given to every harness in the prompt,
+// since workers load no skills of their own.
+export const humanizerRules = () => readPrompt("humanizer").trim();
 
 export const workDir = () => {
   const dir = join(DATA, "work");
@@ -39,7 +43,6 @@ export const addCompanyTool = (also?: (postings: Posting[]) => string): HostTool
       slug = arg.str(args, "slug").trim();
     if (!isAts(ats)) return `ERROR: ats must be one of ${ATS.join(", ")}`;
     const company = { name, ats, slug };
-    if (isCampusBoard(company)) return "Not added: a campus board lists only internships and new-grad roles, which the targets rule out.";
     const postings = await fetchCompany(company).catch((err: unknown) => {
       throw new Error(`board ${ats}/${slug} not reachable (${errorMessage(err)}); check the slug`);
     });
@@ -49,9 +52,16 @@ export const addCompanyTool = (also?: (postings: Posting[]) => string): HostTool
 
 export const gmailTools = (): Record<string, HostTool> => ({
   gmail_search: {
-    description: "Search the application mailbox with Gmail query syntax (e.g. 'from:greenhouse newer_than:1h'). Returns message summaries.",
-    parameters: schema({ query: S.str("Gmail search query"), max: S.int("Max results (default 10, limit 25)") }, ["query"]),
-    handler: async args => JSON.stringify(await gmail.search(arg.str(args, "query"), arg.optInt(args, "max") ?? 10), null, 1),
+    description:
+      "Search the application mailbox with Gmail query syntax (e.g. 'from:greenhouse newer_than:1h'). Returns message summaries, and `next_page` when more match: call again with that `page` to read them.",
+    parameters: schema(
+      { query: S.str("Gmail search query"), max: S.int("Max results per page (default 10, limit 25)"), page: S.str("`next_page` from the previous call") },
+      ["query"],
+    ),
+    handler: async args => {
+      const { messages, next } = await gmail.searchPage(arg.str(args, "query"), arg.optInt(args, "max") ?? 10, arg.optStr(args, "page"));
+      return JSON.stringify({ messages, ...(next ? { next_page: next } : {}) }, null, 1);
+    },
   },
   gmail_read: {
     description: "Read one message in full (headers and body text, with link targets).",

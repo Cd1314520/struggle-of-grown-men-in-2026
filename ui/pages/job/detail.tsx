@@ -11,6 +11,7 @@ import { useJobActions } from "./actions";
 import { Activity } from "./activity";
 import { DecisionBar, DecisionCard, useDecision, useDecisionKeys } from "./decision";
 import { Fit } from "./fit";
+import { InterviewPrep } from "./interview";
 import { SENT } from "../../../src/status";
 import { decisionOf, fitLeads, headerStatus, rubricOf, setAsideOf, thresholdOf, type DecisionKind, type Phase } from "./model";
 import { Overview } from "./overview";
@@ -297,6 +298,7 @@ function Body({ job, layout, onActed }: { job: Job; layout: JobDetailProps["layo
                   {k === "overview" && (
                     <div className="flex flex-col gap-8">
                       {!lead && card && <div className="border-b border-border pb-8">{card}</div>}
+                      <InterviewPrep job={job} />
                       <Overview job={job} phase={phase} targets={targets} openTab={open} />
                     </div>
                   )}

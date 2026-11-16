@@ -16,6 +16,7 @@ import {
 import { FILL_STAGE, isSettled, PARKED, to, type ParkedStatus, type Status } from "./status";
 
 export type GateKind = "question" | "cover_letter" | "confirm_submit" | "manual" | "submission_ambiguous";
+// "bank": the candidate also keeps the answer for the answer bank, profile/answers.md (see answer-bank.ts).
 export type AnswerScope = "application" | "bank";
 export const QUESTION_REASONS = ["agreement", "fact_missing", "skill_not_on_resume", "free_text", "sensitive_id", "history_detail", "other"] as const;
 export type QuestionReason = (typeof QUESTION_REASONS)[number];
@@ -63,8 +64,11 @@ export interface QuestionGroup {
   options: string[];
   why: QuestionReason | null;
   missing: string | null;
+  // askedAt: when this application asked. queuedAfter: questions it found on the same page that are still
+  // unanswered, so answering this one opens the next instead of resuming the application.
   jobs: { id: number; company: string; title: string; gateId: string; askedAt: string; queuedAfter: number }[];
   createdAt: string;
+  // When the most recently opened of those postings opened, in ms (see openedAt).
   openedAt: number;
 }
 export interface HandoffRecord {
@@ -100,7 +104,9 @@ interface GateRow {
   why: QuestionReason | null;
   missing: string | null;
 }
+// ---- statements used in more than one place. Nothing outside this module touches these tables.
 const gateRow = (gateId: string) => db.query<GateRow, [string]>("SELECT * FROM question_gates WHERE id = ?").get(gateId);
+// At most one: question_gates_open_job is unique.
 const openGateRow = (jobId: number) => db.query<GateRow, [number]>("SELECT * FROM question_gates WHERE job_id = ? AND state = 'open'").get(jobId);
 const closeGate = (gateId: string) => db.query("UPDATE question_gates SET state = 'closed' WHERE id = ?").run(gateId);
 const closeOpenGate = (jobId: number) => db.query("UPDATE question_gates SET state = 'closed' WHERE job_id = ? AND state = 'open'").run(jobId);
@@ -142,12 +148,16 @@ function validateInput(input: GateInput) {
   if (input.options !== undefined && (!Array.isArray(input.options) || !input.options.every(option => typeof option === "string")))
     throw new Error("Gate options must be strings");
 }
+// No case, punctuation, Unicode, employer-suffix, or choice-order normalization: consent and legal prompts must not broaden scope.
 function identity(job: Job, input: GateInput) {
   validateInput(input);
   const context = input.context ?? "",
     options = input.options ?? [];
   const structured = !!job.company.trim() && !!context.trim() && Array.isArray(input.options);
+  // The same employer asking the same thing on several applications is one question to the candidate.
   const shared = input.kind === "question" && structured;
+  // The trailing false stood for gates imported from before gates were stored. Nothing creates those
+  // any more, but it stays in the key so stored gates and answers keep matching.
   const matchKey = createHash("sha256")
     .update(JSON.stringify([job.company, input.kind, input.text, context, options, Array.isArray(input.options), false]))
     .digest("hex");
@@ -213,6 +223,7 @@ function validateCheckpoint(value: unknown, job: Job): asserts value is FillChec
 }
 function writeCheckpoint(job: Job, checkpoint: FillCheckpoint) {
   validateCheckpoint(checkpoint, job);
+  // Select declared fields only; never persist arbitrary worker tool arguments.
   const { version, slot, tabId, url, step, notes, resumeSha, savedAt } = checkpoint;
   writeJob(job.id, { fill_checkpoint: JSON.stringify({ version, slot, tabId, url, step, notes, resumeSha, savedAt }) });
 }
@@ -310,6 +321,24 @@ export function findStoredAnswer(jobId: number, input: GateInput): string | null
     .get(jobId, key.matchKey);
   return local?.answer ?? null;
 }
+// The letter the candidate approved for this application, the latest if they changed it.
+export const approvedCoverLetter = (jobId: number) =>
+  db
+    .query<{ answer: string }, [number]>("SELECT answer FROM application_answers WHERE job_id = ? AND kind = 'cover_letter' ORDER BY answered_at DESC LIMIT 1")
+    .get(jobId)?.answer ?? null;
+// A letter the fill worker wrote that goes in without the candidate reading it first (`ownWritingAbove`).
+// Stored like an approved one, so a later worker on this application is handed the same letter.
+export function saveCoverLetter(jobId: number, input: GateInput, letter: string) {
+  const key = identity(requireJob(jobId), input);
+  db.query(
+    `
+      INSERT INTO application_answers (job_id, match_key, kind, question, context, options, answer, answered_at)
+      VALUES (?, ?, 'cover_letter', ?, ?, ?, ?, ?)
+      ON CONFLICT(job_id, match_key) DO UPDATE SET answer = excluded.answer, answered_at = excluded.answered_at`,
+  ).run(jobId, key.matchKey, input.text, key.context, JSON.stringify(key.options), letter, now());
+}
+// ---- questions a worker found together. It queues every unknown question on a page and parks once,
+// on the first still unanswered; answering that one opens the next instead of starting a worker for it.
 export function queueQuestion(jobId: number, input: GateInput) {
   const key = identity(requireJob(jobId), input);
   db.query("INSERT OR IGNORE INTO queued_questions (job_id, match_key, text, context, options, why, missing, queued_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
@@ -323,6 +352,8 @@ export function queueQuestion(jobId: number, input: GateInput) {
     now(),
   );
 }
+// The first queued question this application has not had answered yet.
+// Answered here is enough: a question without context has no stored answer findStoredAnswer would reuse.
 export function nextQueuedQuestion(jobId: number): GateInput | null {
   const row = db
     .query<{ text: string; context: string; options: string; why: QuestionReason | null; missing: string | null }, [number]>(
@@ -336,9 +367,11 @@ export function nextQueuedQuestion(jobId: number): GateInput | null {
     ? { kind: "question", text: row.text, context: row.context, options: JSON.parse(row.options) as string[], why: row.why, missing: row.missing }
     : null;
 }
+// A worker starting on the application re-observes the form and asks again whatever it still needs.
 export function clearQueuedQuestions(jobId: number) {
   db.query("DELETE FROM queued_questions WHERE job_id = ?").run(jobId);
 }
+// The queued questions still unanswered besides the one this gate asks.
 function queuedAfter(row: GateRow): number {
   if (row.kind !== "question") return 0;
   return (
@@ -352,6 +385,9 @@ function queuedAfter(row: GateRow): number {
       .get(row.job_id, row.match_key)?.n ?? 0
   );
 }
+// Open gates grouped by what they ask, the group with the most recently opened posting first: an
+// answer is worth most to an application while its posting is new.
+// The kind of gate each parked job waits on.
 export const openGateKinds = () =>
   new Map(
     db
@@ -413,6 +449,7 @@ function saveAnswer(row: GateRow, answer: string, scope: AnswerScope, at: string
     at,
     row.id,
   );
+  // Another question found on the same page is still open: ask it now rather than spend a worker finding it again.
   const next = row.kind === "question" || row.kind === "cover_letter" ? nextQueuedQuestion(row.job_id) : null;
   if (next) return void park(row.job_id, next, null, parkedStatus[row.kind]);
   const value = gate(row);
@@ -431,12 +468,15 @@ export function answerGate(gateId: string, answer: string, scope: AnswerScope): 
       if (scope === "bank" && row.kind !== "question") throw new Error("Only answers to questions go to the answer bank");
       const at = now(),
         affected: number[] = [];
+      // Kept for the answer bank: the agent that files it decides what it says beyond this application.
       if (scope === "bank")
         db.query(
           `
           INSERT INTO banked_answers (job_id, employer, title, question, context, options, answer, answered_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(row.job_id, row.employer, requireJob(row.job_id).title, row.text, row.context, row.options, answer, at);
+      // Every application in its group asks exactly this, so the answer goes to all of them now; others
+      // asking it in other words wait for the answer bank to cover them (see recheck.ts).
       const targets =
         scope === "application"
           ? [row]
@@ -453,6 +493,7 @@ export function answerGate(gateId: string, answer: string, scope: AnswerScope): 
   for (const jobId of jobIds) notifyJobChange(jobId);
   return { jobIds };
 }
+// ---- answers kept for the answer bank, waiting for answer-bank.ts to file them into answers.md.
 export interface BankedAnswer {
   id: number;
   employer: string;
@@ -531,6 +572,8 @@ export function resumeContext(jobId: number): ResumeContext {
     handoffHistory,
   };
 }
+// Answers the ordinary gate a job is parked on. For a manual gate the answer is the note that hands
+// control back. An ambiguous submit never takes an ordinary answer.
 export function respond(jobId: number, answer: string): boolean {
   const gate = getOpenGate(jobId);
   if (!gate || gate.kind === "submission_ambiguous" || isSubmitting(jobId)) return false;
@@ -589,6 +632,7 @@ export function cancelJobGates(jobId: number): void {
   }).immediate();
   notifyJobChange(jobId);
 }
+// The resolution is spelled out by the caller so nothing clears an ambiguity by default.
 export function resolveAmbiguous(jobId: number, resolution: string): void {
   if (resolution !== "not_submitted") throw new Error("Explicit confirmed-not-submitted resolution required");
   db.transaction(() => {
@@ -601,6 +645,34 @@ export function resolveAmbiguous(jobId: number, resolution: string): void {
   }).immediate();
   notifyJobChange(jobId);
 }
+// Applications whose final submit left no confirmation on the page (an open submission_ambiguous
+// hand-off). The employer's receipt in the mailbox settles them: see confirmSubmittedByMail.
+export const unconfirmedSubmissions = () =>
+  db
+    .query<Job, []>(
+      "SELECT jobs.* FROM jobs JOIN question_gates g ON g.job_id = jobs.id WHERE g.state = 'open' AND g.kind = 'submission_ambiguous' ORDER BY jobs.id",
+    )
+    .all();
+
+// The employer's receipt for an application in unconfirmedSubmissions: it was sent after all.
+export function confirmSubmittedByMail(jobId: number, messageId: string, note: string): void {
+  db.transaction(() => {
+    const job = requireJob(jobId);
+    if (isSettled(job)) throw new Error("This application is already settled");
+    if (job.status === "filling") throw new Error("This application is being worked on now; leave it to that worker");
+    const current = getOpenGate(jobId);
+    if (current?.kind !== "submission_ambiguous") throw new Error("This application has no unclear submission to settle");
+    if (!messageId.trim()) throw new Error("message_id of the receipt is required");
+    closeGate(current.id);
+    clearManualLease(jobId);
+    invalidateApproval(jobId);
+    resetFillPhase(jobId);
+    if (!moveJob(jobId, job.status, to.submitted(`${note.trim()} [confirmation email msg=${messageId.trim()}]`), { quiet: true }))
+      throw new Error("This application changed while its receipt was being recorded");
+  }).immediate();
+  notifyJobChange(jobId);
+}
+
 export interface AmbiguityEvidence {
   notes: string;
   requisitionId: string;
@@ -610,6 +682,8 @@ export interface AmbiguityEvidence {
   checkpoint: FillCheckpoint;
 }
 
+// Why this evidence does not settle the outcome it is offered for, or null when it does. Worded for
+// the verification worker, which reads it as the reply to verify_status.
 export function evidenceProblem(outcome: "submitted" | "not_submitted", evidence: Pick<AmbiguityEvidence, "source" | "status" | "messageId">): string | null {
   if (outcome === "submitted") {
     if (evidence.source !== "portal" && evidence.source !== "confirmation_email") return "submitted outcome requires source 'portal' or 'confirmation_email'.";
@@ -695,6 +769,7 @@ export function queueRecovery(jobId: number, gateId: string): { mode: "fill" | "
   notifyJobChange(jobId);
   return result;
 }
+// A parked gate is not a lease. Only an explicit, current human reservation is.
 export function manualLeases(): Map<number, number> {
   const leases = new Map<number, number>();
   for (const row of db.query<GateRow, []>("SELECT * FROM question_gates WHERE state = 'open' AND kind IN ('manual','submission_ambiguous')").all()) {

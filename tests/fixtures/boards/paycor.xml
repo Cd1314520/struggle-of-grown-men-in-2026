@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:newton="http://www.newtonsoftware.com" version="1.0">
+  <title>Paycor Recruiting Feed</title>
+  <generator>Aegis Aerospace, Inc.</generator>
+  <entry>
+    <title>Integrated Program Planning Tech Service – AIT&amp;L Scheduler</title>
+    <link rel="alternate" href="https://recruitingbypaycor.com/career/JobIntroduction.action?id=8a7883a8a184746e01a188b3a0de7381" />
+    <category term="Lockheed Martin IDIQ" />
+    <author>
+      <name>United States Kennedy Space Center FL 32899</name>
+    </author>
+    <id>8a7883a8a184746e01a188b3a0de7381</id>
+    <updated>2026-10-29T17:27:16Z</updated>
+    <published>2026-10-29T17:27:16Z</published>
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    <newton:postal_code>77598</newton:postal_code>
+    <newton:salary />
+    <newton:job_target_questionnaire_url>https://api.recruitingbypaycor.com/v1/jobs/8a78839ea150ae2901a183fca1b74914/applications/491732957/indeed</newton:job_target_questionnaire_url>
+    <newton:job_target_apply_url>https://api.recruitingbypaycor.com/v1/jobs/8a78839ea150ae2901a183fca1b74914/candidates/jobtarget</newton:job_target_apply_url>
+    <newton:easy_apply>1</newton:easy_apply>
+    <newton:easy_apply_type>full</newton:easy_apply_type>
+  </entry></feed>

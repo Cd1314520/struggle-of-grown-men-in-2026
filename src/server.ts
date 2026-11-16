@@ -28,6 +28,7 @@ import {
   statusHistory,
   UNTITLED,
   type Job,
+  usageSince,
 } from "./db";
 import * as gmail from "./gmail";
 import { startCdpProxy } from "./cdp-proxy";
@@ -48,6 +49,7 @@ import { digestStatus, sendQuestionDigest } from "./digest";
 import { errorMessage } from "./errors";
 import { isAmbiguous, recoveryMode } from "./fill-state";
 import { RETRYABLE, to, wasSent, type Status } from "./status";
+import { interviewPrep } from "./interview";
 import {
   addStep,
   changeStep,
@@ -65,8 +67,17 @@ import {
 import { serveUi } from "./ui";
 import { isListView, listJobs } from "./listing";
 import { stats } from "./stats";
+import { addContact, changeContact, importLinkedInExport, jobOptions, referralsState, syncReferralMail } from "./outreach";
 
-const PROFILE_FILES = ["targets.md", "rubric.yml", MAIN, "resume-notes.md", "answers.md", "personal.yml", "companies.yml", "employers.yml"];
+// The app runs unattended and nothing restarts it: an error nobody caught (a socket or pipe that broke
+// when the computer slept, say) is logged with its stack rather than ending the server.
+const survive = (what: string) => (err: unknown) => {
+  logEvent("error", `${what}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`.slice(0, 2000));
+};
+process.on("unhandledRejection", survive("unhandled rejection"));
+process.on("uncaughtException", survive("uncaught exception"));
+
+const PROFILE_FILES = ["targets.md", "rubric.yml", MAIN, "resume-notes.md", "answers.md", "personal.yml", "companies.yml", "employers.yml", "referral.yml"];
 const safeThresholds = () => {
   try {
     return thresholds();
@@ -75,6 +86,8 @@ const safeThresholds = () => {
   }
 };
 const profilePath = (name: string) => (name === MAIN ? STOCK_MAIN : join(PROFILE, name));
+// A full LinkedIn export with messages runs to tens of megabytes; Connections.csv alone is far smaller.
+const REFERRAL_EXPORT_BYTES = 200 * 1024 * 1024;
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const fail = (message: string, status = 400) => json({ error: message }, status);
 
@@ -202,6 +215,7 @@ function jobDetail(scheduler: Scheduler, job: Job): JobDetail {
     manualBrowserReserved: scheduler.manualBrowserReserved(job.id),
     submissionAmbiguous: isAmbiguous(job.id),
     recoveryMode: recoveryMode(job.id),
+    interviewPrep: interviewPrep(job, steps),
     vncUrl: config.chrome.vncPort && slot !== null ? vncUrl(slot) : null,
     hasPdf: existsSync(files.pdf),
     resumeFrozen: files.frozen,
@@ -400,6 +414,8 @@ export function createHandler(scheduler: Scheduler) {
     if (path === "/api/state") return json(state(scheduler));
     if (path === "/api/summary") return json(summary(scheduler));
     if (path === "/api/stats") return json(stats());
+    // Tokens by stage and model over the last `days` days (default 7), as each worker's CLI reported them.
+    if (path === "/api/usage") return json(usageSince(Math.min(90, Math.max(1, Number(url.searchParams.get("days")) || 7))));
     if (path === "/api/activity") return json(activity(url));
     if (path === "/api/jobs" && req.method === "GET") {
       const view = url.searchParams.get("view");
@@ -526,6 +542,10 @@ export function createHandler(scheduler: Scheduler) {
         } catch (err) {
           return fail(err instanceof Error ? err.message : "job action failed", 409);
         }
+      }
+      if (sub === "/prep-note" && req.method === "POST") {
+        const err = scheduler.writePrepNote(job, jobSteps(job.id));
+        return err ? fail(err, 409) : json({ ok: true });
       }
       if (sub === "/steps" && req.method === "POST") {
         try {
@@ -693,6 +713,40 @@ export function createHandler(scheduler: Scheduler) {
       return err ? fail(err, 409) : json({ ok: true });
     }
 
+    // Referral outreach (src/outreach.ts). Nothing here sends a message or reaches LinkedIn.
+    if (path === "/api/referrals" && req.method === "GET") return json(referralsState());
+    if (path === "/api/referrals/jobs" && req.method === "GET") return json({ jobs: jobOptions(url.searchParams.get("company") ?? "") });
+    if (path === "/api/referrals/contacts" && req.method === "POST") {
+      const added = addContact(await body());
+      return typeof added === "string" ? fail(added, 409) : json(added);
+    }
+    const contactMatch = /^\/api\/referrals\/contacts\/(\d+)$/.exec(path);
+    if (contactMatch && req.method === "POST") {
+      const err = changeContact(Number(contactMatch[1]), await body());
+      return err ? fail(err, err === "no such contact" ? 404 : 409) : json({ ok: true });
+    }
+    if (path === "/api/referrals/import" && req.method === "POST") {
+      // Only the app's own pages may post here (refusal), and the size is checked before the body is read.
+      if (Number(req.headers.get("content-length") ?? Infinity) > REFERRAL_EXPORT_BYTES) return fail("the file is too large", 413);
+      // eslint-disable-next-line @typescript-eslint/no-deprecated -- the body is bounded above and comes from the app's own page
+      const form = await req.formData().catch(() => null);
+      const file = form?.get("file");
+      if (!file || typeof file === "string" || !file.size) return fail("send the export as a form with one file");
+      const modified = Number(form?.get("modified"));
+      try {
+        return json(importLinkedInExport(file.name, new Uint8Array(await file.arrayBuffer()), Number.isFinite(modified) && modified > 0 ? modified : null));
+      } catch (err) {
+        return fail(errorMessage(err), 422);
+      }
+    }
+    if (path === "/api/referrals/mail" && req.method === "POST") {
+      try {
+        return json(await syncReferralMail());
+      } catch (err) {
+        return fail(errorMessage(err), 502);
+      }
+    }
+
     const profileMatch = /^\/api\/profile\/([\w.-]+)$/.exec(path);
     if (profileMatch) {
       const name = profileMatch[1] ?? "";
@@ -725,7 +779,7 @@ export function createHandler(scheduler: Scheduler) {
       const code = url.searchParams.get("code");
       if (!code) return fail(url.searchParams.get("error") ?? "no code returned");
       try {
-        await gmail.exchangeCode(code);
+        await gmail.exchangeCode(code, url.searchParams.get("state"));
         logEvent("system", `Gmail connected: ${gmail.gmailStatus().address}`);
         return Response.redirect("/#settings");
       } catch (err) {

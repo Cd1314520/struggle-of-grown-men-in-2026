@@ -1,10 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { SCHEMA_VERSION, connectDatabase, openDatabase, schemaVersion } from "../src/schema";
 import { BEFORE_COMPANY_KEYS_SCHEMA, createLegacyDatabase } from "./fixtures/legacy-db";
 
+// db.ts opens the app database when it is imported, so each scenario imports it in a fresh process
+// with throwaway state. Never mock shared modules or change the test runner's environment.
 const prelude = `
 import assert from "node:assert/strict";
 import * as store from ${JSON.stringify(join(import.meta.dir, "../src/db.ts"))};
@@ -47,6 +49,7 @@ describe("app database startup", () => {
     const { DATA, ROOT } = await import("../src/config");
     expect(resolve(DATA)).not.toBe(resolve(ROOT, "data"));
     expect(resolve(DATA).startsWith(resolve(tmpdir()))).toBe(true);
+    // The proxy tests load db.ts in this process; it must have opened the throwaway one.
     const { db } = await import("../src/db");
     expect(resolve(db.filename)).toBe(resolve(DATA, "app.db"));
   });
@@ -71,6 +74,7 @@ describe("app database startup", () => {
     scenario(
       `
     assert.equal(schemaVersion(db), SCHEMA_VERSION);
+    // One event for each migration the old database needed, newest first.
     assert.deepEqual(store.recentEvents().map(e => [e.kind, e.message, e.job_id]),
       MIGRATIONS.map(m => ["system", "Database schema upgraded to version " + m.version + " (" + m.name + ")", null]).reverse());
     assert.equal(store.recentEvents().at(-1).message, "Database schema upgraded to version 1 (baseline)");
@@ -81,6 +85,7 @@ describe("app database startup", () => {
     assert.equal(kept.company_key, null);
     assert.equal(kept.fill_checkpoint, null);
     assert.equal(store.kvGet("last.scan"), "then");
+    // Columns the old database lacked are usable straight away.
     store.updateJob(4, { company_key: "acme", fill_checkpoint: "{}", practice_assessment: "{}" });
     assert.deepEqual(ids(store.jobsWithCheckpoint()), [4]);
   `,
@@ -141,6 +146,7 @@ describe("job queries", () => {
     assert.deepEqual(ids(store.jobsInStatuses(["needs_manual", "approved", "filling"])), [1, 2, 4, 5]);
     assert.deepEqual(store.jobsInStatuses([]), []);
     assert.deepEqual(store.jobsInStatuses(["offer"]), []);
+    // A status is data, never SQL.
     assert.deepEqual(store.jobsInStatuses(["approved') OR ('1'='1"]), []);
     assert.deepEqual(Object.keys(store.jobsInStatuses(["approved"])[0]).sort(), Object.keys(store.getJob(1)).sort());
 
@@ -150,6 +156,31 @@ describe("job queries", () => {
     assert.deepEqual(ids(store.applicationsAwaitingOutcome()), [7, 6, 8]);
     assert.deepEqual(ids(store.applicationsAwaitingOutcome(2)), [7, 6]);
   `);
+  });
+
+  it("assesses the highest priority first, then the newest, and only the newest without priority.yml", () => {
+    const body = (expected: number[]) => `
+    const { nextToPrep } = await import(${JSON.stringify(join(import.meta.dir, "../src/priority.ts"))});
+    job(1, { status: "triaged", title: "Software Intern", location: "Seattle, WA", found_at: "2026-10-03 00:00:00" });
+    job(2, { status: "triaged", title: "Embedded Intern", location: "Boston, MA", found_at: "2026-10-01 00:00:00" });
+    job(3, { status: "triaged", title: "Embedded Intern", location: "Houston, TX", found_at: "2026-10-01 00:00:00" });
+    job(4, { status: "triaged", title: "Hardware Intern", location: "Austin, TX", found_at: "2026-10-02 00:00:00" });
+    job(5, { status: "skipped", title: "Embedded Intern", location: "Dallas, TX", found_at: "2026-10-04 00:00:00" });
+    const order = [];
+    for (let next; (next = nextToPrep());) {
+      order.push(next.id);
+      assert.equal(next.title, store.getJob(next.id).title, "the whole job");
+      store.moveJob(next.id, "triaged", { status: "rejected" });
+    }
+    assert.deepEqual(order, ${JSON.stringify(expected)});`;
+    scenario(body([1, 4, 2, 3]));
+    const rules = "tiers: [{ points: 30, title: 'embedded|hardware' }]\nplaces: [{ points: 25, match: ', TX$' }]\n";
+    scenario(body([4, 3, 2, 1]), {
+      before: dir => {
+        mkdirSync(join(dir, "profile"));
+        writeFileSync(join(dir, "profile", "priority.yml"), rules);
+      },
+    });
   });
 
   it("lists the board, counts and siblings the UI shows", () => {
@@ -163,14 +194,17 @@ describe("job queries", () => {
     const board = store.boardJobs();
     assert.deepEqual(ids(board), [4, 5, 3, 6]);
     assert.deepEqual(Object.keys(board[0]).sort(), ["company", "found_at", "id", "location", "note", "pending", "posted_at", "score", "source", "status", "submitted_at", "title", "updated_at", "url"]);
+    // The limit trims the backlog only: approved jobs are all listed, however old.
     assert.deepEqual(ids(store.boardJobs(1)), [4, 5, 6]);
     assert.deepEqual(store.statusCounts(), { approved: 2, found: 1, held: 1, skipped: 1, triaged: 1 });
 
     assert.deepEqual(store.siblingJobs(store.getJob(3)), [{ id: 4, title: "Engineer 4", status: "approved" }]);
+    // Applications to an employer: approved or further along, never triaged, held or skipped ones.
     assert.equal(store.employerApplications(store.getJob(3)), 1);
     assert.equal(store.employerApplications(store.getJob(4)), 0);
     assert.equal(store.employerApplications(store.getJob(6)), 0, "a job without a company key matches no employer");
     assert.deepEqual(ids(store.siblingJobs(store.getJob(4))), [3]);
+    // A job without a company key has no siblings, not every other keyless job.
     job(7, { status: "approved", company_key: null });
     assert.deepEqual(store.siblingJobs(store.getJob(6)), []);
   `);
@@ -233,6 +267,7 @@ describe("job queries", () => {
     store.kvSet("a.1", "one"); store.kvSet("a.2", "two"); store.kvSet("ab", "other"); store.kvSet("a.1", "uno");
     assert.equal(store.kvGet("a.1"), "uno");
     assert.deepEqual(store.kvEntries("a."), [{ key: "a.1", value: "uno" }, { key: "a.2", value: "two" }]);
+    // A prefix is matched literally: LIKE wildcards in it mean nothing.
     assert.deepEqual(store.kvEntries("a%"), []);
     store.kvDelete("a.1");
     assert.equal(store.kvGet("a.1"), null);
@@ -289,6 +324,7 @@ describe("job writes", () => {
     assert.deepEqual(db.query("SELECT id, status, note FROM jobs ORDER BY id").all(), [{ id: 1, status: "found", note: "kept" }, { id: 2, status: "found", note: "kept" }]);
     assert.deepEqual(changes, []);
 
+    // Every column of the table except the two the writer owns is writable, and nothing else is.
     const fixed = { score: 1, hold_reason: "user", hand_picked: 1, locate_tries: 2 };
     const value = column => column in fixed ? fixed[column] : column + "-value";
     const columns = db.query("SELECT name FROM pragma_table_info('jobs')").all().map(c => c.name).filter(name => !["id", "updated_at", "status"].includes(name));
@@ -525,11 +561,13 @@ describe("postings, duplicates and sources", () => {
     assert.equal(store.knownUrl("https://boards.example/acme/1?utm_campaign=y"), true);
     assert.equal(store.knownUrl("https://boards.example/acme/2"), false);
 
+    // The same URL again adds nothing, but supplies a posting date that was missing.
     assert.equal(store.insertJob({ ...posting, posted: "2026-10-01" }), null);
     assert.equal(store.getJob(id).posted_at, "2026-10-01");
     assert.equal(store.insertJob({ ...posting, posted: "2026-10-05" }), null);
     assert.equal(store.getJob(id).posted_at, "2026-10-01");
 
+    // The same role listed elsewhere becomes a source, widens the location and fills the description.
     assert.equal(store.insertJob({ url: "https://other.example/acme/sse", source: "lever", company: "Acme Inc", title: "Sr. Software Engineer (Remote)", location: "Remote", description: "Build things" }), null);
     row = store.getJob(id);
     assert.deepEqual([row.url, row.location, row.description], ["https://boards.example/acme/1", "Austin | Remote", "Build things"]);
@@ -537,6 +575,7 @@ describe("postings, duplicates and sources", () => {
     assert.equal(store.knownUrl("https://other.example/acme/sse"), true);
     assert.equal(db.query("SELECT count(*) AS n FROM jobs").get().n, 1);
 
+    // A different level is a different job.
     const junior = store.insertJob({ url: "https://boards.example/acme/3", source: "greenhouse", company: "Acme", title: "Junior Software Engineer", location: null, description: null }, "triaged");
     assert.equal(typeof junior, "number");
     assert.equal(store.getJob(junior).status, "triaged");
@@ -574,6 +613,7 @@ describe("postings, duplicates and sources", () => {
     assert.deepEqual([row.url, row.location, row.status], ["https://jobs.example/acme/nyc", "New York, NY | London, United Kingdom", "found"]);
     assert.equal(store.appliedLocation(row), "New York, NY");
     assert.deepEqual(store.jobSources(id), [{ url: "https://jobs.example/acme/london", source: "lever", location: "London, United Kingdom" }]);
+    // Another office abroad, or a second US one, changes nothing about where it applies.
     assert.equal(store.insertJob({ ...role, url: "https://jobs.example/acme/dublin", location: "Dublin, Ireland" }), null);
     assert.equal(store.insertJob({ ...role, url: "https://jobs.example/acme/dc", location: "Washington, D.C." }), null);
     row = store.getJob(id);
@@ -643,6 +683,7 @@ describe("postings, duplicates and sources", () => {
     store.writeJob(1, { feedback: "keep", locate_tries: 1 }); store.writeJob(2, { feedback: "x", locate_tries: 3, deferred_at: "2026-10-01T00:00:00Z" });
     changes.length = 0;
 
+    // Found through one of the other job's extra listings, not its main URL.
     assert.equal(store.relocateJob(store.getJob(2), "https://boards.example/acme/alias", "text"), "merged");
 
     assert.equal(store.getJob(2), null);
@@ -652,6 +693,20 @@ describe("postings, duplicates and sources", () => {
     assert.deepEqual(store.jobEvents(1).map(e => e.message), ["kept"]);
     assert.deepEqual([store.getJob(1).feedback, store.getJob(1).locate_tries, store.getJob(1).deferred_at], ["keep", 1, null]);
     assert.deepEqual(changes, [{ type: "job", jobId: 1 }]);
+  `);
+  });
+
+  it("keeps the same role for different terms apart", () => {
+    scenario(`
+    const posting = { url: "https://boards.example/acme/s27", source: "greenhouse", company: "Acme", title: "Hardware Engineering Intern (Summer 2027)", location: "Austin", description: null };
+    const summer = store.insertJob(posting);
+    assert.equal(typeof store.insertJob({ ...posting, url: "https://boards.example/acme/f27", title: "Hardware Engineering Intern (Fall 2027)" }), "number");
+    assert.equal(typeof store.insertJob({ ...posting, url: "https://boards.example/acme/s28", title: "Hardware Engineering Intern - Summer '28" }), "number");
+    // The same term, or a title naming none, is still the same role.
+    assert.equal(store.insertJob({ ...posting, url: "https://other.example/acme/1", title: "Hardware Engineering Intern, Summer 2027" }), null);
+    assert.equal(store.insertJob({ ...posting, url: "https://other.example/acme/2", title: "Hardware Engineering Intern" }), null);
+    assert.equal(store.jobSources(summer).length, 2);
+    assert.equal(db.query("SELECT count(*) AS n FROM jobs").get().n, 3);
   `);
   });
 
@@ -668,6 +723,8 @@ describe("postings, duplicates and sources", () => {
 
     store.dedupeExisting();
 
+    // A job something has acted on is never folded away; untouched duplicates fold into it.
+    // Among untouched duplicates the most advanced survives.
     assert.deepEqual(ids(db.query("SELECT id FROM jobs ORDER BY id").all()), [3, 4, 7]);
     assert.deepEqual(db.query("SELECT id, company_key, dedupe_key FROM jobs ORDER BY id").all(), [
       { id: 3, company_key: "acme", dedupe_key: "acme|engineer software" },
@@ -680,14 +737,23 @@ describe("postings, duplicates and sources", () => {
     assert.equal(store.getJob(3).location, null);
     assert.deepEqual(store.jobEvents(1), []);
     assert.equal(db.query("SELECT count(*) AS n FROM jobs WHERE feedback IS NOT NULL").get().n, 0);
-    assert.equal(store.kvGet("dedupe.version"), "2");
+    assert.equal(store.kvGet("dedupe.version"), "3");
     assert.equal(store.recentEvents()[0].message, "Folded 3 duplicate postings into existing jobs");
 
+    // With the rules version recorded, only rows that have no key yet are keyed.
     db.run("UPDATE jobs SET company_key = 'stale', dedupe_key = 'stale' WHERE id = 3");
     job(5, { company: "New Co", title: "Analyst" });
     store.dedupeExisting();
     assert.deepEqual([store.getJob(3).company_key, store.getJob(5).company_key, store.getJob(5).dedupe_key], ["stale", "new", "new|analyst"]);
 
+    // With the rules version recorded, only employers with a new, changed or newly keyed job since the
+    // last sweep are searched for duplicates (the next test): searching all of them takes minutes.
+    job(8, { company: "Other Co", title: "Software Engineer", company_key: "other", dedupe_key: "other|engineer software" });
+    job(9, { company: "Other Co", title: "Software Engineer" });
+    store.dedupeExisting();
+    assert.deepEqual([4, 8, 9].map(id => store.getJob(id) !== null), [true, false, false]);
+
+    // A new rules version re-keys everything and searches every company again.
     store.kvSet("dedupe.version", "1");
     store.dedupeExisting();
     assert.equal(store.getJob(3).company_key, "acme");
@@ -731,8 +797,10 @@ describe("postings, duplicates and sources", () => {
 
 describe("where SQL lives", () => {
   const root = join(import.meta.dir, "..");
-  const files = [...new Bun.Glob("{src,scripts}/**/*.ts").scanSync(root)].sort();
+  // Forward slashes on Windows too, as the sets below name them.
+  const files = [...new Bun.Glob("{src,scripts}/**/*.ts").scanSync(root)].map(f => f.replaceAll("\\", "/")).sort();
   const read = (file: string) => Bun.file(join(root, file)).text();
+  // The modules that own tables. Everything else calls their functions.
   const owners = new Set([
     "src/db.ts",
     "src/schema.ts",
@@ -742,14 +810,17 @@ describe("where SQL lives", () => {
     "src/digest.ts",
     "src/steps.ts",
     "src/blockers.ts",
-    "src/stats.ts",
+    "src/referrals.ts",
+    "src/stats.ts", // reads only: the Overview's aggregates across jobs and status_changes
   ]);
+  // Standalone tools that read a database by path rather than through the app's connection.
   const tools = new Set([
     "scripts/journal-stalls.ts",
     "scripts/journal-resumes.ts",
     "scripts/reassess-backlog.ts",
     "scripts/migrate.ts",
     "scripts/watch-known-boards.ts",
+    "scripts/import-internscouter-outreach.ts", // reads jobs only, to tie old contacts to applications; writes through referrals.ts
   ]);
   it("keeps statements in the modules that own the tables", async () => {
     expect(files.length).toBeGreaterThan(20);
@@ -765,10 +836,15 @@ describe("where SQL lives", () => {
   it("opens databases only through schema.ts", async () => {
     const openers: string[] = [];
     for (const file of files) if ((await read(file)).includes("new Database(")) openers.push(file);
+    // migrate.ts reads the version of a database before deciding whether to upgrade it.
     expect(openers).toEqual(["scripts/migrate.ts", "src/schema.ts"]);
   });
 
   it("never splices a value into a SQL template", async () => {
+    // Looks at every template literal that starts like SQL, wherever it is used, so a statement built
+    // in a variable first is seen too. It cannot see SQL assembled with + or held in plain strings.
+    // The only text ever spliced in: a checked column list, a migration's own column definition, and
+    // two PRAGMA values, none of which SQLite can take as parameters.
     const allowed = new Set(["src/db.ts ${sets}", "src/schema.ts ${definition}", "src/schema.ts ${next.version}", "src/schema.ts ${BUSY_TIMEOUT_MS}"]);
     const sqlStart = /^\s*(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|PRAGMA|WITH|VACUUM)\b/;
     const holes = (text: string) =>
@@ -776,6 +852,7 @@ describe("where SQL lives", () => {
     const spliced: string[] = [];
     for (const file of files) for (const hole of holes(await read(file))) if (!allowed.has(`${file} ${hole}`)) spliced.push(`${file} ${hole}`);
     expect(spliced).toEqual([]);
+    // The check sees the kind of statement it exists to stop, including one built in a variable.
     expect(holes('const sql = `\n  SELECT id FROM jobs WHERE id IN (${ids.join(",")})`;\ndb.query(sql)')).toEqual(['${ids.join(",")}']);
     expect(holes('db.query(`SELECT * FROM jobs ${stale ? "" : "WHERE x"}`)')).toHaveLength(1);
     expect(holes("throw new Error(`Job ${id} does not exist`)")).toEqual([]);

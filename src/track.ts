@@ -1,6 +1,9 @@
+// Track: read the application mailbox and record what it says about applications already sent: each
+// new request from an employer becomes a step (steps.ts), and later mail moves those steps on.
 import { config } from "./config";
 import { applicationsAwaitingOutcome, kvGet, kvSet, logEvent, type Job } from "./db";
 import * as gmail from "./gmail";
+import { confirmSubmittedByMail, unconfirmedSubmissions } from "./questions";
 import { arg, S, schema, type RunWorker } from "./worker";
 import { addStep, changeStep, getStep, openSteps, recordOutcome, STEP_KINDS, stepMs, type Step } from "./steps";
 import { gmailTools, render, workDir } from "./worker-tools";
@@ -9,6 +12,7 @@ const MAIL_STEP_STATES = ["done", "scheduled", "closed", "expired", "cancelled"]
 const ENDINGS = ["offer", "rejected_by_company"] as const;
 const day = (s: string | null | undefined) => s?.slice(0, 10) ?? "?";
 
+// One step as the agent reads it: what it is, and whose move it is.
 function stepLine(s: Step, company: string, now: number) {
   const state =
     s.state === "todo"
@@ -33,12 +37,15 @@ export function applicationList(open: readonly Pick<Job, "id" | "company" | "tit
 export async function trackMailbox(run: RunWorker) {
   if (!gmail.gmailStatus().connected) return;
   const open = applicationsAwaitingOutcome();
-  if (!open.length) return;
+  const unconfirmed = unconfirmedSubmissions();
+  if (!open.length && !unconfirmed.length) return;
   const since = kvGet("last.track") ?? new Date(Date.now() - 7 * 86400_000).toISOString();
   const started = new Date().toISOString();
   const byId = new Map(open.map(j => [j.id, j]));
   const listed = (id: number) => byId.get(id);
-  let finished = false as boolean;
+  const unconfirmedIds = new Set(unconfirmed.map(j => j.id));
+  let finished = false as boolean; // set from the tool callback
+  // A refusal goes back to the agent as text, so it can correct the call.
   const attempt = (fn: () => string) => {
     try {
       return fn();
@@ -56,10 +63,32 @@ export async function trackMailbox(run: RunWorker) {
       mailbox: gmail.gmailStatus().address ?? "",
       since,
       sinceDate: since.slice(0, 10).replaceAll("-", "/"),
-      applications: applicationList(open, openSteps(open.map(j => j.id))),
+      applications: applicationList(open, openSteps(open.map(j => j.id))) || "(none)",
+      unconfirmed: unconfirmed.map(j => `${j.id} | ${j.company} | ${j.title}`).join("\n") || "(none)",
     }),
     tools: {
       ...gmailTools(),
+      confirm_received: {
+        description: "Record that the employer's receipt arrived for an application listed under 'Sent, not yet confirmed': it was submitted.",
+        parameters: schema(
+          {
+            job_id: S.int("Application id from the 'Sent, not yet confirmed' list"),
+            message_id: S.str("Gmail message id of the receipt"),
+            note: S.str("One line: who sent it and what it says"),
+          },
+          ["job_id", "message_id", "note"],
+        ),
+        handler: args =>
+          attempt(() => {
+            const id = arg.int(args, "job_id");
+            if (!unconfirmedIds.has(id)) return "ERROR: that id is not in the 'Sent, not yet confirmed' list.";
+            const note = arg.str(args, "note");
+            confirmSubmittedByMail(id, arg.str(args, "message_id"), note);
+            unconfirmedIds.delete(id);
+            logEvent("mail", `Receipt arrived: ${note}`, id, "track");
+            return "Recorded as submitted.";
+          }),
+      },
       add_step: {
         description: "Record a new request from an employer on one application: something the candidate has to do, book or attend.",
         parameters: schema(
@@ -133,7 +162,7 @@ export async function trackMailbox(run: RunWorker) {
             const status = arg.oneOf(args, "status", ENDINGS),
               note = arg.str(args, "note");
             if (!recordOutcome(job.id, status, note)) return "ERROR: that application cannot take this outcome now.";
-            job.status = status;
+            job.status = status; // so later mail in this run cannot add steps to it
             logEvent("mail", `${status}: ${note}`, job.id, "track");
             return "Recorded.";
           }),

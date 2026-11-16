@@ -74,6 +74,9 @@ function decidingPhases(listed: Listed | null): Phase[] {
 
 const screened = (r: Rubric, phase: Phase) => r[phase].criteria.filter(c => c.required && c.screen !== false);
 
+// The ids the screen asks, as "<phase>.<id>".
+export const screenIds = (listed: Listed | null, r = loadRubric()) => decidingPhases(listed).flatMap(phase => screened(r, phase).map(c => `${phase}.${c.id}`));
+
 export function screenChecklistText(listed: Listed | null, r = loadRubric()) {
   return decidingPhases(listed)
     .flatMap(phase => screened(r, phase).map(c => `- \`${phase}.${c.id}\`: ${c.statement}`))
@@ -90,7 +93,7 @@ export function screenVerdict(raw: unknown, listed: Listed | null): { out: strin
     answers.set(a.id, answer);
   }
   const phases = decidingPhases(listed);
-  const missing = phases.flatMap(phase => screened(r, phase).map(c => `${phase}.${c.id}`)).filter(k => !answers.has(k));
+  const missing = screenIds(listed, r).filter(k => !answers.has(k));
   if (missing.length) return `missing answers for: ${missing.join(", ")}`;
   const failed = phases.map(phase => ({
     phase,

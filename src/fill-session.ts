@@ -20,7 +20,8 @@ export interface FillSession {
   checkpoint: FillCheckpoint;
 }
 
-export type Browser = Pick<typeof chrome, "ensureChrome" | "pruneTabs" | "prepareJobBrowser" | "tabs" | "screenshot" | "activateApplicationTab">;
+export type Browser = Pick<typeof chrome, "ensureChrome" | "pruneTabs" | "prepareJobBrowser" | "tabs" | "screenshot" | "activateApplicationTab"> &
+  Partial<Pick<typeof chrome, "showWindows">>;
 
 export interface FillRuntime {
   sessions: Map<number, FillSession>;

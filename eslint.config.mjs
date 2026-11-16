@@ -3,7 +3,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["eslint.config.mjs", "node_modules/", "data/", "artifacts/", "basic-resume/", ".playwright-mcp/"] },
+  { ignores: ["eslint.config.mjs", "node_modules/", "data/", "artifacts/", "basic-resume/", ".playwright-mcp/", ".claude/"] },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,

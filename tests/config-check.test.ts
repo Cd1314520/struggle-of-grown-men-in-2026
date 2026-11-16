@@ -27,12 +27,29 @@ describe("config.yml", () => {
       withChange(c => {
         (c["limits"] ??= {})["applyPerDy"] = 5;
       }),
-    ).toEqual(["limits.applyPerDy: not a setting this app knows (known: prepPerDay, applyPerDay, locatePerDay, applySpreadHours)"]);
+    ).toEqual(["limits.applyPerDy: not a setting this app knows (known: prepPerDay, applyPerDay, locatePerDay, applySpreadHours, fillSteps, locateSteps)"]);
     expect(
       withChange(c => {
         (c["autoApply"] ??= {})["minscore"] = 70;
       })[0],
     ).toStartWith("autoApply.minscore: not a setting this app knows");
+  });
+
+  it("takes a fallback per stage as one model or a list of them", () => {
+    expect(withChange(c => ((c["models"] ??= {})["fallback"] = { fill: "codex/gpt-6-sol", prep: ["claude-code/sonnet", "codex/gpt-6-luna"] }))).toEqual([]);
+    expect(withChange(c => ((c["models"] ??= {})["fallback"] = { fil: "codex/gpt-6-sol" }))[0]).toStartWith(
+      "models.fallback.fil: not a setting this app knows",
+    );
+    expect(withChange(c => ((c["models"] ??= {})["fallback"] = { fill: ["codex/gpt-6-sol", ""] }))).toEqual([
+      'models.fallback.fill[1]: expected non-empty text, got ""',
+    ]);
+    expect(withChange(c => ((c["models"] ??= {})["fallback"] = { fill: 3 }))).toEqual(["models.fallback.fill: expected a model or a list of models, got 3"]);
+  });
+
+  it("takes screen.titles only as a regular expression that compiles, or null", () => {
+    expect(withChange(c => (c["screen"] = { titles: String.raw`\b(intern|co-?op)\b` }))).toEqual([]);
+    expect(withChange(c => (c["screen"] = { titles: null }))).toEqual([]);
+    expect(withChange(c => (c["screen"] = { titles: "(intern" }))).toEqual(['screen.titles: expected a regular expression, got "(intern"']);
   });
 
   it("refuses values of the wrong kind, by path", () => {

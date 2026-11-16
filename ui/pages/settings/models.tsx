@@ -7,8 +7,8 @@ import { api, queryClient, refreshAll, useModels } from "../../lib/api";
 import { SettingRow, SettingsGroup, SettingsPanel } from "./parts";
 
 export const STAGES: readonly { stage: ModelStage; label: string; description: string; core: boolean }[] = [
-  { stage: "triage", label: "Triage", description: "Reads raw titles, 50 at a time, on every scan.", core: true },
-  { stage: "screen", label: "Screen", description: "Checks each posting for plain dealbreakers.", core: true },
+  { stage: "triage", label: "Triage", description: "Reads raw titles in batches (triage.batch), once enough have gathered.", core: true },
+  { stage: "screen", label: "Screen", description: "Checks each posting for plain dealbreakers, when screen.readPostings is on.", core: true },
   { stage: "prep", label: "Assess and tailor", description: "Scores postings against the rubric and tailors the resume.", core: true },
   { stage: "fill", label: "Fill", description: "Fills application forms in the browser.", core: true },
   { stage: "track", label: "Track mail", description: "Reads replies and records next steps and outcomes.", core: false },
@@ -33,6 +33,7 @@ const DEFAULT = "__default__";
 const HARNESSES: { id: keyof ModelCatalog["errors"]; label: string; login: string }[] = [
   { id: "omp", label: "omp", login: "omp login" },
   { id: "claude-code", label: "Claude Code", login: "claude auth login" },
+  { id: "codex", label: "Codex", login: "bun run codex:login" },
 ];
 const price = (n: number) => (n >= 10 ? n.toFixed(0) : n >= 1 ? n.toFixed(1).replace(/\.0$/, "") : n.toFixed(2));
 const option = (m: CatalogModel): ComboOption => ({
@@ -116,7 +117,7 @@ export function Models() {
     <SettingsPanel
       id="models"
       title="Models"
-      description="claude-code/* runs through Claude Code; the rest through omp. Used from each stage's next run."
+      description="claude-code/* runs through Claude Code, codex/* through Codex, antigravity/* through agy; the rest through omp. Used from each stage's next run."
       actions={
         data && (
           <Button size="sm" variant="ghost" icon={<RefreshCw />} loading={refreshing} onClick={() => void refresh()} className="-mr-2.5 touch:-mr-3">

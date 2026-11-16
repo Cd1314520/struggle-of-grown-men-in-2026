@@ -1,6 +1,20 @@
 import { useSyncExternalStore } from "react";
 
-const PAGES = ["overview", "review", "questions", "pipeline", "applications", "archive", "activity", "resume", "profile", "setup", "settings", "job"] as const;
+const PAGES = [
+  "overview",
+  "review",
+  "questions",
+  "pipeline",
+  "applications",
+  "referrals",
+  "archive",
+  "activity",
+  "resume",
+  "profile",
+  "setup",
+  "settings",
+  "job",
+] as const;
 export type Page = (typeof PAGES)[number];
 const isPage = (p: string | undefined): p is Page => PAGES.includes(p as Page);
 

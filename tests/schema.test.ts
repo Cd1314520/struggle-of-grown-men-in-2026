@@ -33,6 +33,10 @@ const TABLES = [
   "question_digest_notified",
   "question_gates",
   "queued_questions",
+  "referral_connections",
+  "referral_contacts",
+  "referral_imports",
+  "referral_suggestions",
   "status_changes",
   "submit_approvals",
 ];
@@ -265,6 +269,21 @@ describe("schema migrations", () => {
       expect(() => db.run("INSERT INTO fill_state (job_id) VALUES (1)")).toThrow(/UNIQUE/);
       db.run("DELETE FROM jobs WHERE id = 1");
       expect(db.query("SELECT * FROM fill_state").all()).toEqual([]);
+    });
+  });
+
+  describe("referrals (version 12)", () => {
+    it("holds contacts to their stages and keeps a contact when its application is folded away", () => {
+      const db = memory();
+      migrate(db);
+      db.run("INSERT INTO jobs (id, url, source, company, title) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'One')");
+      db.run(
+        "INSERT INTO referral_contacts (id, name, company, company_key, relation, job_id, added_on) VALUES (1, 'Ana', 'Acme', 'acme', 'engineer', 1, '2026-10-01')",
+      );
+      expect(() => db.run("UPDATE referral_contacts SET stage = 'ghosted' WHERE id = 1")).toThrow(/CHECK/);
+      expect(() => db.run("UPDATE referral_contacts SET relation = 'friend' WHERE id = 1")).toThrow(/CHECK/);
+      db.run("DELETE FROM jobs WHERE id = 1");
+      expect(db.query("SELECT id, job_id FROM referral_contacts").all()).toEqual([{ id: 1, job_id: null }]);
     });
   });
 

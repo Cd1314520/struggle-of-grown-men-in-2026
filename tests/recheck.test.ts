@@ -72,6 +72,8 @@ describe("recheck", () => {
     ], replies, prompts));
     assert.ok(prompts[0].includes("1. Gamma") && prompts[0].includes("3. Acme"));
     assert.ok(prompts[0].includes("Hispanic or Latino?\\nNo."));
+    // A free-text answer it writes goes through the humanizer rules first.
+    assert.ok(prompts[0].includes("Editing a free-text answer") && prompts[0].includes("# Humanizer: remove AI writing patterns"));
     assert.ok(prompts[0].includes("## Resume") && prompts[0].includes("#show"));
     assert.ok(replies[0].startsWith("ERROR") && replies[1].startsWith("ERROR"));
     assert.ok(replies[4].startsWith("ERROR") && replies[4].includes("question 1"));
@@ -84,6 +86,32 @@ describe("recheck", () => {
     assert.equal(getJob(3).status, "needs_input");
     const left = db.query("SELECT message FROM events WHERE job_id = 3 AND worker = 'recheck'").all().map(e => e.message);
     assert.deepEqual(left, ['Left for you: "Social Security Number" — needs the number itself']);
+    `);
+  });
+
+  it("leaves an essay question to the owner on a job whose prose they write themselves", () => {
+    scenario(`
+    const { config } = await import(${src("config")});
+    config.ownWritingAbove = 80;
+    job(1, "Acme"); job(2, "Beta"); job(3, "Gamma");
+    updateJob(1, { score: 91 }); updateJob(2, { score: 80 }); updateJob(3, { score: 91 });
+    for (const id of [1, 2, 3]) updateJob(id, { posted_at: new Date(Date.now() - id * 864e5).toISOString() });
+    const essay = { ...ask("Why do you want to work here?", []), why: "free_text" };
+    const mine = parkGate(1, essay, null);
+    const agents = parkGate(2, essay, null);
+    const fact = parkGate(3, { ...ask("Title", ["Mr.", "Ms."]), why: "other" }, null);
+    const prompts = [];
+    await recheckOpenQuestions(worker([
+      ["answer_question", { number: 1, answer: "Because of the robots.", basis: "resume" }],
+      ["answer_question", { number: 2, answer: "Mr.", basis: "low-stakes" }],
+      ["recheck_done", { summary: "answered 2" }],
+    ], [], prompts));
+    assert.ok(prompts[0].includes("1. Beta") && prompts[0].includes("2. Gamma"));
+    assert.ok(!prompts[0].includes("Acme"), "the owner's essay is not offered to the recheck");
+    assert.equal(getGate(mine.id).state, "open");
+    assert.equal(getJob(1).status, "needs_input");
+    assert.equal(getGate(agents.id).answer, "Because of the robots.");
+    assert.equal(getGate(fact.id).answer, "Mr.");
     `);
   });
 

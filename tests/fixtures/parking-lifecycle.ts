@@ -11,12 +11,18 @@ const scenario = process.argv[2];
 const { config, jobDir, DATA } = await import("../../src/config");
 config.approval = "gated";
 config.targets.holdBack = false;
-config.concurrency.fill = scenario?.startsWith("restart-") || scenario === "recovery-prefix" ? 2 : 1;
+config.concurrency.fill = scenario?.startsWith("restart-") || scenario === "recovery-prefix" || scenario === "blocked-prefix" ? 2 : 1;
 config.concurrency.prep = 0;
 config.fillPauseSeconds = [0, 0];
 config.schedule = { scanMinutes: 0, discoverMinutes: 0, trackMinutes: 0 };
 config.limits.applyPerDay = 50;
 config.limits.applySpreadHours = 0;
+if (scenario === "usage-limit") {
+  config.models.fill = "claude-code/opus";
+  // The fill's own list replaces the global one: Sonnet is never tried for it.
+  config.fallback = ["claude-code/sonnet"];
+  config.models.fallback = { fill: "codex/gpt-6-sol" };
+}
 
 if (scenario === "target-isolation") {
   await import("./cdp-isolation");
@@ -101,11 +107,16 @@ const simulatedTabs = new Set<string>();
 const jobBrowsers: JobBrowser[] = [];
 let nextTab = 0;
 let activateWait: Promise<void> | null = null;
+const windowMoves: string[] = [];
 if (scenario?.startsWith("restart-")) for (const id of [1, 2, 3, 4]) simulatedTabs.add(id === 1 ? "draft-tab" : `draft-tab-${id}`);
 const browser: Browser = {
   ensureChrome: async () => {},
   pruneTabs: async () => {},
   screenshot: () => Promise.resolve(null),
+  showWindows: (slot: number, visible: boolean) => {
+    windowMoves.push(`${slot}:${visible ? "shown" : "hidden"}`);
+    return Promise.resolve();
+  },
   tabs: () => Promise.resolve([...simulatedTabs].map(id => ({ id, title: "Fixture requisition", url: "https://fixture.invalid/draft", ws: "" }))),
   activateApplicationTab: async (_slot: number, tabId: string) => {
     if (!simulatedTabs.has(tabId)) throw new Error("Missing saved draft tab");
@@ -135,6 +146,7 @@ const browser: Browser = {
 };
 await mock.module("../../src/gmail", () => ({
   gmailStatus: () => ({ connected: false, address: null }),
+  applicationMailbox: () => "",
   search: () => {
     throw new Error("mail forbidden in fixture");
   },
@@ -148,14 +160,16 @@ await mock.module("../../src/gmail", () => ({
 await mock.module("../../src/digest", () => ({
   tickQuestionDigest: async () => {},
 }));
-const { db, getJob, kvSet, moveJob, updateJob } = await import("../../src/db");
+const { db, getJob, kvGet, kvSet, moveJob, updateJob } = await import("../../src/db");
 const { to } = await import("../../src/status");
 const { authorizeSubmit, fillPhase, isSubmitting, isVerifying, isRecovering } = await import("../../src/fill-state");
 const core = await import("../../src/questions");
 const { jobBlockers } = await import("../../src/blockers");
-const { backedOff, usedToday } = await import("../../src/limits");
+const { backedOff, backoffUntil, usedToday } = await import("../../src/limits");
 const { Scheduler, retryPassingHandoffs } = await import("../../src/scheduler");
 const { listJobs } = await import("../../src/listing");
+// blocked-prefix: browser 1 exists but rests, so its drafts wait for it instead of moving to browser 0.
+if (scenario === "blocked-prefix") kvSet("fill.rest.1", String(Date.now() + 864e5));
 const scheduler = new Scheduler({ runWorker, browser });
 
 function must<T>(value: T | null | undefined, what: string): T {
@@ -343,6 +357,29 @@ if (scenario === "blocked-prefix") {
   process.exit(0);
 }
 
+if (scenario === "stranded-slot") {
+  // Parked in browser 2 while concurrency.fill was higher; with one browser now, browser 0 takes it.
+  addJob(1);
+  const frozen = resume.freezeResume(1);
+  updateJob(1, { resume_sha: frozen.sha, resume_frozen_at: new Date().toISOString() });
+  core.recordCheckpoint(1, {
+    version: 1,
+    slot: 2,
+    tabId: "gone-tab",
+    url: null,
+    step: "Draft from a browser that no longer opens",
+    notes: "Resume from the site's draft",
+    resumeSha: frozen.sha,
+    savedAt: new Date().toISOString(),
+  });
+  scheduler.pump();
+  await until(() => workers.length === 1);
+  assert.equal(jobRow(1).status, "filling");
+  assert.equal(workerAt(0).options.cdpPort !== undefined, true);
+  assert.match(workerAt(0).options.prompt, /THE SAVED TAB IS GONE/);
+  process.exit(0);
+}
+
 if (scenario === "recovery-prefix") {
   for (const id of [1, 2, 3, 4]) addJob(id);
   updateJob(1, { company: "Shared employer", company_key: "shared-employer" });
@@ -391,11 +428,18 @@ if (scenario === "freshest-first") {
   process.exit(0);
 }
 
+if (scenario === "cover-letter" || scenario === "cover-letter-sent") {
+  config.coverLetters = "draft";
+  config.ownWritingAbove = 80;
+}
 if (scenario === "paced") {
   config.limits.applySpreadHours = 24;
   config.limits.applyPerDay = 100;
 }
 addJob(1);
+// The owner writes for a job scoring above `ownWritingAbove`; the worker's own letter goes in at or below it.
+if (scenario === "cover-letter") db.query("UPDATE jobs SET score = 91 WHERE id = 1").run();
+if (scenario === "cover-letter-sent") db.query("UPDATE jobs SET score = 80 WHERE id = 1").run();
 if (
   [
     "paced",
@@ -460,6 +504,52 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.match(jobRow(1).note ?? "", /^requires a cover letter: Cover Letter\*/);
   assert.equal(core.getOpenGate(1), null);
   await until(() => !scheduler.activeFillSession(1));
+} else if (scenario === "cover-letter") {
+  const field = { ...navigation, field: "Cover Letter* (text box)" };
+  const letter = Array.from({ length: 90 }, (_, i) => `word${i}`).join(" ");
+  assert.match(await call(first, "skip_application", { requires: "cover_letter", note: "Cover Letter*" }), /^ERROR: draft the letter/);
+  assert.match(await call(first, "cover_letter", { ...field, draft: "Too short." }), /^ERROR: the draft has 2 words/);
+  assert.match(await call(first, "cover_letter", { ...field, draft: `${letter} — more` }), /^ERROR: the draft uses an em or en dash/);
+  const parking = call(first, "cover_letter", { ...field, draft: letter });
+  await until(() => core.getOpenGate(1) !== null);
+  const gate = must(core.getOpenGate(1), "cover letter gate");
+  assert.match(first.options.prompt, /The candidate writes the prose of this application themselves/);
+  assert.match(first.options.prompt, /Ask in the same way for an answer the employer says must be written without AI/);
+  assert.match(first.options.prompt, /written without AI and the candidate has not written it/);
+  assert.match(first.options.prompt, /the application parks while the candidate reads and edits your draft/);
+  assert.equal(gate.kind, "cover_letter");
+  assert.deepEqual(gate.options, [letter], "the draft travels on the gate for the owner to edit");
+  assert.equal(jobRow(1).status, "needs_input", "a letter waits for the owner even though nothing else would");
+  first.exit();
+  await parking;
+  assert.equal(core.respond(1, "My edited letter."), true);
+  scheduler.pump();
+  await until(() => workers.length === 2);
+  assert.equal(readFileSync(join(jobDir(1), "cover_letter.txt"), "utf8"), "My edited letter.\n");
+  assert.match(await call(workerAt(1), "cover_letter", { ...field, draft: letter }), /Enter it exactly as written:\n\nMy edited letter\.$/);
+} else if (scenario === "cover-letter-sent") {
+  const field = { ...navigation, field: "Cover Letter* (text box)" };
+  const letter = Array.from({ length: 90 }, (_, i) => `word${i}`).join(" ");
+  assert.match(first.options.prompt, /No one reads this letter before it is sent/);
+  assert.match(first.options.prompt, /For free-text questions \("why this company"\), write a concise/);
+  assert.match(await call(first, "cover_letter", { ...field, draft: "Too short." }), /^ERROR: the draft has 2 words/);
+  const reply = await call(first, "cover_letter", { ...field, draft: letter });
+  assert.ok(
+    reply.endsWith(`Enter it exactly as written:
+
+${letter}`),
+    "the worker's own letter comes straight back to be entered",
+  );
+  assert.equal(core.getOpenGate(1), null, "nothing waits for the owner");
+  assert.equal(jobRow(1).status, "filling");
+  assert.equal(first.aborted, false);
+  assert.equal(
+    readFileSync(join(jobDir(1), "cover_letter.txt"), "utf8"),
+    `${letter}
+`,
+  );
+  assert.equal(core.approvedCoverLetter(1), letter, "a later worker on this application is handed the same letter");
+  assert.match(await call(first, "cover_letter", { ...field, draft: `${letter} changed` }), new RegExp(`Enter it exactly as written:\n\n${letter}$`));
 } else if (scenario === "skip-after-submit") {
   assert.equal(authorizeSubmit(1), true);
   assert.match(await call(first, "skip_application", { requires: "references", note: "References*" }), /cannot be skipped/);
@@ -611,6 +701,42 @@ if (scenario === "release" || scenario === "quick-answer") {
   assert.equal(workerAt(1).options.jobId, 1, "the same draft resumes");
   assert.equal(jobRow(1).resume_sha, initialSha);
   assert.equal(usedToday("fill"), 1, "resuming is not a new application");
+} else if (scenario === "usage-limit") {
+  assert.equal(first.options.model, "claude-code/opus");
+  assert.match(first.options.prompt, /# Humanizer: remove AI writing patterns/);
+  await call(first, "checkpoint", navigation);
+  const claudeResets = Date.now() + 3 * 3_600_000;
+  first.fail(`Claude usage limit reached (five_hour, resets ${new Date(claudeResets).toISOString()}): limit reached`);
+  // Nothing pauses, so the draft goes straight back to a browser.
+  scheduler.pump();
+  await until(() => workers.length === 2);
+  assert.equal(backedOff(), false, "a usage limit with a fallback left does not pause the app");
+  assert.equal(core.getOpenGate(1), null, "not parked for a person");
+  const second = workerAt(1);
+  assert.equal(second.options.jobId, 1, "the same draft resumes");
+  assert.equal(second.options.model, "codex/gpt-6-sol", "on the fallback model");
+  assert.match(second.options.prompt, /RESUMING an application/);
+  // A Codex fill edits its free-text answers with the same humanizer rules as a Claude Code one.
+  assert.match(second.options.prompt, /Editing a free-text answer[\s\S]*# Humanizer: remove AI writing patterns/);
+  assert.equal(jobRow(1).resume_sha, initialSha);
+  assert.equal(usedToday("fill"), 1, "resuming is not a new application");
+  // The fallback runs out too: nothing is left to move to, so the app waits for the first of the two
+  // to reset (Codex's, in 2 hours), not the doubling pause.
+  await call(second, "checkpoint", navigation);
+  const codexResets = Date.now() + 2 * 3_600_000;
+  second.fail("You've hit your usage limit. Try again in 2 hours.");
+  await until(() => !scheduler.activeFillSession(1));
+  assert.equal(backedOff(), true);
+  assert.ok(Math.abs(backoffUntil() - codexResets) < 60_000, `paused until Codex resets, not ${new Date(backoffUntil()).toISOString()}`);
+  scheduler.pump();
+  assert.equal(workers.length, 2, "nothing starts before then");
+  // Once Codex's limit has lifted, the draft resumes on it; Claude's is still running.
+  kvSet("limit.codex", "0");
+  kvSet("backoff.until", "0");
+  scheduler.pump();
+  await until(() => workers.length === 3);
+  assert.equal(workerAt(2).options.model, "codex/gpt-6-sol");
+  assert.ok(Number(kvGet("limit.claude:default")) > claudeResets, "Claude's account stays out until just after its reset");
 } else if (scenario === "retry-browser" || scenario === "retry-site-down") {
   const cause = scenario === "retry-browser" ? "browser" : "site_down";
   const parking = call(first, "need_manual", { ...navigation, cause, reason: "Clicks time out; reads work" });
@@ -739,6 +865,7 @@ if (scenario === "release" || scenario === "quick-answer") {
   } else {
     await scheduler.reserveBrowser(1, gate.id);
     assert.equal(scheduler.manualBrowserReserved(1), true);
+    assert.deepEqual(windowMoves, ["0:shown"], "an inspected browser comes on screen");
     assert.equal(scheduler.fillSlot(1), 0);
     addJob(2);
     scheduler.pump();
@@ -748,6 +875,7 @@ if (scenario === "release" || scenario === "quick-answer") {
     });
     assert.equal(scheduler.manualBrowserReserved(1), true);
     scheduler.releaseBrowser(1, gate.id);
+    assert.deepEqual(windowMoves, ["0:shown", "0:hidden"], "a released browser goes back off screen");
     assert.equal(core.getOpenGate(1)?.id, gate.id);
     assert.equal(scheduler.manualBrowserReserved(1), false);
     await until(() => workers.length === 2);

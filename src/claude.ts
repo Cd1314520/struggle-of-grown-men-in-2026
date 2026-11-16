@@ -1,15 +1,41 @@
+// Claude Code as a worker harness: `claude -p` with stream-json output, signed in as this machine's own
+// Claude Code (whatever `claude auth status` shows). One process per unit of work, as with omp.
+//
+// Host tools reach it as an MCP server ("host") that the app serves on a private localhost port for the
+// worker's lifetime, so the agent sees them as `mcp__host__<name>`. A browser worker also gets
+// Playwright's MCP server ("browser") attached over CDP to the same pacing proxy omp would use. Nothing
+// from the owner's own Claude Code setup is loaded: no CLAUDE.md, settings, hooks, plugins or MCP servers.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, DATA, PROMPTS } from "./config";
-import { logEvent } from "./db";
-import { errorMessage } from "./errors";
+import { logEvent, logUsage, type TokenUse } from "./db";
+import { errorMessage, settled } from "./errors";
 import type { CatalogModel } from "./models";
-import { CLAUDE_PREFIX, durationMs, type Builtin, type HostTool, type ToolArgs, type WorkerHandle, type WorkerOptions, type WorkerResult } from "./worker";
+import {
+  CLAUDE_PREFIX,
+  durationMs,
+  modelEffort,
+  type Builtin,
+  type HostTool,
+  type ToolArgs,
+  type WorkerHandle,
+  type WorkerOptions,
+  type WorkerResult,
+} from "./worker";
 
-const claude = () => process.env["AUTO_APPLY_CLAUDE"] ?? "claude";
-export const PLAYWRIGHT_MCP = ["npx", "-y", "@playwright/mcp@0.0.83"];
+// Overridable so a test can stand in a fake. A fake in TypeScript runs under Bun: Windows does not
+// start a script from its shebang.
+const claude = () => {
+  const bin = process.env["AUTO_APPLY_CLAUDE"] ?? "claude";
+  return bin.endsWith(".ts") ? [process.execPath, bin] : [bin];
+};
+// Pinned: its tool names and options are what prompts/browser-playwright.md describes. On Windows npx is
+// a batch file, which Claude Code starts only through cmd.
+export const PLAYWRIGHT_MCP = [...(process.platform === "win32" ? ["cmd", "/c"] : []), "npx", "-y", "@playwright/mcp@0.0.83"];
 
+// omp's built-in tools as Claude Code's. `eval` has no counterpart: the fill worker gets a `prefill`
+// host tool in its place (src/fill.ts).
 const BUILTINS: Record<Builtin, string[]> = {
   read: ["Read", "Glob"],
   write: ["Write"],
@@ -27,7 +53,8 @@ interface Rpc {
   params?: { protocolVersion?: unknown; name?: unknown; arguments?: unknown };
 }
 
-function serveHostTools(tools: Record<string, HostTool>, log: (kind: string, message: string) => void) {
+// A minimal MCP server over streamable HTTP: plain JSON replies, no event stream, no sessions.
+export function serveHostTools(tools: Record<string, HostTool>, log: (kind: string, message: string) => void) {
   const token = randomUUID();
   const call = async (name: string, args: ToolArgs) => {
     log("tool", `${name} ${JSON.stringify(args).slice(0, 600)}`);
@@ -40,7 +67,7 @@ function serveHostTools(tools: Record<string, HostTool>, log: (kind: string, mes
     }
   };
   const answer = async (rpc: Rpc) => {
-    if (rpc.id === undefined || rpc.id === null) return null;
+    if (rpc.id === undefined || rpc.id === null) return null; // a notification
     const reply = (result: unknown) => ({ jsonrpc: "2.0", id: rpc.id, result });
     switch (rpc.method) {
       case "initialize":
@@ -66,7 +93,7 @@ function serveHostTools(tools: Record<string, HostTool>, log: (kind: string, mes
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    idleTimeout: 0,
+    idleTimeout: 0, // a tool call may wait on a person
     async fetch(req) {
       if (req.headers.get("authorization") !== `Bearer ${token}`) return new Response("unauthorized", { status: 401 });
       if (req.method !== "POST") return new Response(null, { status: 405 });
@@ -89,7 +116,7 @@ function serveHostTools(tools: Record<string, HostTool>, log: (kind: string, mes
   };
 }
 
-const browserServer = (cdpPort: number) => {
+export const browserServer = (cdpPort: number) => {
   mkdirSync(join(DATA, "screenshots"), { recursive: true });
   return {
     type: "stdio",
@@ -99,21 +126,29 @@ const browserServer = (cdpPort: number) => {
       "--cdp-endpoint",
       `http://127.0.0.1:${cdpPort}`,
       "--caps",
-      "vision",
-      "--no-webmcp",
+      "vision", // clicks by coordinates, for CAPTCHAs
+      "--no-webmcp", // it would add navigator.modelContext, which bot checks look for
       "--output-dir",
       join(DATA, "screenshots"),
+      // Input is paced like a person's by the proxy, so a long answer takes a while to type.
       "--timeout-action",
       "60000",
     ],
   };
 };
 
+// The subset of Claude Code's stream-json events this client reads.
 interface Block {
   type?: string;
   text?: string;
   name?: string;
   input?: Record<string, unknown>;
+}
+interface Usage {
+  input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  output_tokens?: number;
 }
 interface Event {
   type?: string;
@@ -122,10 +157,32 @@ interface Event {
   result?: string;
   errors?: string[];
   mcp_servers?: { name?: string; status?: string }[];
-  message?: { content?: Block[] };
+  message?: { id?: string; usage?: Usage; content?: Block[] };
+  usage?: Usage;
+  total_cost_usd?: number;
   rate_limit_info?: { status?: string; rateLimitType?: string; resetsAt?: number };
 }
 
+const tokens = (u: Usage): TokenUse => ({
+  input: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
+  cached: u.cache_read_input_tokens ?? 0,
+  output: u.output_tokens ?? 0,
+});
+// What a run used: the CLI's own total when it finished, else the sum over the responses it reported
+// before it was stopped (a response's output count is taken as it starts, so that sum runs short).
+export function claudeUsage(total: Pick<Event, "usage" | "total_cost_usd"> | null, responses: Iterable<Usage>): TokenUse | null {
+  if (total?.usage) return { ...tokens(total.usage), ...(total.total_cost_usd === undefined ? {} : { cost: total.total_cost_usd }) };
+  const sum: TokenUse = { input: 0, cached: 0, output: 0, partial: true };
+  for (const u of responses) {
+    const t = tokens(u);
+    sum.input += t.input;
+    sum.cached += t.cached;
+    sum.output += t.output;
+  }
+  return sum;
+}
+
+// What a built-in or browser tool call is doing, for the activity log. Never the text it types.
 export function stepOf(name: string, input: Record<string, unknown> = {}): string {
   const s = (key: string) => (typeof input[key] === "string" ? input[key] : "");
   const what = s("description") || s("element") || s("url") || s("query") || s("file_path") || s("pattern") || s("command");
@@ -142,13 +199,13 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
   const log = (kind: string, message: string) => {
     logEvent(kind, message, opts.jobId, opts.name);
   };
-  const model = opts.model?.slice(CLAUDE_PREFIX.length) ?? "";
+  const { model, effort } = modelEffort(opts.model, CLAUDE_PREFIX);
   const sessionId = randomUUID();
   const host = serveHostTools(opts.tools, log);
   const servers: Record<string, unknown> = { host: host.config };
   if (opts.browser) servers["browser"] = browserServer(opts.cdpPort ?? config.chrome.proxyPort);
   const args = [
-    claude(),
+    ...claude(),
     "-p",
     "--output-format",
     "stream-json",
@@ -170,21 +227,25 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
     sessionId,
   ];
   if (model && model !== "default") args.push("--model", model);
+  if (effort) args.push("--effort", effort);
+  // Closing the page would lose the application's tab, a form filled all at once gets flagged as a
+  // bot, and running code in Playwright's own process is outside anything a worker needs.
   if (opts.browser) args.push("--disallowedTools", ["browser_close", "browser_fill_form", "browser_run_code_unsafe"].map(t => `mcp__browser__${t}`).join(","));
 
   const env: Record<string, string | undefined> = {
     ...process.env,
     ...opts.env,
-    MCP_TIMEOUT: "120000",
-    MCP_TOOL_TIMEOUT: String(48 * 3_600_000),
+    MCP_TIMEOUT: "120000", // npx may fetch Playwright's server on its first run
+    MCP_TOOL_TIMEOUT: String(48 * 3_600_000), // host tools may wait on a person
   };
-  delete env["CLAUDECODE"];
+  delete env["CLAUDECODE"]; // set when the app itself was started from a Claude Code session
   const proc = Bun.spawn(args, { cwd: opts.cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
   active.add(proc);
-  void proc.stdin.write(opts.prompt);
-  void proc.stdin.end();
+  settled(() => proc.stdin.write(opts.prompt));
+  settled(() => proc.stdin.end());
 
   let lastText = "";
+  // Assigned from callbacks, which control-flow narrowing cannot see.
   let result = null as WorkerResult | null;
   let abortReason = null as string | null;
   let limited = null as string | null;
@@ -202,17 +263,22 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
       }, durationMs(opts.maxTime))
     : null;
 
+  // Claude Code repeats a response's usage on each block of it: the last one per response id counts.
+  const responses = new Map<string, Usage>();
+  let total: Event | null = null;
   const onEvent = (e: Event) => {
     switch (e.type) {
       case "system":
         if (e.subtype !== "init") break;
         for (const s of e.mcp_servers ?? []) {
           if (s.status !== "failed" && s.status !== "needs-auth") continue;
+          // Without its host tools a worker can report nothing; without its browser, a fill can do nothing.
           result ??= { status: "error", error: `the ${s.name ?? "?"} MCP server did not start (${s.status})` };
           stop();
         }
         break;
       case "assistant":
+        if (e.message?.id && e.message.usage) responses.set(e.message.id, e.message.usage);
         for (const block of e.message?.content ?? []) {
           if (block.type === "text" && block.text?.trim()) {
             lastText = block.text.trim();
@@ -229,6 +295,7 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
         }
         break;
       case "result":
+        total = e;
         if (e.subtype === "success" && !e.is_error) result ??= { status: "completed" };
         else {
           const said = e.result?.trim() || e.errors?.join("; ") || e.subtype || "unknown error";
@@ -268,6 +335,7 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
       const tail = (await stderr).trim().split("\n").slice(-5).join("\n");
       result = { status: "error", error: `${limited ? `${limited}. ` : ""}claude exited with code ${code} before finishing. ${tail}`.trim() };
     }
+    logUsage(opts.name, opts.model ?? "claude-code/default", claudeUsage(total, responses.values()), opts.jobId);
     if (result.status === "aborted" && abortReason !== null) log("system", `${opts.name} worker stopped: ${abortReason} (Claude Code session ${sessionId})`);
     else if (result.status !== "completed")
       log("error", `${opts.name} worker ${result.status}: ${result.error || "no error details reported"} (Claude Code session ${sessionId})`);
@@ -284,6 +352,8 @@ export function runClaude(opts: WorkerOptions): WorkerHandle {
   };
 }
 
+// The models Claude Code offers here: its aliases, which follow the newest of each family, when the
+// `claude` on the PATH is signed in. It has no listing of its own.
 const ALIASES: { alias: string; name: string }[] = [
   { alias: "default", name: "Claude Code's default" },
   { alias: "fable", name: "Claude Fable (latest)" },
@@ -292,9 +362,9 @@ const ALIASES: { alias: string; name: string }[] = [
   { alias: "haiku", name: "Claude Haiku (latest)" },
 ];
 export async function claudeCatalog(): Promise<{ models: CatalogModel[]; error: string | null }> {
-  if (!Bun.which(claude())) return { models: [], error: "claude is not installed" };
+  if (!Bun.which(claude()[0] ?? "claude")) return { models: [], error: "claude is not installed" };
   try {
-    const proc = Bun.spawn([claude(), "auth", "status"], { stdout: "pipe", stderr: "pipe" });
+    const proc = Bun.spawn([...claude(), "auth", "status"], { stdout: "pipe", stderr: "pipe" });
     const timer = setTimeout(() => {
       proc.kill();
     }, 30_000);

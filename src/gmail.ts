@@ -1,7 +1,11 @@
+// Gmail access for the dedicated application mailbox (OAuth, gmail.modify scope).
+// Client credentials: profile/gmail-client.json (the "Desktop app" or "Web" OAuth client
+// JSON downloaded from Google Cloud). Tokens live in the local DB.
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, PROFILE, publicUrl } from "./config";
-import { kvGet, kvSet } from "./db";
+import { kvDelete, kvGet, kvSet } from "./db";
 
 const SCOPE = "https://www.googleapis.com/auth/gmail.modify";
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -34,6 +38,7 @@ interface Message {
 }
 interface MessageList {
   messages?: { id: string }[];
+  nextPageToken?: string;
 }
 
 function client() {
@@ -47,8 +52,24 @@ function client() {
   return { id: c.client_id, secret: c.client_secret };
 }
 
+// The callback is a plain GET, and any page in the browsers the app drives can open it. Without a check
+// one could hand the app a code for an account of its choosing (login CSRF), so each sign-in started
+// here leaves a one-time `state` the callback must bring back within ten minutes.
+const STATE_KEY = "gmail.oauth.state";
+const STATE_TTL_MS = 10 * 60_000;
+export function checkOAuthState(state: string | null) {
+  const raw = kvGet(STATE_KEY);
+  if (raw !== null) kvDelete(STATE_KEY); // one use, whatever the outcome
+  const saved = raw ? (JSON.parse(raw) as { state?: string; at?: number }) : {};
+  if (!state || state !== saved.state || Date.now() - (saved.at ?? 0) > STATE_TTL_MS)
+    throw new Error("This sign-in was not started from this app, or took longer than ten minutes. Connect Gmail again from Settings.");
+}
+
 export function authUrl() {
+  const state = randomUUID();
+  kvSet(STATE_KEY, JSON.stringify({ state, at: Date.now() }));
   const q = new URLSearchParams({
+    state,
     client_id: client().id,
     redirect_uri: redirectUri(),
     response_type: "code",
@@ -70,7 +91,8 @@ async function tokenRequest(params: Record<string, string>) {
   return body;
 }
 
-export async function exchangeCode(code: string) {
+export async function exchangeCode(code: string, state: string | null) {
+  checkOAuthState(state);
   const t = await tokenRequest({ code, grant_type: "authorization_code", redirect_uri: redirectUri() });
   if (t.refresh_token) kvSet("gmail.refresh", t.refresh_token);
   kvSet("gmail.access", JSON.stringify({ token: t.access_token, exp: Date.now() + (t.expires_in - 60) * 1000 }));
@@ -84,6 +106,9 @@ export async function exchangeCode(code: string) {
 }
 
 export const gmailStatus = () => ({ connected: !!kvGet("gmail.refresh"), address: kvGet("gmail.address") });
+// The address application forms and portal accounts use: the connected Gmail, or before it is
+// connected the configured mailbox (codes sent there then wait for the candidate).
+export const applicationMailbox = () => gmailStatus().address ?? config.mailbox?.trim() ?? "";
 
 async function accessToken() {
   const cached = JSON.parse(kvGet("gmail.access") ?? "null") as { token: string; exp: number } | null;
@@ -106,6 +131,7 @@ async function call(path: string, init?: RequestInit, token?: string): Promise<u
 }
 
 const header = (msg: { payload?: { headers?: { name: string; value: string }[] } }, name: string) => {
+  // RFC header names are case-insensitive; normalize both sides of the lookup.
   const normalizedName = name.toLowerCase();
   return msg.payload?.headers?.find(h => h.name.toLowerCase() === normalizedName)?.value ?? "";
 };
@@ -123,6 +149,7 @@ function bodyText(payload: Part | undefined): string {
   };
   walk(payload);
   if (plain.join("").trim()) return plain.join("\n");
+  // Keep link targets: verification mails often carry the code only in an href.
   return html
     .join("\n")
     .replace(/<style[\s\S]*?<\/style>/gi, "")
@@ -136,11 +163,18 @@ function bodyText(payload: Part | undefined): string {
 }
 
 export async function search(query: string, max = 10) {
-  const list = (await call(`/messages?${new URLSearchParams({ q: query, maxResults: String(Math.min(max, 25)) }).toString()}`)) as MessageList;
-  const out = [];
+  return (await searchPage(query, max)).messages;
+}
+
+// One page of a search, and the token for the next one (null on the last page): after a few days
+// away the mailbox holds more than one page, and a reader that stops at the first misses the rest.
+export async function searchPage(query: string, max = 10, page?: string) {
+  const params = new URLSearchParams({ q: query, maxResults: String(Math.min(max, 25)), ...(page ? { pageToken: page } : {}) });
+  const list = (await call(`/messages?${params.toString()}`)) as MessageList;
+  const messages = [];
   for (const m of list.messages ?? []) {
     const msg = (await call(`/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`)) as Message;
-    out.push({
+    messages.push({
       id: m.id,
       thread: msg.threadId,
       from: header(msg, "from"),
@@ -150,7 +184,7 @@ export async function search(query: string, max = 10) {
       snippet: msg.snippet,
     });
   }
-  return out;
+  return { messages, next: list.nextPageToken ?? null };
 }
 
 export async function read(id: string) {
@@ -170,6 +204,7 @@ export async function markRead(id: string) {
   await call(`/messages/${encodeURIComponent(id)}/modify`, { method: "POST", body: JSON.stringify({ removeLabelIds: ["UNREAD"] }) });
 }
 
+// Digest-only sending: recipient is resolved from the OAuth identity, never from worker input.
 export class GmailSendError extends Error {
   constructor(
     message: string,
@@ -191,6 +226,8 @@ async function verifiedSelfIdentity(): Promise<{ recipient: string; token: strin
   const connected = mailboxAddress(status.address);
   const expected = config.mailbox ? mailboxAddress(config.mailbox) : connected;
   if (connected !== expected) throw new Error("Connected Gmail identity does not match the configured mailbox");
+  // Keep this credential snapshot through all subsequent requests. OAuth callbacks can replace
+  // the cache while profile verification is pending; rereading it would authorize another mailbox.
   const token = await accessToken();
   const profile = (await call("/profile", { signal: AbortSignal.timeout(30_000) }, token)) as { emailAddress?: unknown };
   if (typeof profile.emailAddress !== "string" || mailboxAddress(profile.emailAddress) !== expected)
@@ -245,6 +282,7 @@ export async function sendSelfMessage(message: { messageId: string; subject: str
       body: JSON.stringify({ raw }),
       signal: AbortSignal.timeout(30_000),
     });
+    // A definite rejection is safe to retry. A timeout/server error may follow acceptance.
     if (!res.ok) throw new GmailSendError(`Gmail send rejected (${res.status})`, res.status >= 500 || res.status === 408);
     const body = (await res.json()) as { id?: string };
     if (!body.id) throw new GmailSendError("Gmail send returned no message identifier", true);
@@ -259,6 +297,8 @@ export async function findSentSelfMessage(messageId: string, expectedMailbox: st
   const reference = digestDeliveryReference(messageId);
   const { recipient, token } = await verifiedSelfIdentity();
   if (recipient !== mailboxAddress(expectedMailbox)) throw new Error("Digest mailbox changed before reconciliation");
+  // Gmail may replace RFC Message-ID. Search the persisted body reference, then require the
+  // exact custom identity header; search indexing alone is never delivery proof.
   const q = `in:sent "${reference}"`;
   const list = (await call(
     `/messages?${new URLSearchParams({ q, maxResults: "100" }).toString()}`,

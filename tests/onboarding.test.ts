@@ -18,6 +18,7 @@ describe("the example profile", () => {
       "companies.yml",
       "employers.yml",
       "personal.yml",
+      "referral.yml",
       "resume-notes.md",
       "rubric.yml",
       "targets.md",
@@ -25,6 +26,7 @@ describe("the example profile", () => {
     const rubric = loadRubric(join(EXAMPLES, "rubric.yml"));
     expect(rubric.practice.criteria.length).toBeGreaterThan(0);
     expect(rubric.real.criteria.length).toBeGreaterThan(0);
+    // The boards ship filled in: each one a board a scan can read, none of them twice.
     const boards = (YAML.parse(example("companies.yml")) as { companies: { name: string; ats: string; slug: string }[] }).companies;
     expect(boards.length).toBeGreaterThan(1000);
     expect(boards.filter(b => !b.name || !b.slug || !isAts(b.ats))).toEqual([]);
@@ -34,8 +36,10 @@ describe("the example profile", () => {
   });
 
   it("holds the app back only where a choice is the owner's to make", () => {
+    // The placeholder check in src/profile.ts is what stops the app acting on a template.
     const marked = readdirSync(EXAMPLES).filter(f => example(f).includes(PLACEHOLDER));
-    expect(marked.sort()).toEqual(["answers.md", "personal.yml", "targets.md"]);
+    expect(marked.sort()).toEqual(["answers.md", "personal.yml", "referral.yml", "targets.md"]);
+    // Nothing that may be left as it is mentions the marker, or the file could never pass.
     for (const f of ["rubric.yml", "resume-notes.md", "companies.yml", "employers.yml"]) expect(example(f)).not.toContain(PLACEHOLDER);
   });
 
@@ -85,6 +89,7 @@ describe("choosing a model", () => {
       setModel("triage", null, file);
       expect(YAML.parse(readFileSync(file, "utf8"))).toEqual({ mailbox: "me@example.com", models: { triage: null } });
 
+      // A file the app could not start with is left alone.
       writeFileSync(file, "mailbox: not-an-address\n");
       expect(() => {
         setModel("prep", "acme/fast-1", file);

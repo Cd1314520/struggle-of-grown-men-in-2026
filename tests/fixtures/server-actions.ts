@@ -261,6 +261,110 @@ if (scenario === "action-guards") {
   assert.equal(statusOf(other), "submitted");
   assert.equal((await steps(sent, { op: "remove", step: oa.id })).status, 200);
   assert.deepEqual(jobSteps(sent), []);
+} else if (scenario === "referrals") {
+  const { readFileSync } = await import("node:fs");
+  const call = async (path: string, init?: RequestInit) => {
+    const res = await handle(new Request(`${BASE}${path}`, init));
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  };
+  const post = (path: string, body: unknown) => call(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  type State = import("../../src/api-types").ReferralsState;
+  const state = async () => (await call("/api/referrals")).body as unknown as State;
+
+  // The example profile: the list works, drafts wait for the facts.
+  writeFileSync(join(PROFILE, "referral.yml"), readFileSync(join(import.meta.dir, "..", "..", "profile.example", "referral.yml"), "utf8"));
+  const sent = job("submitted", { submitted_at: new Date().toISOString() });
+  let s = await state();
+  assert.deepEqual(
+    s.companies.map(c => [c.company, c.kind, c.job?.id]),
+    [["Acme", "applied", sent]],
+  );
+  assert.ok(s.problems.some(p => p.includes("TODO-FILL")));
+
+  assert.equal((await post("/api/referrals/contacts", { name: "Ana Diaz", relation: "friend", jobId: sent })).status, 409);
+  assert.equal((await post("/api/referrals/contacts", { name: "Ana Diaz", relation: "engineer", jobId: 999 })).status, 409);
+  const added = await post("/api/referrals/contacts", {
+    name: "Ana Diaz",
+    relation: "engineer",
+    jobId: sent,
+    profileUrl: "https://www.linkedin.com/in/ana-diaz",
+  });
+  assert.equal(added.status, 200);
+  const id = added.body["id"] as number;
+  s = await state();
+  const ana = s.contacts.find(c => c.id === id);
+  assert.equal(ana?.company, "Acme", "a contact about a job takes its employer");
+  assert.equal(ana.drafts, null);
+  assert.deepEqual(s.due, [{ contactId: id, overdue: false }]);
+  // Acme has a conversation open now: the list leaves it alone.
+  assert.deepEqual(s.companies, []);
+  assert.deepEqual(
+    ((await call("/api/referrals/jobs?company=ACME,%20Inc.")).body["jobs"] as { id: number }[]).map(j => j.id),
+    [sent],
+  );
+
+  // Filled in, the drafts appear, built from what the file says.
+  writeFileSync(
+    join(PROFILE, "referral.yml"),
+    [
+      "me: {short: CS senior at Example University, opener: I'm a CS senior.}",
+      "interest: new grad roles",
+      "areas: [{name: Software, hook: have built a course planner, fact: I built a course planner 300 students use.}]",
+    ].join("\n"),
+  );
+  s = await state();
+  assert.deepEqual(s.problems, []);
+  assert.match(
+    s.contacts[0]?.drafts?.note ?? "",
+    /^Hi Ana, I'm a CS senior at Example University\. I applied to Acme's Engineer 1 role and have built a course planner/,
+  );
+
+  // The owner sends the invite with a note, then uploads an export that shows the accept and a reply.
+  assert.equal((await post(`/api/referrals/contacts/${id}`, { op: "stage", stage: "requested", withNote: true })).status, 200);
+  assert.equal((await state()).notes.left, 2);
+  assert.equal((await post(`/api/referrals/contacts/${id}`, { op: "stage", stage: "nope" })).status, 409);
+  assert.equal((await post("/api/referrals/contacts/999", { op: "remove" })).status, 404);
+  // A one-file form as a browser sends it: multipart, its length known up front.
+  const asBrowser = (name: string, content: string): RequestInit => {
+    const body = [
+      "--XYZ",
+      `Content-Disposition: form-data; name="file"; filename="${name}"`,
+      "Content-Type: application/octet-stream",
+      "",
+      content,
+      "--XYZ--",
+      "",
+    ].join("\r\n");
+    return {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=XYZ", "content-length": String(Buffer.byteLength(body)) },
+      body,
+    };
+  };
+  const connections = [
+    "First Name,Last Name,URL,Email Address,Company,Position,Connected On",
+    "Ana,Diaz,https://www.linkedin.com/in/ana-diaz,,Acme,Engineer,23 Oct 2026",
+    "Bo,Chen,https://www.linkedin.com/in/bo,,Acme,Backend Engineer,01 Jan 2025",
+  ].join("\n");
+  const upload = await call("/api/referrals/import", asBrowser("Connections.csv", connections));
+  assert.equal(upload.status, 200, JSON.stringify(upload.body));
+  assert.deepEqual(upload.body, { connections: 2, updates: 1 });
+  s = await state();
+  assert.equal(s.contacts[0]?.stage, "connected");
+  assert.equal(s.linkedin.connections, 2);
+  assert.equal(s.contacts[0].next.kind, "send_message");
+  assert.equal((await call("/api/referrals/import", asBrowser("notes.txt", "hello"))).status, 422);
+  const unsized = new FormData();
+  unsized.append("file", new File([connections], "Connections.csv"));
+  assert.equal((await call("/api/referrals/import", { method: "POST", body: unsized })).status, 413, "a body of unknown length is refused");
+
+  // Mail without a connected mailbox: nothing is searched.
+  assert.deepEqual((await post("/api/referrals/mail", {})).body, { checked: 0, updates: 0 });
+  assert.equal((await post(`/api/referrals/contacts/${id}`, { op: "edit", notes: "met at the fair", email: "not an address" })).status, 409);
+  assert.equal((await post(`/api/referrals/contacts/${id}`, { op: "edit", notes: "met at the fair" })).status, 200);
+  assert.equal((await state()).contacts[0]?.notes, "met at the fair");
+  assert.equal((await post(`/api/referrals/contacts/${id}`, { op: "remove" })).status, 200);
+  assert.deepEqual((await state()).contacts, []);
 } else {
   throw new Error(`unknown scenario: ${String(scenario)}`);
 }

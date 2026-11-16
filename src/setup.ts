@@ -1,13 +1,19 @@
+// What a new install still needs before the app can do its work, step by step, as the Setup page shows
+// it. Every check reads the machine or the files as they are now; nothing here is stored.
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { loadCompanies } from "./ats";
+import { chromeBinary } from "./chrome";
 import { config, LOCAL_CONFIG, MODEL_STAGES, PROFILE } from "./config";
 import { kvGet } from "./db";
 import * as gmail from "./gmail";
 import type { ModelCatalog } from "./models";
 import { isExample, profileProblems } from "./profile";
 import { stockResume } from "./resume";
-import { harnessOf, type HarnessId } from "./worker";
+import { codexBinary } from "./codex";
+import { agyBinary } from "./antigravity";
+import { stageModels } from "./providers";
+import { harnessOf, usesPlaywright, type HarnessId } from "./worker";
 
 export type SetupStepId = "tools" | "models" | "machine" | "resume" | "profile" | "gmail" | "scan";
 export interface SetupCheck {
@@ -19,32 +25,49 @@ export interface SetupCheck {
 }
 export interface SetupStep {
   id: SetupStepId;
-  done: boolean;
+  done: boolean; // every required check passes
   required: boolean;
   checks: SetupCheck[];
 }
 export interface SetupResult {
   steps: SetupStep[];
-  remaining: number;
+  remaining: number; // required steps not done
   redirectUri: string;
-  localConfig: string;
+  localConfig: string; // where the machine's own settings are written
 }
 
-const onHarness = (h: HarnessId) => MODEL_STAGES.some(stage => harnessOf(config.models[stage] ?? null) === h);
+// Whether any stage's model, or a fallback of one, runs on harness `h`.
+const onHarness = (h: HarnessId) => MODEL_STAGES.some(stage => stageModels(stage).some(model => harnessOf(model) === h));
 
-const PROGRAMS: { name: string; purpose: string; required: () => boolean }[] = [
+const WINDOWS = process.platform === "win32";
+
+// The programs the app starts, as the service's PATH finds them (Chrome also where Windows installs it).
+// Windows has no virtual displays: Chrome is a window on the desktop, with no live view to serve.
+const PROGRAMS: { name: string; purpose: string; required: () => boolean; found?: () => boolean }[] = [
   { name: "omp", purpose: "Runs the agents on omp's models", required: () => onHarness("omp") },
   { name: "claude", purpose: "Runs the agents on Claude Code's models (claude-code/…)", required: () => onHarness("claude-code") },
-  { name: "npx", purpose: "Starts Playwright's browser tools for a Claude Code fill", required: () => harnessOf(config.models.fill) === "claude-code" },
+  {
+    name: "codex",
+    purpose: "Runs the agents on Codex's models (codex/…); the Codex desktop app's CLI also counts",
+    required: () => onHarness("codex"),
+    found: () => !!codexBinary(),
+  },
+  {
+    name: "agy",
+    purpose: "Runs the agents on Google's Antigravity CLI (antigravity/…); sign in by running agy once",
+    required: () => onHarness("antigravity"),
+    found: () => !!agyBinary(),
+  },
+  { name: "npx", purpose: "Starts Playwright's browser tools for a Claude Code, Codex or agy fill", required: () => stageModels("fill").some(usesPlaywright) },
   { name: "typst", purpose: "Compiles the stock and tailored resumes", required: () => true },
-  { name: "google-chrome", purpose: "The browsers applications are filled in", required: () => true },
-  { name: "Xvfb", purpose: "Virtual displays for the browsers", required: () => true },
+  { name: WINDOWS ? "chrome" : "google-chrome", purpose: "The browsers applications are filled in", required: () => true, found: () => !!chromeBinary() },
+  { name: "Xvfb", purpose: "Virtual displays for the browsers", required: () => !WINDOWS },
   { name: "pdfinfo", purpose: "Resume page counts (poppler-utils)", required: () => true },
   { name: "pdftoppm", purpose: "Resume previews (poppler-utils)", required: () => true },
   { name: "pdftotext", purpose: "Reading uploaded PDFs and the resume journal (poppler-utils)", required: () => true },
   { name: "git", purpose: "The resume diff on a job's page", required: () => true },
-  { name: "x11vnc", purpose: "The live view of a browser", required: () => config.chrome.vncPort > 0 },
-  { name: "websockify", purpose: "The live view of a browser, in a web page", required: () => config.chrome.vncPort > 0 },
+  { name: "x11vnc", purpose: "The live view of a browser", required: () => !WINDOWS && config.chrome.vncPort > 0 },
+  { name: "websockify", purpose: "The live view of a browser, in a web page", required: () => !WINDOWS && config.chrome.vncPort > 0 },
   { name: "tailscale", purpose: "Optional: publishing the app to your tailnet", required: () => false },
 ];
 
@@ -59,12 +82,15 @@ const step = (id: SetupStepId, checks: SetupCheck[], required = true): SetupStep
 function tools() {
   return step(
     "tools",
-    PROGRAMS.map(p => check(p.name, p.name, !!Bun.which(p.name), p.purpose, p.required())),
+    PROGRAMS.map(p => check(p.name, p.name, p.found ? p.found() : !!Bun.which(p.name), p.purpose, p.required())),
   );
 }
 
+// A stage's model is known when its harness lists it under that exact name. omp also matches names
+// loosely ("opus"), and Claude Code, Codex and agy take any full model name, so an unlisted name is a
+// warning, not a failure.
 function models(catalog: ModelCatalog | null) {
-  if (!catalog) return step("models", [check("catalog", "Model provider", false, "Checking what omp and Claude Code can reach…", false)]);
+  if (!catalog) return step("models", [check("catalog", "Model provider", false, "Checking what omp, Claude Code, Codex and agy can reach…", false)]);
   const known = new Set(catalog.models.flatMap(m => [m.selector, m.selector.slice(m.provider.length + 1)]));
   const reachable = catalog.models.length > 0;
   const harness = (h: HarnessId, label: string) => {
@@ -79,13 +105,15 @@ function models(catalog: ModelCatalog | null) {
       reachable,
       reachable
         ? `${catalog.models.length} models from ${new Set(catalog.models.map(m => m.provider)).size} providers`
-        : Object.values(catalog.errors).join("; ") || "No models listed: log in to omp or Claude Code",
+        : Object.values(catalog.errors).join("; ") || "No models listed: log in to omp, Claude Code, Codex or agy",
     ),
     harness("omp", "omp"),
     harness("claude-code", "Claude Code"),
+    harness("codex", "Codex"),
+    harness("antigravity", "Antigravity (agy)"),
     ...MODEL_STAGES.map(stage => {
       const model = config.models[stage] ?? null;
-      const ok = model === null || !reachable || known.has(model) || harnessOf(model) === "claude-code";
+      const ok = model === null || !reachable || known.has(model) || harnessOf(model) !== "omp";
       return check(`stage.${stage}`, stage, ok, model === null ? "omp's default model" : ok ? model : `${model} is not in omp's list`, false);
     }),
   ]);
@@ -127,6 +155,7 @@ function resume() {
   ]);
 }
 
+// companies.yml runs to thousands of lines and the summary asks on every change: counted once per version of the file.
 let boards: { stamp: string; count: number } | null = null;
 function boardCount() {
   const file = statSync(join(PROFILE, "companies.yml"), { throwIfNoEntry: false });
@@ -135,7 +164,9 @@ function boardCount() {
     let count = 0;
     try {
       count = loadCompanies().length;
-    } catch {}
+    } catch {
+      // an unreadable file shows as no boards
+    }
     boards = { stamp, count };
   }
   return boards.count;
@@ -169,6 +200,7 @@ function scan() {
   return step("scan", [check("scan", "First scan", !!last, last ? `Last scan ${last}` : "Not run yet")], false);
 }
 
+// `catalog` null: the model list has not been read yet (the summary never waits for it).
 export function setupStatus(catalog: ModelCatalog | null): SetupResult {
   const steps = [tools(), models(catalog), machine(), resume(), profile(), mail(), scan()];
   return {

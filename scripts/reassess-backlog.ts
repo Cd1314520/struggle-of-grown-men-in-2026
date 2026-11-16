@@ -145,7 +145,9 @@ export function runReassessment(options: { apply?: boolean; dbPath?: string; sil
           const filtered = selectAndFilter(db);
 
           if (filtered.eligibleJobs.length > 0) {
-            const updateStmt = db.prepare(`
+            // query(), not prepare(): close() finalizes the statements it caches, and on Windows an
+            // unfinalized statement keeps the file open after close.
+            const updateStmt = db.query(`
           UPDATE jobs
           SET status = 'triaged',
               score = NULL,
@@ -159,7 +161,7 @@ export function runReassessment(options: { apply?: boolean; dbPath?: string; sil
               updated_at = datetime('now')
           WHERE id = ? AND status = ?
         `);
-            const logEventStmt = db.prepare(`
+            const logEventStmt = db.query(`
           INSERT INTO events (job_id, worker, kind, message)
           VALUES (?, 'migration', 'migration', 'Requeued old assessed job for fresh practice prep')
         `);

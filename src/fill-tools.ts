@@ -1,4 +1,9 @@
+// The host tools a fill worker is given. Each one acts for the session it was built for and for
+// nothing else: once that session no longer owns the application, every tool refuses.
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { newPassword, normalizeTenantDomain, resolveAccount, saveResetPassword } from "./accounts";
+import { config, jobDir, sendsOwnLetter } from "./config";
 import { CAUSE_GUIDE, recordBlocker, WORKER_CAUSES } from "./blockers";
 import { connectTab } from "./cdp-tab";
 import type { JobBrowser } from "./chrome";
@@ -27,6 +32,8 @@ import {
   QUESTION_REASONS,
   resolveAmbiguityWithEvidence,
   type AmbiguityEvidence,
+  approvedCoverLetter,
+  saveCoverLetter,
   type GateInput,
 } from "./questions";
 import { to } from "./status";
@@ -46,10 +53,12 @@ export interface FillContext {
   job: Job;
   session: FillSession;
   mailbox: string;
+  // A verification worker only finds out whether an authorized submit went through; it never submits.
   isVerification: boolean;
   jobBrowser: JobBrowser;
 }
 
+// Settles an ambiguous submit from what the verification worker observed, or parks it again.
 async function verifyStatus(rt: FillRuntime, ctx: FillContext, args: ToolArgs): Promise<string> {
   const { job, session, isVerification } = ctx;
   if (!isVerification) return "ERROR: verify_status is only available during verification mode.";
@@ -108,6 +117,7 @@ async function verifyStatus(rt: FillRuntime, ctx: FillContext, args: ToolArgs): 
   return "Recorded: Ambiguity resolved. Verified draft queued for normal fill with fresh confirm_submit required.";
 }
 
+// What a form may require that the candidate does not give, so the application is dropped instead of parked.
 const SKIPPED_FOR = {
   cover_letter: "a cover letter",
   references: "references",
@@ -116,16 +126,27 @@ const SKIPPED_FOR = {
   phone_code: "a code sent to the candidate's phone",
   personal_login: "a personal account the candidate must sign in to",
   hcaptcha: "an hCaptcha this machine cannot pass",
+  coursework: "completed coursework the candidate does not have",
 };
 const SKIP_GUIDE =
   "What the form requires. cover_letter and references: as the task says. " +
   "recording: a video or audio recording of the candidate. " +
-  "own_work: a portfolio file, work sample or take-home the candidate has not supplied, or an answer the employer says must be written without AI. " +
+  "own_work: a portfolio file, work sample or take-home the candidate has not supplied, or an answer the employer says must be written without AI that the candidate has not written (one in resumeContext.answers or the answer bank is theirs: enter it). " +
   "phone_code: a code texted or phoned to the candidate, or an authenticator app, with no email alternative. " +
   "personal_login: signing in to a personal account you have no credentials for (Google, LinkedIn, Microsoft, Apple). " +
-  "hcaptcha: an hCaptcha that rejected every honest attempt allowed, or a form on jobs.lever.co.";
+  "hcaptcha: an hCaptcha that rejected every honest attempt allowed, or a form on jobs.lever.co. " +
+  "coursework: completed coursework the form makes a condition of applying and the answer bank says the candidate lacks.";
 const SKIPPED_AFTER_SUBMIT = ["own_work", "phone_code", "hcaptcha"];
 
+// Why a cover letter draft cannot go to the candidate as it is, or null.
+export function coverLetterProblem(draft: string): string | null {
+  const words = draft.split(/\s+/).filter(Boolean).length;
+  if (words < 60) return `the draft has ${words} words; write a complete letter.`;
+  if (words > 250) return `the draft has ${words} words; keep it under 250.`;
+  if (/[\u2013\u2014]/.test(draft)) return "the draft uses an em or en dash; the writing rules forbid them.";
+  return null;
+}
+// What stopped the application, so stops can be counted and looked at again by cause.
 const causeParam = { type: "string", enum: WORKER_CAUSES, description: CAUSE_GUIDE };
 
 const WHY_GUIDE =
@@ -133,7 +154,7 @@ const WHY_GUIDE =
   "agreement: an agreement or acknowledgement out of the ordinary, outside the terms rule. " +
   "fact_missing: a fact about the candidate that is in neither the candidate details nor the answer bank. " +
   "skill_not_on_resume: a skill, tool or experience question you cannot settle from the resume; rare, since these are answered from the resume. " +
-  "free_text: a free-text question you cannot answer with a grounded, honest answer from the resume, the job description and the candidate details. " +
+  "free_text: a free-text question you cannot answer with a grounded, honest answer from the resume, the job description and the candidate details, or one the task says the candidate writes themselves. " +
   "sensitive_id: a Social Security number, date of birth or other ID number. " +
   "history_detail: employment or education detail the resume does not give, such as supervisors, an employer's phone number or exact dates. " +
   "other: none of these.";
@@ -262,6 +283,7 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
         const requires = arg.oneOf(args, "requires", Object.keys(SKIPPED_FOR) as (keyof typeof SKIPPED_FOR)[]);
         const refused = fillPhase(job.id) === "submitting" && SKIPPED_AFTER_SUBMIT.includes(requires);
         if (isVerification || (isSubmitting(job.id) && !refused)) return "ERROR: an authorized or ambiguous submission cannot be skipped; report it as usual.";
+        if (requires === "cover_letter" && config.coverLetters === "draft") return "ERROR: draft the letter with cover_letter instead of skipping.";
         const skipped = db.transaction(() => {
           if (!moveJob(job.id, "filling", to.skipped(`requires ${SKIPPED_FOR[requires]}: ${arg.str(args, "note")}`), { quiet: true })) return false;
           cancelJobGates(job.id);
@@ -274,6 +296,46 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
         return "Recorded: application skipped. Stop now.";
       },
     },
+    ...(config.coverLetters === "draft" && {
+      cover_letter: {
+        description:
+          "The form requires a cover letter. Returns the letter to enter for this application when there is one: the one the candidate approved, or your own draft where the task says it goes in without waiting. Otherwise parks the application on your draft for the candidate to edit and approve, and terminates this worker.",
+        parameters: schema({
+          field: S.str("The cover letter field's label, and whether it is a text box or an upload"),
+          draft: S.str("Your complete draft letter, under 250 words"),
+          ...navigationFields,
+        }),
+        handler: async args => {
+          if (isVerification || isSubmitting(job.id)) return "ERROR: an authorized or ambiguous submission cannot park on a cover letter.";
+          const approved = approvedCoverLetter(job.id);
+          if (approved !== null)
+            return `The candidate approved this letter (also saved as cover_letter.txt in this application's folder). Enter it exactly as written:\n\n${approved}`;
+          const draft = arg.str(args, "draft").trim();
+          const problem = coverLetterProblem(draft);
+          if (problem) return `ERROR: ${problem} Rewrite the draft and call again.`;
+          if (!ownsFill(rt, session)) throw new Error("stale fill worker");
+          const input: GateInput = {
+            kind: "cover_letter",
+            text: `Cover letter: ${arg.str(args, "field")}`,
+            context: `${job.company}, ${job.title}`,
+            options: [draft],
+          };
+          // The candidate writes only the letters of the jobs they rate highest; this one goes in as drafted.
+          if (sendsOwnLetter(job.score)) {
+            saveCoverLetter(job.id, input, draft);
+            writeFileSync(join(jobDir(job.id), "cover_letter.txt"), draft + "\n");
+            logEvent(
+              "auto",
+              `Cover letter written by the agent and entered without waiting for review (score ${job.score ?? "none"}): ${draft}`,
+              job.id,
+              "fill",
+            );
+            return `Recorded (also saved as cover_letter.txt in this application's folder). Enter it exactly as written:\n\n${draft}`;
+          }
+          return parkFill(rt, session, input, await checkpointFrom(rt, session, args));
+        },
+      },
+    }),
     confirm_submit: {
       description: "After re-observing all entered fields, authorize the one final click or durably park for review.",
       parameters: schema({ summary: S.str("Exact final entered values, every non-trivial answer and free text verbatim"), ...navigationFields }),
@@ -395,6 +457,8 @@ export function fillTools(rt: FillRuntime, ctx: FillContext): Record<string, Hos
   return tools;
 }
 
+// The prefill script (src/prefill.ts), run by the app on the application's tab, for a harness that has
+// no JavaScript session to run it in itself (Claude Code). `factsPath` is what it fills from.
 export function prefillTool(rt: FillRuntime, ctx: FillContext, factsPath: string): HostTool {
   const looked = new Set<string>();
   return {

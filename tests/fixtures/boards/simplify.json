@@ -1,0 +1,95 @@
+[
+ {
+  "source": "Simplify",
+  "category": "Software",
+  "company_name": "Axon",
+  "id": "8a9e6891-293e-40a9-b0cc-86a38defec9c",
+  "title": "Software Engineer Intern",
+  "active": true,
+  "terms": [
+   "Summer 2027"
+  ],
+  "date_updated": 1793323853,
+  "date_posted": 1793320794,
+  "url": "https://job-boards.greenhouse.io/axontalentcommunity/jobs/8037922003?utm_source=Simplify&ref=Simplify",
+  "locations": [
+   "Seattle, WA",
+   "Arlington County, Arlington, VA"
+  ],
+  "company_url": "https://simplify.jobs/c/Axon",
+  "is_visible": true,
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's"
+  ]
+ },
+ {
+  "source": "Simplify",
+  "category": "Hardware",
+  "company_name": "ASML",
+  "id": "17267928-46c8-4fc2-b987-5b361fefad93",
+  "title": "Optical Engineer Co-op Intern",
+  "active": true,
+  "terms": [
+   "Summer 2026"
+  ],
+  "date_updated": 1793324183,
+  "date_posted": 1793232000,
+  "url": "https://asml.wd3.myworkdayjobs.com/asmlext1/job/Wilton-CT-USA/Co-Op---Optical-Engineer--Internship-_J-00355324",
+  "locations": [
+   "Wilton, CT"
+  ],
+  "company_url": "https://simplify.jobs/c/ASML",
+  "is_visible": true,
+  "sponsorship": "Other",
+  "degrees": [
+   "Bachelor's",
+   "Master's",
+   "PhD"
+  ]
+ },
+ {
+  "source": "Simplify",
+  "category": "Product",
+  "company_name": "Insomniac",
+  "id": "57b55222-62e9-4a96-a8d7-1df7cf66aafe",
+  "title": "Paid Summer Music Group Publishing Intern",
+  "active": false,
+  "terms": [
+   "Summer 2026"
+  ],
+  "date_updated": 1772592825,
+  "date_posted": 1772592825,
+  "url": "https://livenation.wd503.myworkdayjobs.com/InsomniacExternalSite/job/Calabasas-CA-USA/Paid-Summer-Music-Group-Publishing-Intern_JR-86642",
+  "locations": [
+   "Calabasas, CA"
+  ],
+  "company_url": "https://simplify.jobs/c/Insomniac",
+  "is_visible": true,
+  "sponsorship": "Other",
+  "degrees": []
+ },
+ {
+  "date_updated": 1774263255,
+  "sponsorship": "Other",
+  "active": true,
+  "degrees": [
+   "Bachelor's"
+  ],
+  "url": "https://job-boards.greenhouse.io/genevatrading/jobs/5085231007",
+  "company_name": "Geneva Trading",
+  "title": "Junior Software Engineer",
+  "locations": [
+   "Chicago, IL"
+  ],
+  "terms": [
+   "Summer 2026"
+  ],
+  "category": "Software Engineering",
+  "source": "AlmondCroffle",
+  "id": "58821bd1-bd22-45bf-82f0-c375329b1523",
+  "date_posted": 1774263048,
+  "company_url": "",
+  "is_visible": false
+ }
+]

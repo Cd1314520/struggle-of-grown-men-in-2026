@@ -9,6 +9,7 @@ export const PROFILE_DESC: Record<string, string> = {
   "personal.yml": "Contact details and the fields every application form asks for.",
   "companies.yml": "The companies whose job boards each scan reads.",
   "employers.yml": "Employers you have settled by hand: the ones you most want, and the ones that are fine to practise on.",
+  "referral.yml": "The true facts referral messages are drafted from, and how the daily list of who to contact is chosen. Only the Referrals page reads it.",
 };
 export const PLACEHOLDER = "TODO-FILL";
 
