@@ -517,6 +517,28 @@ function interviewBriefs(db: Database) {
   ]);
 }
 
+function siteBlocks(db: Database) {
+  runEach(db, [
+    `CREATE TABLE blockers_new (
+      id INTEGER PRIMARY KEY,
+      job_id INTEGER NOT NULL,
+      cause TEXT NOT NULL CHECK (cause IN ('site_down', 'blocked', 'login', 'captcha', 'email_code', 'no_form', 'needs_you', 'browser', 'no_response', 'unknown', 'other')),
+      detail TEXT NOT NULL,
+      at TEXT NOT NULL DEFAULT (datetime('now')),
+      gate_id TEXT
+    )`,
+    "INSERT INTO blockers_new (id, job_id, cause, detail, at, gate_id) SELECT id, job_id, cause, detail, at, gate_id FROM blockers",
+    "DROP TRIGGER jobs_blockers_forgotten",
+    "DROP TABLE blockers",
+    "ALTER TABLE blockers_new RENAME TO blockers",
+    "CREATE INDEX blockers_job ON blockers(job_id, id)",
+    `CREATE TRIGGER jobs_blockers_forgotten AFTER DELETE ON jobs
+    BEGIN
+      DELETE FROM blockers WHERE job_id = OLD.id;
+    END`,
+  ]);
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: "baseline", up: baseline },
   { version: 2, name: "status history", up: statusHistory },
@@ -525,10 +547,11 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 5, name: "application steps", up: applicationSteps },
   { version: 6, name: "blockers", up: blockers },
   { version: 7, name: "answer bank", up: answerBank },
-  { version: 8, name: "referrals", up: referrals },
-  { version: 9, name: "gate reasons", up: gateReasons },
-  { version: 10, name: "state machines", up: stateMachines },
-  { version: 11, name: "interview briefs", up: interviewBriefs },
+  { version: 8, name: "gate reasons", up: gateReasons },
+  { version: 9, name: "state machines", up: stateMachines },
+  { version: 10, name: "interview briefs", up: interviewBriefs },
+  { version: 11, name: "site blocks", up: siteBlocks },
+  { version: 12, name: "referrals", up: referrals },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

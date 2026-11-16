@@ -272,7 +272,7 @@ describe("schema migrations", () => {
     });
   });
 
-  describe("referrals (version 8)", () => {
+  describe("referrals (version 12)", () => {
     it("holds contacts to their stages and keeps a contact when its application is folded away", () => {
       const db = memory();
       migrate(db);
@@ -342,32 +342,32 @@ describe("schema migrations", () => {
     });
   });
 
-  describe("gate reasons (version 9)", () => {
+  describe("gate reasons (version 8)", () => {
     it("adds the reason and the missing detail to gates and queued questions, empty for the old ones", () => {
       const db = memory();
-      migrate(db, MIGRATIONS.slice(0, 8));
+      migrate(db, MIGRATIONS.slice(0, 7));
       db.run(`
         INSERT INTO jobs (id, url, source, company, title, status) VALUES (1, 'https://a.example/1', 'test', 'Acme', 'Engineer', 'needs_input');
         INSERT INTO question_gates (id, job_id, kind, group_key, match_key, employer, text, context, options, state, created_at)
           VALUES ('g1', 1, 'question', 'job:1:m1', 'm1', 'Acme', 'Relocate?', '', '[]', 'open', 'a');
         INSERT INTO queued_questions (job_id, match_key, text, context, options, queued_at) VALUES (1, 'm1', 'Relocate?', '', '[]', 'a');
       `);
-      expect(migrate(db, MIGRATIONS.slice(0, 9)).map(m => m.name)).toEqual(["gate reasons"]);
+      expect(migrate(db, MIGRATIONS.slice(0, 8)).map(m => m.name)).toEqual(["gate reasons"]);
       expect(db.query("SELECT why, missing FROM question_gates").all()).toEqual([{ why: null, missing: null }]);
       expect(db.query("SELECT why, missing FROM queued_questions").all()).toEqual([{ why: null, missing: null }]);
     });
   });
 
-  describe("state machines (version 10)", () => {
+  describe("state machines (version 9)", () => {
     const jobRow = (id: number, status: string, note: string | null = null) =>
       `(${id}, 'https://a.example/${id}', 'test', 'Acme', 'Job ${id}', '${status}', ${note === null ? "NULL" : `'${note}'`})`;
     const beforeStateMachines = () => {
       const db = memory();
-      migrate(db, MIGRATIONS.slice(0, 9));
+      migrate(db, MIGRATIONS.slice(0, 8));
       return db;
     };
     const upgrade = (db: Database) => {
-      expect(migrate(db, MIGRATIONS.slice(0, 10)).map(m => m.name)).toEqual(["state machines"]);
+      expect(migrate(db, MIGRATIONS.slice(0, 9)).map(m => m.name)).toEqual(["state machines"]);
     };
 
     it("maps each combination of the old fill flags to a phase", () => {

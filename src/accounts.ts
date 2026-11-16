@@ -20,7 +20,7 @@ const QUERY_TENANT_HOSTS: [RegExp, string][] = [
   [/^www\d*\.jobdiva\.com$/, "a"],
 ];
 
-function normalizeTenantDomain(urlOrDomain: string): string {
+export function normalizeTenantDomain(urlOrDomain: string): string {
   if (typeof urlOrDomain !== "string") {
     throw new Error("Domain must be a non-empty string");
   }
@@ -107,13 +107,25 @@ function passwordLength(rule: PasswordRule): number {
   return Math.min(Math.max(DEFAULT_LENGTH, min), max);
 }
 
-function newPassword(rule: PasswordRule): string {
+export function newPassword(rule: PasswordRule = {}): string {
   const length = passwordLength(rule) - SUFFIX.length;
   return randomBytes(length).toString("base64url").replace(/[-_]/g, "x").slice(0, length) + SUFFIX;
 }
 
 const breaksRule = (password: string, rule: PasswordRule) =>
   (rule.min !== undefined && password.length < rule.min) || (rule.max !== undefined && password.length > rule.max);
+
+export function saveResetPassword(domain: string, mailbox: string, password: string): string {
+  const existing = db.query<{ email: string }, [string]>("SELECT email FROM accounts WHERE domain = ?").get(domain);
+  const email = existing?.email ?? mailbox.trim();
+  if (!email) return JSON.stringify({ saved: false, error: "no_mailbox", message: "No application mailbox configured; cannot save the login." });
+  db.query("INSERT INTO accounts (domain, email, password) VALUES (?, ?, ?) ON CONFLICT(domain) DO UPDATE SET password = excluded.password").run(
+    domain,
+    email,
+    password,
+  );
+  return JSON.stringify({ saved: true, domain, email });
+}
 
 export function resolveAccount(domain: string, mailbox: string, allowCreate: boolean, rule: PasswordRule = {}): string {
   let key: string;
