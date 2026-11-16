@@ -125,6 +125,21 @@ describe("schema migrations", () => {
     expect(`version ${schemaVersion(db)}\n\n${definitions.join(";\n\n")};\n`).toMatchSnapshot();
   });
 
+  it("upgrades a database from Chris's fork, where referrals was migration 8", () => {
+    // The fork's version 11: everything up to interview briefs (10 here), plus the referral tables.
+    const fork = memory();
+    migrate(fork, MIGRATIONS.slice(0, 10));
+    MIGRATIONS[11]?.up(fork);
+    fork.run("INSERT INTO referral_imports (kind, file, fingerprint) VALUES ('internscouter', 'outreach.json', 'kept')");
+    fork.run("PRAGMA user_version = 11");
+    expect(migrate(fork).map(m => m.name)).toEqual(["site blocks", "referrals"]);
+    expect(schemaVersion(fork)).toBe(SCHEMA_VERSION);
+    const fresh = memory();
+    migrate(fresh);
+    expect(shape(fork)).toEqual(shape(fresh));
+    expect(fork.query("SELECT fingerprint FROM referral_imports").all()).toEqual([{ fingerprint: "kept" }]);
+  });
+
   it("does nothing the second time", () => {
     const db = memory();
     migrate(db);

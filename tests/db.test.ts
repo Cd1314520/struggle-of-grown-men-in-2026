@@ -844,8 +844,14 @@ describe("where SQL lives", () => {
     // Looks at every template literal that starts like SQL, wherever it is used, so a statement built
     // in a variable first is seen too. It cannot see SQL assembled with + or held in plain strings.
     // The only text ever spliced in: a checked column list, a migration's own column definition, and
-    // two PRAGMA values, none of which SQLite can take as parameters.
-    const allowed = new Set(["src/db.ts ${sets}", "src/schema.ts ${definition}", "src/schema.ts ${next.version}", "src/schema.ts ${BUSY_TIMEOUT_MS}"]);
+    // three PRAGMA values, none of which SQLite can take as parameters.
+    const allowed = new Set([
+      "src/db.ts ${sets}",
+      "src/schema.ts ${definition}",
+      "src/schema.ts ${next.version}",
+      "src/schema.ts ${version - 1}",
+      "src/schema.ts ${BUSY_TIMEOUT_MS}",
+    ]);
     const sqlStart = /^\s*(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|PRAGMA|WITH|VACUUM)\b/;
     const holes = (text: string) =>
       [...text.matchAll(/`([^`]*)`/g)].flatMap(match => (sqlStart.test(match[1] ?? "") ? (match[1]?.match(/\$\{[^}]*\}/g) ?? []) : []));

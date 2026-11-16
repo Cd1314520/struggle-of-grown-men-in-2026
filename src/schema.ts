@@ -349,6 +349,8 @@ function answerBank(db: Database) {
 // companies and people the daily list suggested on which day, and each file read. Nothing here is ever
 // sent anywhere: the owner sends every message by hand.
 function referrals(db: Database) {
+  // Made already, under the fork's numbering (renumberForkReferrals).
+  if (hasTable(db, "referral_contacts")) return;
   runEach(db, [
     `CREATE TABLE referral_contacts (
       id INTEGER PRIMARY KEY,
@@ -558,10 +560,23 @@ export const SCHEMA_VERSION = MIGRATIONS.length;
 
 export const schemaVersion = (db: Database) => db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? 0;
 
+const hasTable = (db: Database, name: string) => db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== null;
+
+// Databases from Chris's fork (Cd1314520) ran "referrals" as migration 8, so its gate reasons, state
+// machines and interview briefs were 9 to 11. Here referrals is 12, after site blocks (11). A database at 8
+// to 11 that already has the referral tables is this numbering's version one lower, plus referrals: step it
+// back, so the migrations it lacks (site blocks) run, and referrals finds its tables in place. Below 12 a
+// database numbered here never has those tables, so nothing else is touched.
+function renumberForkReferrals(db: Database) {
+  const version = schemaVersion(db);
+  if (version >= 8 && version <= 11 && hasTable(db, "referral_contacts")) db.run(`PRAGMA user_version = ${version - 1}`);
+}
+
 export function migrate(db: Database, migrations: readonly Migration[] = MIGRATIONS): Migration[] {
   migrations.forEach((migration, index) => {
     if (migration.version !== index + 1) throw new Error(`Migration "${migration.name}" must be version ${index + 1}, not ${migration.version}`);
   });
+  if (migrations === MIGRATIONS) renumberForkReferrals(db);
   const latest = migrations.length;
   const tooNew = (version: number) =>
     new Error(`Database schema is version ${version}, but this code only knows up to version ${latest}. Run the newer code, or restore a backup.`);
