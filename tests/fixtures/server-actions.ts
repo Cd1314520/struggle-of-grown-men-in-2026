@@ -365,6 +365,54 @@ if (scenario === "action-guards") {
   assert.equal((await state()).contacts[0]?.notes, "met at the fair");
   assert.equal((await post(`/api/referrals/contacts/${id}`, { op: "remove" })).status, 200);
   assert.deepEqual((await state()).contacts, []);
+} else if (scenario === "early-outreach") {
+  const { leadsStore } = await import("../../src/outreach-scout");
+  const call = async (path: string, init?: RequestInit) => {
+    const res = await handle(new Request(`${BASE}${path}`, init));
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  };
+  const post = (path: string, body: unknown) => call(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  type State = import("../../src/api-types").OutreachState;
+  const state = async () => (await call("/api/outreach")).body as unknown as State;
+
+  assert.deepEqual((await state()).today, []);
+  const lead = leadsStore.addLead({
+    kind: "seed",
+    company: "Acme Power",
+    domain: "acme.com",
+    source_url: "https://news.example.com/acme",
+    source_title: "Acme Power raises a seed round",
+    posted_at: new Date().toISOString(),
+    likes: null,
+    what_they_do: "Chargers",
+    why_fit: "Power electronics",
+    score: 80,
+  });
+  assert.ok(lead);
+  const person = leadsStore.addPerson({
+    lead_id: lead.id,
+    name: "Sam Lee",
+    role: "CEO",
+    profile_url: null,
+    email: "sam@acme.com",
+    email_source: "public",
+    email_confidence: "high",
+    subject: "EE intern",
+    body: "Hi Sam,\nshort.",
+    drafted_on: (await state()).day,
+  });
+  assert.ok(person);
+  assert.equal((await state()).today[0]?.person.id, person.id);
+  assert.equal((await post(`/api/outreach/people/${person.id}`, { stage: "ghosted" })).status, 400);
+  assert.equal((await post("/api/outreach/people/999", { stage: "sent" })).status, 404);
+  assert.equal((await post(`/api/outreach/people/${person.id}`, { stage: "sent" })).status, 200);
+  const after = await state();
+  assert.equal(after.sentToday, 1);
+  assert.equal(after.waiting[0]?.person.id, person.id);
+  // Mail without a connected mailbox: nothing is searched.
+  assert.deepEqual((await post("/api/outreach/mail", {})).body, { checked: 0, replied: 0 });
+  assert.equal((await post("/api/outreach/leads/999/drop", {})).status, 404);
+  assert.equal((await post(`/api/outreach/leads/${lead.id}/drop`, {})).status, 200);
 } else {
   throw new Error(`unknown scenario: ${String(scenario)}`);
 }

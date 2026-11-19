@@ -7,6 +7,7 @@ const PAGES = [
   "pipeline",
   "applications",
   "referrals",
+  "outreach",
   "archive",
   "activity",
   "resume",

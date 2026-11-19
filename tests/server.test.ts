@@ -39,4 +39,5 @@ describe("job actions over HTTP", () => {
   it("changes the steps of a sent application, and records the outcomes the user knows of", () => runScenario("steps"));
   it("refuses requests that come from another site or arrive under another host name", () => runScenario("other-sites"));
   it("keeps referral contacts, drafts from referral.yml, and reads an uploaded LinkedIn export", () => runScenario("referrals"));
+  it("serves the early outreach page and takes the owner's changes", () => runScenario("early-outreach"));
 });

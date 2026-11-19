@@ -91,7 +91,7 @@ const CONFIG = shape(
     // import was added later: a config.yml from before it still loads, and the resume import uses omp's default.
     models: shape(
       { triage: model, discover: model, locate: model, screen: model, prep: model, fill: model, track: model, recheck: model },
-      { import: model, interview: model, fallback: shape({}, Object.fromEntries(STAGES.map(stage => [stage, fallbacks]))) },
+      { import: model, interview: model, outreach: model, fallback: shape({}, Object.fromEntries(STAGES.map(stage => [stage, fallbacks]))) },
     ),
     schedule: shape({ scanMinutes: amount(), discoverMinutes: amount(), trackMinutes: amount() }),
     concurrency: shape({ prep: count() }, { fill: count(1) }),
@@ -109,6 +109,20 @@ const CONFIG = shape(
   {
     publicUrl: orNull(url),
     quietDays: count(1),
+    outreach: shape(
+      {},
+      {
+        minutes: amount(),
+        perDay: count(1),
+        leadsPerRun: count(1),
+        minScore: amount(),
+        followUpDays: count(1),
+        resuggestDays: count(),
+        hunterPerDay: count(),
+        sendFrom: orNull(matching(/^\S+@\S+$/, "an email address")),
+        hunterKey: orNull(text),
+      },
+    ),
     vncUrl: orNull(url),
     mailbox: orNull(matching(/^\S+@\S+$/, "an email address")),
     coverLetters: oneOf("skip", "draft"),

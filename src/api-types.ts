@@ -7,6 +7,7 @@ import type { ImportState } from "./resume-import";
 import type { StockResume } from "./resume";
 import type { FillCheckpoint, Gate, QuestionGroup } from "./questions";
 import type { InterviewPrep } from "./interview";
+import type { Lead, Person } from "./leads";
 import type { NextStep, Step } from "./steps";
 import type { Drafts } from "./referral-drafts";
 import type { ContactStep, PickKind } from "./referral-plan";
@@ -195,3 +196,22 @@ export interface ReferralImportResult {
   updates: number;
 }
 export type { AtsReport, Dimension, Keyword } from "./ats-score";
+
+// The Early outreach page (src/outreach-leads-api.ts).
+export interface OutreachItem {
+  person: Person;
+  lead: Lead;
+}
+export interface OutreachState {
+  day: string;
+  sentToday: number;
+  perDay: number;
+  sendFrom: string | null; // the address the owner sends from, for the page; null: not set
+  gmail: boolean; // replies are noticed only in the connected mailbox
+  today: OutreachItem[]; // drafts to send today, best first
+  followUps: OutreachItem[]; // sent, follow-up due
+  checkFirst: OutreachItem[]; // a guessed address to check before it goes on the list
+  waiting: OutreachItem[]; // drafts beyond today's list, and emails sent with no follow-up due yet
+  replied: OutreachItem[];
+  done: OutreachItem[];
+}

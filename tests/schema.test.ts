@@ -29,6 +29,8 @@ const TABLES = [
   "job_sources",
   "jobs",
   "kv",
+  "outreach_leads",
+  "outreach_people",
   "question_digest_deliveries",
   "question_digest_notified",
   "question_gates",
@@ -132,7 +134,7 @@ describe("schema migrations", () => {
     MIGRATIONS[11]?.up(fork);
     fork.run("INSERT INTO referral_imports (kind, file, fingerprint) VALUES ('internscouter', 'outreach.json', 'kept')");
     fork.run("PRAGMA user_version = 11");
-    expect(migrate(fork).map(m => m.name)).toEqual(["site blocks", "referrals"]);
+    expect(migrate(fork).map(m => m.name)).toEqual(["site blocks", "referrals", "early outreach"]);
     expect(schemaVersion(fork)).toBe(SCHEMA_VERSION);
     const fresh = memory();
     migrate(fresh);

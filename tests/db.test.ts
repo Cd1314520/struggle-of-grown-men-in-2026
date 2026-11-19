@@ -811,6 +811,7 @@ describe("where SQL lives", () => {
     "src/steps.ts",
     "src/blockers.ts",
     "src/referrals.ts",
+    "src/leads.ts",
     "src/stats.ts", // reads only: the Overview's aggregates across jobs and status_changes
   ]);
   // Standalone tools that read a database by path rather than through the app's connection.

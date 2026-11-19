@@ -73,6 +73,8 @@ import { applicationStarted, FILL_STAGE, PARKED, to } from "./status";
 import { trackMailbox } from "./track";
 import { gmailStatus } from "./gmail";
 import { syncReferralMail } from "./outreach";
+import { syncOutreachMail } from "./outreach-leads-api";
+import { closeQuiet, runFollowUps, runScout, shouldFollowUp, shouldScout } from "./outreach-scout";
 import { stepsNeedingBrief } from "./steps";
 
 // The outside world a scheduler acts on. The defaults are the real agent runner and the real browsers.
@@ -383,6 +385,11 @@ export class Scheduler {
     });
   }
 
+  // Early outreach's scout, now (the page's "Find leads now", or the tick when drafts run short).
+  outreach() {
+    return this.exclusive("outreach", () => runScout(this.run));
+  }
+
   locate() {
     return this.exclusive("locate", async () => {
       await locateEmployerPostings(this.run);
@@ -663,6 +670,21 @@ export class Scheduler {
           },
         );
       }
+      // Early outreach replies, read only, every two hours like the referral check.
+      if (gmailStatus().connected && due("last.outreachMail", REFERRAL_MAIL_MINUTES)) {
+        kvSet("last.outreachMail", new Date().toISOString());
+        void syncOutreachMail().catch((err: unknown) => {
+          logEvent("error", `Outreach mail check: ${errorMessage(err)}`);
+        });
+      }
+      // Early outreach: once a day, people followed up with no reply are closed as no response.
+      if (due("last.outreachClose", 24 * 60)) {
+        kvSet("last.outreachClose", new Date().toISOString());
+        closeQuiet();
+      }
+      // Early outreach: the scout when drafts run short, and one follow-up run a day (src/outreach-scout.ts).
+      if (!this.isRunning("outreach") && !profileProblems(["targets.md"]).length && shouldScout()) void this.outreach();
+      if (!this.isRunning("outreach-followup") && shouldFollowUp()) void this.exclusive("outreach-followup", () => runFollowUps(this.run));
       if (!this.isRunning("interview-prep") && stepsNeedingBrief(1).length) void this.interviewPrep();
       retryPassingHandoffs();
       this.pump();

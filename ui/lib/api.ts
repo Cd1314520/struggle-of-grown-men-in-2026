@@ -16,6 +16,7 @@ import type {
   ModelStage,
   ReferralImportResult,
   ReferralsState,
+  OutreachState,
   ResumeState,
   SettingsResult,
   SetupResult,
@@ -103,6 +104,7 @@ export const api = {
   resume: () => request<ResumeState>("/api/resume"),
   settings: () => request<SettingsResult>("/api/settings"),
   referrals: () => request<ReferralsState>("/api/referrals"),
+  outreach: () => request<OutreachState>("/api/outreach"),
 
   // ---- writes. Each shows the server's refusal as a toast and rethrows it.
   jobAction: (id: number, body: { action: string; text?: string; gateId?: string | undefined }) => post(`/api/jobs/${id}/action`, { text: "", ...body }),
@@ -137,6 +139,10 @@ export const api = {
   addContact: (body: Record<string, unknown>) => post<{ id: number }>("/api/referrals/contacts", body),
   changeContact: (id: number, body: Record<string, unknown>) => post(`/api/referrals/contacts/${id}`, body),
   checkReferralMail: () => post<{ checked: number; updates: number }>("/api/referrals/mail", {}),
+  changeOutreachPerson: (id: number, body: Record<string, unknown>) => post(`/api/outreach/people/${id}`, body),
+  dropOutreachLead: (id: number) => post(`/api/outreach/leads/${id}/drop`, {}),
+  runOutreach: () => post("/api/outreach/run", {}),
+  checkOutreachMail: () => post<{ checked: number; replied: number }>("/api/outreach/mail", {}),
   importLinkedInExport: (file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -177,6 +183,7 @@ export const useSettings = () => useQuery({ queryKey: ["settings"], queryFn: api
 export const useModels = () => useQuery({ queryKey: ["models"], queryFn: () => api.models() });
 export const useResume = () => useQuery({ queryKey: ["resume"], queryFn: api.resume });
 export const useReferrals = () => useQuery({ queryKey: ["referrals"], queryFn: api.referrals });
+export const useOutreach = () => useQuery({ queryKey: ["outreach"], queryFn: api.outreach });
 export const useQuestions = () => useQuery({ queryKey: ["questions"], queryFn: api.questions });
 export const useBlockers = () => useQuery({ queryKey: ["blockers"], queryFn: api.blockers });
 export const useProfileFile = (file: string | null) =>

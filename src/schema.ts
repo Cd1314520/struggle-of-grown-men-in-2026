@@ -541,6 +541,53 @@ function siteBlocks(db: Database) {
   ]);
 }
 
+// Early outreach (see leads.ts): companies found through a fresh hiring post, a new listing or a seed round,
+// and the people the owner may email there, each with a draft. Nothing here is ever sent: the owner sends
+// every email by hand and marks it.
+function earlyOutreach(db: Database) {
+  runEach(db, [
+    `CREATE TABLE outreach_leads (
+      id INTEGER PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('post', 'listing', 'seed')),
+      company TEXT NOT NULL,
+      company_key TEXT NOT NULL,
+      domain TEXT NOT NULL DEFAULT '',
+      source_url TEXT NOT NULL UNIQUE,
+      source_title TEXT NOT NULL DEFAULT '',
+      posted_at TEXT NOT NULL,          -- ISO time the post, listing or round appeared
+      likes INTEGER,                    -- NULL: not shown where it was found
+      what_they_do TEXT NOT NULL DEFAULT '',
+      why_fit TEXT NOT NULL DEFAULT '',
+      score INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'active', 'done', 'dropped')),
+      found_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    "CREATE INDEX outreach_leads_company ON outreach_leads(company_key)",
+    `CREATE TABLE outreach_people (
+      id INTEGER PRIMARY KEY,
+      lead_id INTEGER NOT NULL REFERENCES outreach_leads(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT '',
+      profile_url TEXT,
+      email TEXT NOT NULL,              -- lowercased
+      email_source TEXT NOT NULL CHECK (email_source IN ('public', 'hunter', 'guess')),
+      email_confidence TEXT NOT NULL CHECK (email_confidence IN ('high', 'medium', 'low')),
+      promoted INTEGER NOT NULL DEFAULT 0 CHECK (promoted IN (0, 1)),   -- the owner checked a low-confidence address
+      subject TEXT NOT NULL DEFAULT '',
+      body TEXT NOT NULL,
+      followup_body TEXT,
+      stage TEXT NOT NULL DEFAULT 'drafted' CHECK (stage IN ('drafted', 'sent', 'followed_up', 'replied', 'no_response', 'closed')),
+      drafted_on TEXT NOT NULL,         -- days, YYYY-MM-DD, in the owner's time zone
+      sent_on TEXT,
+      followed_up_on TEXT,
+      replied_on TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (lead_id, email)
+    )`,
+    "CREATE INDEX outreach_people_lead ON outreach_people(lead_id)",
+  ]);
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: "baseline", up: baseline },
   { version: 2, name: "status history", up: statusHistory },
@@ -554,6 +601,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 10, name: "interview briefs", up: interviewBriefs },
   { version: 11, name: "site blocks", up: siteBlocks },
   { version: 12, name: "referrals", up: referrals },
+  { version: 13, name: "early outreach", up: earlyOutreach },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

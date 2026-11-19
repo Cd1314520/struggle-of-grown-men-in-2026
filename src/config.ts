@@ -29,6 +29,8 @@ export interface Config {
   models: Record<Exclude<ModelStage, "import" | "interview">, string | null> & {
     import?: string | null;
     interview?: string | null;
+    // Early outreach's scout and follow-ups; absent or null: the discover model (with discover's fallbacks).
+    outreach?: string | null;
     fallback?: Partial<Record<ModelStage, string | string[]>>;
   };
   autoApply?: {
@@ -42,6 +44,19 @@ export interface Config {
   };
   schedule: { scanMinutes: number; discoverMinutes: number; trackMinutes: number };
   quietDays?: number;
+  // Early outreach (docs/outreach.md). minutes: between scout runs, 0 off. perDay: emails on the day's list.
+  // hunterKey and sendFrom belong in config.local.yml.
+  outreach?: {
+    minutes?: number;
+    perDay?: number;
+    leadsPerRun?: number;
+    minScore?: number;
+    followUpDays?: number;
+    resuggestDays?: number;
+    hunterPerDay?: number;
+    sendFrom?: string | null;
+    hunterKey?: string | null;
+  };
   questionDigest?: { enabled: boolean; time: string; timeZone: string };
   // A form that requires a cover letter: "skip" drops the application; "draft" has the fill worker
   // draft one and park it for the owner to edit and approve, whatever `approval` says.

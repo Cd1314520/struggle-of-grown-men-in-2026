@@ -22,6 +22,12 @@ describe("the web UI", () => {
     expect(await css?.text()).toContain("--color-accent");
   }, 30_000);
 
+  it("routes the Early outreach page and names it in the nav", async () => {
+    const js = (await (await serveUi("/assets/app.js"))?.text()) ?? "";
+    expect(js).toContain("/api/outreach");
+    expect(js).toContain("Early outreach");
+  }, 30_000);
+
   it("serves the fonts it ships with", async () => {
     const font = await serveUi("/assets/fonts/inter.woff2");
     expect(font?.headers.get("content-type")).toBe("font/woff2");

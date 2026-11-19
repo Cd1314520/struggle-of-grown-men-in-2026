@@ -94,6 +94,22 @@ schedule:
   discoverMinutes: 0 # off: 1,800+ boards are watched already
   trackMinutes: 120
 
+# Early outreach (docs/outreach.md): a scout finds fresh hiring posts, new startup listings and seed rounds,
+# picks up to three people at each (founders first) and drafts a short email to each. The app never sends
+# anything: you copy each draft into your own mail. The scout runs only while fewer than perDay drafts wait.
+#   sendFrom   the address you send from, for the drafts' sign-off (set it in config.local.yml)
+#   hunterKey  an optional Hunter.io API key for finding addresses (config.local.yml only)
+outreach:
+  minutes: 240 # between scout runs; 0 turns early outreach off
+  perDay: 20 # emails on the day's list
+  leadsPerRun: 8
+  minScore: 60 # the scout's fit score a lead needs
+  followUpDays: 5 # one follow-up, this many days after the first email
+  resuggestDays: 30 # a company emailed is not a new lead again for this long
+  hunterPerDay: 3 # Hunter.io lookups a day, when hunterKey is set
+  sendFrom: null
+  hunterKey: null
+
 # Titles a posting must match to be read at all, as a case-insensitive regular expression: the rest
 # are dropped before triage, at no cost, which matters when the watched boards list far more roles
 # than the targets want (an internship search, say). null: every title goes to triage.

@@ -68,6 +68,7 @@ import { serveUi } from "./ui";
 import { isListView, listJobs } from "./listing";
 import { stats } from "./stats";
 import { addContact, changeContact, importLinkedInExport, jobOptions, referralsState, syncReferralMail } from "./outreach";
+import { changePerson, dropLead, outreachState, syncOutreachMail } from "./outreach-leads-api";
 
 // The app runs unattended and nothing restarts it: an error nobody caught (a socket or pipe that broke
 // when the computer slept, say) is logged with its stack rather than ending the server.
@@ -742,6 +743,31 @@ export function createHandler(scheduler: Scheduler) {
     if (path === "/api/referrals/mail" && req.method === "POST") {
       try {
         return json(await syncReferralMail());
+      } catch (err) {
+        return fail(errorMessage(err), 502);
+      }
+    }
+
+    // Early outreach (src/outreach-leads-api.ts). Nothing here sends anything.
+    if (path === "/api/outreach" && req.method === "GET") return json(outreachState());
+    const personMatch = /^\/api\/outreach\/people\/(\d+)$/.exec(path);
+    if (personMatch && req.method === "POST") {
+      const err = changePerson(Number(personMatch[1]), await body());
+      return err ? fail(err, err === "no such person" ? 404 : 400) : json({ ok: true });
+    }
+    const dropMatch = /^\/api\/outreach\/leads\/(\d+)\/drop$/.exec(path);
+    if (dropMatch && req.method === "POST") {
+      const err = dropLead(Number(dropMatch[1]));
+      return err ? fail(err, 404) : json({ ok: true });
+    }
+    if (path === "/api/outreach/run" && req.method === "POST") {
+      if (scheduler.isRunning("outreach")) return fail("the scout is running already", 409);
+      void scheduler.outreach();
+      return json({ ok: true });
+    }
+    if (path === "/api/outreach/mail" && req.method === "POST") {
+      try {
+        return json(await syncOutreachMail());
       } catch (err) {
         return fail(errorMessage(err), 502);
       }

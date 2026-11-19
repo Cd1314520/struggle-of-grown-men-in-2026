@@ -46,6 +46,12 @@ describe("config.yml", () => {
     expect(withChange(c => ((c["models"] ??= {})["fallback"] = { fill: 3 }))).toEqual(["models.fallback.fill: expected a model or a list of models, got 3"]);
   });
 
+  it("takes an outreach block and refuses a perDay below 1", () => {
+    expect(withChange(c => (c["outreach"] = { minutes: 0, perDay: 20, sendFrom: "sam@example.edu", hunterKey: null }))).toEqual([]);
+    expect(withChange(c => (c["outreach"] = { perDay: -1 }))).toEqual(["outreach.perDay: expected a whole number of at least 1, got -1"]);
+    expect(withChange(c => ((c["models"] ??= {})["outreach"] = "codex/gpt-6.1-terra@low"))).toEqual([]);
+  });
+
   it("takes screen.titles only as a regular expression that compiles, or null", () => {
     expect(withChange(c => (c["screen"] = { titles: String.raw`\b(intern|co-?op)\b` }))).toEqual([]);
     expect(withChange(c => (c["screen"] = { titles: null }))).toEqual([]);

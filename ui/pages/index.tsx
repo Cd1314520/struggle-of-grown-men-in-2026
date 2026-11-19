@@ -4,6 +4,7 @@ import { ActivityPage } from "./activity";
 import { ApplicationsPage } from "./applications";
 import { ArchivePage } from "./archive";
 import { JobPage } from "./job";
+import { OutreachPage } from "./outreach";
 import { OverviewPage } from "./overview";
 import { PipelinePage } from "./pipeline";
 import { ProfilePage } from "./profile";
@@ -21,6 +22,7 @@ export const PAGE_COMPONENTS: Record<Page, ComponentType> = {
   pipeline: PipelinePage,
   applications: ApplicationsPage,
   referrals: ReferralsPage,
+  outreach: OutreachPage,
   archive: ArchivePage,
   activity: ActivityPage,
   resume: ResumePage,

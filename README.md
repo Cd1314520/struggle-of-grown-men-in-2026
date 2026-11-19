@@ -18,6 +18,7 @@ systemctl --user status auto-apply
 | [docs/browser.md](docs/browser.md) | the browsers, the pacing proxy, and the fingerprint audit |
 | [docs/harnesses.md](docs/harnesses.md) | omp and Claude Code as worker harnesses: how a stage picks one, what each is given, what differs |
 | [docs/database.md](docs/database.md) | schema and migrations, backups, status history, fill state, application steps, retention |
+| [docs/outreach.md](docs/outreach.md) | early outreach: fresh hiring posts and seed rounds, and short emails to the people who hire, drafted for you to send |
 
 Settings live in [`config.yml`](config.yml), with what identifies you or this machine in an untracked `config.local.yml` laid over it; both are checked when the app starts. The Settings page changes any of them, writing to `config.local.yml`. The documentation names the keys and leaves the values to the file.
 
