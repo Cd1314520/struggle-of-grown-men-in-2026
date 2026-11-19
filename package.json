@@ -1,6 +1,7 @@
 {
   "name": "auto-apply",
   "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "scripts": {
     "start": "bun src/server.ts",

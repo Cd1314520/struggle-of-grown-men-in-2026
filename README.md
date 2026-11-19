@@ -1,67 +1,127 @@
-# auto-apply
+# InternScouter
 
-Local job scanner, resume tailor and application filler with two manual gates. A small Bun app owns state and scheduling; every piece of agent work is an agent process, on omp (`omp --mode rpc`) or Claude Code (`claude -p`) as each stage's model says, that reports back through host tools.
+InternScouter finds internships and jobs that fit you, tailors your resume to each one, and fills in the
+applications for you in a real Chrome window. It runs on your own computer, keeps everything in a local
+database, and does the work with AI coding agents you already have (Claude Code, Codex, Google's
+Antigravity CLI, or omp).
 
-## Start here
+It is a fork of [auto-apply](https://github.com/TheRatLord/auto-apply) by Doomy. See [Credits](#credits).
+
+## What it does
+
+1. **Finds openings.** It watches about 1,800 company career boards (Greenhouse, Lever, Ashby, Workday,
+   iCIMS and many more), the SimplifyJobs internship list, and LinkedIn and Indeed searches.
+2. **Throws out what does not fit, cheaply.** Titles, places, seniority and terms are filtered without a
+   model. A small model then triages what is left.
+3. **Scores each job against your checklist.** You write `profile/rubric.yml` (statements like "the role
+   is in Texas" or "it asks for 5+ years"), and an agent answers each one with evidence from the posting.
+   The app adds up the score and decides apply, hold or skip.
+4. **Tailors your resume.** It rewrites a copy of your Typst resume for each job, using only what is
+   already in your resume and notes.
+5. **Fills in the application.** An agent fills the form in Chrome, answers the standard questions from
+   your profile, and uploads your resume. CAPTCHAs, logins and anything it is unsure of are left for you.
+6. **Keeps track afterwards.** With Gmail connected (read only), it notices confirmations, rejections,
+   assessments and interview invitations, and prepares interview notes.
+7. **Helps you reach people.** The Referrals page tracks who you ask for referrals. The Early outreach
+   page finds fresh "we're hiring" posts and startups that just raised money, and drafts short emails to
+   the founders for you to send yourself. The app never sends a message for you.
+
+You decide how much it does on its own: in `config.yml`, `approval: gated` makes it wait for your yes
+before each application and again before each submit; `approval: auto` lets it apply on its own to jobs
+that clear the score you set (`autoApply.minScore`).
+
+## What you need
+
+- Windows 10/11 or Linux (macOS is untested).
+- [Bun](https://bun.sh), Google Chrome, Git, Node.js (for `npx`), [Typst](https://typst.app) and
+  poppler (`pdftotext`, `pdfinfo`, `pdftoppm`).
+- At least one agent command line tool, signed in: [Claude Code](https://claude.com/claude-code)
+  (`claude`), Codex (`codex`), Antigravity (`agy`) or omp. A paid plan's usage limits are enough; when one
+  runs out, the app moves work to the next one you list.
+- Optional: a Gmail account and a Google Cloud OAuth client, so it can read replies.
+
+## Get started
 
 ```bash
-bun install                 # dependencies, and the pre-commit hook
-bun run check               # typecheck, lint, format check, tests
-systemctl --user status auto-apply
+git clone https://github.com/Cd1314520/struggle-of-grown-men-in-2026.git
+cd struggle-of-grown-men-in-2026
+bun install
+cp config.local.example.yml config.local.yml
+bun run start
 ```
 
-| | |
+On Windows, install the tools first with `winget install Oven-sh.Bun`, `winget install Typst.Typst` and
+`winget install oschwartz10612.Poppler` (plus Chrome, Git and Node), then run the same commands in
+PowerShell, with `copy` in place of `cp`. Linux setup, including running it as a service, is in
+[docs/setup.md](docs/setup.md).
+
+Open <http://localhost:8787>. The **Setup** page lists what is still missing and checks each step for you:
+
+1. **Your profile.** The first start copies templates into `profile/`. Fill them in on the **Profile**
+   page: what you are looking for (`targets.md`), your scoring checklist (`rubric.yml`), the answers forms
+   ask for (`personal.yml`, `answers.md`), and the companies to watch (`companies.yml`).
+2. **Your resume.** Upload your resume on the **Resume** page; it is turned into the Typst file the app
+   tailors.
+3. **Models.** On **Settings → Models**, pick which agent runs each stage. Cheap, fast models work well
+   for triage; filling forms needs a capable one.
+4. **Gmail** (optional). Follow [docs/setup.md](docs/setup.md#profile-gmail-and-config).
+5. **Run the browser check** before the first real application:
+   `bun run scripts/browser-audit.ts --mode=smoke` (see [docs/browser.md](docs/browser.md)).
+
+Your profile, resume, `config.local.yml` and everything under `data/` stay on your computer and are never
+committed (they are in `.gitignore`).
+
+## Using it
+
+| Page | What it is for |
 |---|---|
-| [docs/setup.md](docs/setup.md) | prerequisites, installing the service (Linux; Windows natively or through WSL2), the profile, Gmail, who can reach the app; the Setup page checks each step |
-| [docs/operations.md](docs/operations.md) | auto apply, parked applications and Questions, the daily digest, the observation journal, Workday recovery |
-| [docs/pipeline.md](docs/pipeline.md) | sources and scanning, duplicates, freshness, resumes |
-| [docs/browser.md](docs/browser.md) | the browsers, the pacing proxy, and the fingerprint audit |
-| [docs/harnesses.md](docs/harnesses.md) | omp and Claude Code as worker harnesses: how a stage picks one, what each is given, what differs |
-| [docs/database.md](docs/database.md) | schema and migrations, backups, status history, fill state, application steps, retention |
-| [docs/outreach.md](docs/outreach.md) | early outreach: fresh hiring posts and seed rounds, and short emails to the people who hire, drafted for you to send |
+| Overview | today at a glance: what was found, assessed, sent, and what waits for you |
+| Review | jobs waiting for your yes, with the score, the evidence and the tailored resume |
+| Questions | questions a form asked that your profile does not answer yet |
+| Pipeline / Applications | every job by stage, and what happened after you applied |
+| Referrals | people you ask for referrals and where each conversation stands |
+| Early outreach | today's short emails to founders and hiring managers, for you to send ([docs/outreach.md](docs/outreach.md)) |
+| Settings | models, schedules, daily limits; changes are saved to `config.local.yml` |
 
-Settings live in [`config.yml`](config.yml), with what identifies you or this machine in an untracked `config.local.yml` laid over it; both are checked when the app starts. The Settings page changes any of them, writing to `config.local.yml`. The documentation names the keys and leaves the values to the file.
+A few settings worth knowing, all in `config.yml` (override them in `config.local.yml`):
 
-## Flow
+- `limits.prepPerDay` and `limits.applyPerDay`: how many jobs it assesses and applies to each day.
+- `screen.titles` and `screen.terms`: which titles and terms (for example `Summer 2027`) it reads at all.
+- `outreach.minutes`: how often Early outreach looks for leads; set it to `0` to turn it off.
+- `fallback` and `claudeAccounts`: which models and accounts take over when one hits its usage limit.
 
-`found → triaged → prepping → awaiting_approval (gate 1) → approved → filling → awaiting_submit (gate 2) → submitted → interview / offer / rejected_by_company / withdrawn`
+## Good to know
 
-Once an application is sent, each thing the employer asks for (a questionnaire, an assessment, a time to book, an interview) is a step on it (`src/steps.ts`). The mailbox agent adds steps from mail and moves them on; you mark them done or booked on the job's page, and the Applied list is grouped by whose move it is. A step you mark done stays in the agent's brief as waiting on the employer, so the reply that follows (the next round, or a rejection) is attached to it.
+- **Agents cost tokens.** Every assessment and every filled form is an agent run on your plan. Start with
+  low daily limits and raise them once you see what a day costs on your plan.
+- **Read what goes out.** Check the first applications and drafts yourself. The writing rules keep the
+  agents to facts in your profile, but you are the one applying.
+- **Respect the sites.** LinkedIn and Indeed are searched logged out and slowly; the app does not log in
+  to them or get around their limits. Some employers do not allow automated applications: follow their
+  terms.
 
-Side exits: `needs_input` (agent asked a question), `needs_manual` (agent could not get past a CAPTCHA or block), `failed`, `skipped`, `rejected`.
+## For developers
 
-Triage first drops, without a model, postings abroad, titles that do not match `screen.titles` when it is set (a regular expression in `config.yml`), titles naming a term that is over or, when `screen.terms` is set, not one of those terms, senior-level titles (senior, staff, principal, lead, manager and above), and descriptions that ask for 5 or more years of experience outside a "preferred" section (`src/screen.ts`). It then uses the model named in `models.triage`, up to 100 postings per call. A smaller batch waits for later scans to fill it, until its oldest posting was found 2 hours ago (`triage.batch` and `triage.waitHours` in `config.yml`); a job you picked by hand never waits. The prompt names only the employers from `profile/employers.yml` that are in the batch.
+`bun run check` runs the type check, the linter, the format check and the tests (a pre-commit hook runs
+it on every commit). How the app is built is in [docs/architecture.md](docs/architecture.md), with more
+in `docs/`.
 
-Before the full assessment, prep skips without a model a job listed abroad, one whose description asks for 5 or more years, and one whose employer already has `autoApply.perEmployer` applications (while `approval` is `auto`). With `screen.readPostings` on (off by default: it ruled out about one job in ten), it then has the cheaper `models.screen` read the posting for the required statements in `rubric.yml` that it settles on its own (those not marked `screen: false`). A job is screened out only when it fails a requirement under every rubric that could decide it; anything else, or a screen that does not finish, goes on to the full assessment, which answers every statement again. None of this counts against `limits.prepPerDay`. Jobs waiting for prep are taken one at a time, the most recently opened first, unless `profile/priority.yml` gives each a keyword score (no model; `src/priority.ts` describes its parts): then the highest first.
+## Credits
 
-An employer is judged once against the description of a target employer (`targets.describe`). While targets are held back, a job at an employer an earlier full assessment judged a target (or on the frontier list in `profile/employers.yml`) only gets the screen for the real rubric's plain requirements (when `screen.readPostings` is on), then is held without a full assessment. `rememberedEmployer` in `src/employers.ts` reads the earlier judgments made against the current description; one target judgment outranks the rest, and the lists in `profile/employers.yml` outrank them all. A job you pick out by hand is always assessed in full.
+- **Doomy** ([TheRatLord](https://github.com/TheRatLord)) wrote
+  [auto-apply](https://github.com/TheRatLord/auto-apply), the app this is built on: the scanner, the
+  rubric scoring, resume tailoring, the form-filling agents, the browser setup and the web UI.
+- **[Cd1314520](https://github.com/Cd1314520)** turned it into InternScouter: native Windows support;
+  Codex and Antigravity as agent harnesses, with fallback across providers and Claude accounts when one
+  hits its usage limit; the internship search (title and term screens, the SimplifyJobs feed, many more
+  applicant systems, startup priority); the Referrals and Early outreach pages; cover letter drafts,
+  interview prep and the humanizer writing rules.
 
-| Worker | Built-in tools (omp's names; [harnesses](docs/harnesses.md)) | Host tools |
-|---|---|---|
-| triage | none | `triage_result` |
-| discover | read, write, web_search | `add_company`, `save_job` |
-| screen | none | `screen_result` |
-| prep | read, write, edit (no shell: the posting is untrusted; `finish_prep` compiles) | `submit_checklist`, `finish_prep` |
-| fill | read, write, eval (browser) | `prefill` (Claude Code only), `get_account`, `gmail_*`, `ask_user`, `confirm_submit`, `need_manual`, `verify_status`, `report_result` |
-| track | read, write | `gmail_*`, `add_step`, `update_step`, `record_outcome`, `note` |
-| import | read, write, edit, bash (typst) | `finish_import` |
-| interview | read, web_search | `save_brief` |
+The writing rules in `prompts/humanizer.md` are adapted from the humanizer skill (MIT, see
+`prompts/humanizer.LICENSE`).
 
-## Checks
+## License
 
-`bun run check` runs the typecheck, the linter, the format check and the tests. `bun run format` rewrites the TypeScript the way Prettier wants it (`.prettierrc.json`). CI (`.github/workflows/check.yml`) runs the same command on every push. A pre-commit hook (`.githooks/pre-commit`) runs it before every commit; `bun install` enables the hook by pointing `core.hooksPath` at `.githooks`.
-
-## Layout
-
-- `src/scheduler.ts`: what runs when. A `Scheduler` holds the state that only exists while the process is up (running workers, which job has which browser) and takes the agent runner and the browser functions as constructor arguments, so it can be driven without either.
-- One module per worker: `src/scan.ts` (sources, triage, discovery), `src/locate.ts`, `src/prep.ts`, `src/fill.ts`, `src/track.ts`, `src/interview-prep.ts`. `src/fill-session.ts` is a fill worker's hold on a job and a browser; `src/fill-tools.ts` is the host tools it is given. `src/worker-tools.ts` is what the workers share.
-- `src/server.ts`: the HTTP API. `createHandler(scheduler)` answers requests; `main()` starts the server, the proxies and the scheduler, and only runs when the file is the entry point.
-- `ui/`: the web UI, a React and Tailwind app that `src/ui.ts` bundles on request, with no build step.
-- `docs/ui.md`: how `ui/` is laid out, the API it reads, and the design rules every page keeps.
-- `src/worker.ts`: the harness layer every worker goes through; `src/omp.ts` (RPC client) and `src/claude.ts` (Claude Code, with its MCP host-tool server) are the two harnesses. `src/cdp-tab.ts`: a browser tab the app drives itself, for prefill under Claude Code. `prompts/`: one prompt per worker.
-- `src/schema.ts`: database migrations and how a connection is opened. `src/db.ts`: jobs, status history, events and kv.
-- `src/status.ts`: the job statuses, their groups, and what each move between them writes. Every status change goes through `to`. `src/fill-state.ts`: where an application stands between approval and a recorded outcome.
-- `src/setup.ts`: what a new install still needs, for the Setup page. `src/models.ts`: the models omp and Claude Code list, and the model per stage. `src/resume-import.ts`: uploaded files into the stock resume. `profile.example/`: the templates a new `profile/` is seeded from.
-- `src/config.ts`: reads `config.yml`; `src/config-check.ts` is what the file must look like; `src/settings.ts` changes a setting from the app. `src/template.ts`: fills a prompt's placeholders.
-- `deploy/systemd/`: the service and timer units. `deploy/wsl/`: what running under WSL2 adds. `docs/`: everything this page links to.
-- `data/`: SQLite DB, per-job resume copies, omp sessions, Chrome profile (git-ignored; holds site passwords and Gmail tokens).
+[PolyForm Noncommercial 1.0.0](LICENSE). You may use, copy and change InternScouter for personal and
+other noncommercial purposes. Commercial use, such as selling it or running it as a paid service, is not
+allowed without the authors' permission.

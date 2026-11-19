@@ -610,7 +610,7 @@ export const schemaVersion = (db: Database) => db.query<{ user_version: number }
 
 const hasTable = (db: Database, name: string) => db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== null;
 
-// Databases from Chris's fork (Cd1314520) ran "referrals" as migration 8, so its gate reasons, state
+// Databases from an earlier fork ran "referrals" as migration 8, so its gate reasons, state
 // machines and interview briefs were 9 to 11. Here referrals is 12, after site blocks (11). A database at 8
 // to 11 that already has the referral tables is this numbering's version one lower, plus referrals: step it
 // back, so the migrations it lacks (site blocks) run, and referrals finds its tables in place. Below 12 a

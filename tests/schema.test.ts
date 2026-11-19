@@ -127,7 +127,7 @@ describe("schema migrations", () => {
     expect(`version ${schemaVersion(db)}\n\n${definitions.join(";\n\n")};\n`).toMatchSnapshot();
   });
 
-  it("upgrades a database from Chris's fork, where referrals was migration 8", () => {
+  it("upgrades a database from an earlier fork, where referrals was migration 8", () => {
     // The fork's version 11: everything up to interview briefs (10 here), plus the referral tables.
     const fork = memory();
     migrate(fork, MIGRATIONS.slice(0, 10));
